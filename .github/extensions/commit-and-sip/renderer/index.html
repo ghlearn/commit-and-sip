@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark light">
+  <title>Commit &amp; Sip · Level Up Lounge</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#counter">Skip to your order</a>
+  <header class="masthead">
+    <a class="wordmark" href="#counter" aria-label="Commit and Sip, your order">commit<span>&amp;</span>sip<span class="wordmark-dot" aria-hidden="true">.</span></a>
+    <p class="lounge">Level Up Lounge <span>Small changes. Good coffee.</span></p>
+  </header>
+
+  <main id="counter" tabindex="-1">
+    <div class="service-strip">
+      <strong id="mode-label">CONNECTING · mode not yet verified</strong>
+      <span id="mode-description">Waiting for the booth connection. No actions are available yet.</span>
+    </div>
+    <div class="intro">
+      <div><p class="eyebrow">A five-minute Order Up activity</p><h1>One good change.<br>One great cup.</h1></div>
+      <p class="intro-note">Read the order. Review the change.<br>Approve it, then serve it up.</p>
+    </div>
+    <section id="error-region" class="notice error-notice" role="alert" hidden>
+      <h2>Let’s get you back to the counter</h2>
+      <p id="error-message"></p>
+      <p>Retry the connection to check what was saved before trying your action again. If it keeps failing, ask the booth host to reopen this canvas.</p>
+      <button id="retry-connection" type="button">Retry connection</button>
+    </section>
+    <section id="blocker-region" class="notice" aria-labelledby="blocker-heading" hidden>
+      <h2 id="blocker-heading">Before you can continue</h2>
+      <ul id="blockers"></ul>
+    </section>
+    <p id="status" class="status-line" role="status" aria-live="polite" aria-atomic="true">Connecting to your order…</p>
+    <p id="access-note" class="notice" role="status" hidden></p>
+
+    <div class="counter-layout">
+      <div class="work-column">
+        <article class="ticket" aria-labelledby="ticket-heading">
+          <div class="ticket-top"><span>Order up!</span><span id="phase-stamp">Waiting</span></div>
+          <div class="ticket-content">
+            <p class="eyebrow">Your assignment</p>
+            <h2 id="ticket-heading">A fresh order is on its way.</h2>
+            <p id="order-description">The booth will assign your drink when the connection is ready.</p>
+            <dl class="order-specs">
+              <div><dt>Menu price</dt><dd id="order-price">—</dd></div>
+              <div><dt>Serving</dt><dd id="order-serving">—</dd></div>
+            </dl>
+            <p id="artwork-note" class="ticket-caption"></p>
+            <section class="exercise-issue" aria-labelledby="issue-heading">
+              <h3 id="issue-heading">Exercise issue</h3>
+              <p id="issue-title">Waiting for the assigned issue.</p>
+              <pre id="issue-body"></pre>
+            </section>
+            <p id="native-guidance" class="native-guidance" hidden>Ask booth host to open assigned issue/PR in Copilot App</p>
+          </div>
+          <div class="ticket-bottom"><span>Made with a little care &amp; a code review</span><small id="run-id">Run pending</small></div>
+        </article>
+
+        <section class="review-station" aria-labelledby="review-heading">
+          <div class="section-heading"><div><p class="eyebrow">At the review counter</p><h2 id="review-heading">Check before you pour.</h2></div><span id="view-count" class="review-count">0 / 3</span></div>
+          <ol class="steps" aria-label="Order progress">
+            <li data-phase="order">Order</li><li data-phase="reviewing">Review</li><li data-phase="approved">Approve</li><li data-phase="served">Serve</li>
+          </ol>
+          <p id="review-help">Start your order to review the summary, changed files, and checks.</p>
+          <div id="review-surfaces" class="review-surfaces" hidden>
+            <section class="review-surface" aria-labelledby="summary-heading">
+              <div class="surface-heading"><h3 id="summary-heading">Summary</h3><button type="button" data-action="view" data-surface="summary">Open summary</button></div>
+              <div id="summary-content" hidden><p id="review-summary"></p><p id="head-sha" class="mono-caption"></p></div>
+            </section>
+            <section class="review-surface" aria-labelledby="changes-heading">
+              <div class="surface-heading"><h3 id="changes-heading">Changes</h3><button type="button" data-action="view" data-surface="changes">Open changes</button></div>
+              <div id="changes-content" hidden></div>
+            </section>
+            <section class="review-surface" aria-labelledby="checks-heading">
+              <div class="surface-heading"><h3 id="checks-heading">Checks</h3><button type="button" data-action="view" data-surface="checks">Open checks</button></div>
+              <div id="checks-content" hidden></div>
+            </section>
+          </div>
+          <form id="order-check" class="order-check" aria-labelledby="order-check-heading" hidden>
+            <h3 id="order-check-heading">Does the change match the order?</h3>
+            <p id="order-check-help">After reviewing all three sections, confirm the price, serving, and what changed. The booth checks these facts against your assigned order and the validated changes; this does not prove comprehension.</p>
+            <fieldset id="order-check-fields" disabled>
+              <legend class="sr-only">Order details from your review</legend>
+              <div class="order-check-grid">
+                <div><label for="check-price">Menu price</label><input id="check-price" name="price" type="number" min="0" step="0.01" inputmode="decimal" required aria-describedby="order-check-help"></div>
+                <div><label for="check-serving">Served</label><select id="check-serving" name="serving" required><option value="">Choose one</option><option value="hot">Hot</option><option value="cold">Cold</option></select></div>
+                <div class="scope-field"><label for="check-scope">What changed?</label><select id="check-scope" name="scope" required><option value="">Choose one</option><option value="one-drink">Only the ordered drink</option><option value="unrelated-edits">Other items or unrelated files</option></select></div>
+              </div>
+              <button id="check-order-action" type="submit" disabled>Check order details</button>
+            </fieldset>
+            <p id="assessment-status" class="mono-caption" role="status" aria-live="polite" aria-atomic="true">Order details not checked yet. Attempts: 0.</p>
+          </form>
+          <div class="action-bar">
+            <button id="primary-action" class="primary" type="button" disabled>Connecting…</button>
+            <button id="hint-action" type="button" data-action="hint" disabled>Ask for a hint</button>
+            <button id="refresh-action" class="quiet" type="button" data-action="refresh" disabled>Refresh progress</button>
+          </div>
+          <p id="action-help" class="muted">Approval needs all three review sections plus a passed order-details checkpoint.</p>
+          <p id="hint-count" class="mono-caption">Hints used: 0</p>
+          <p class="scoring-note">Hints are free. Complete the activity to earn 1,000 points. Equal scores share a rank.</p>
+        </section>
+
+        <section id="result" class="result" aria-labelledby="result-heading" hidden tabindex="-1">
+          <p class="eyebrow">Order collected</p><h2 id="result-heading">That’s a wrap. Take a sip.</h2>
+          <p id="result-context"></p>
+          <dl class="result-details">
+            <div><dt>Handle</dt><dd id="result-handle"></dd></div>
+            <div><dt>Score</dt><dd id="result-score"></dd></div>
+            <div><dt>Rank at completion</dt><dd id="result-rank"></dd></div>
+          </dl>
+          <p id="judge">Copilot commentary not configured</p>
+          <a id="leaderboard-link" class="button-link" target="_blank" rel="noopener noreferrer" hidden>Open public event leaderboard ↗</a>
+          <p id="leaderboard-note" class="muted"></p>
+          <img id="leaderboard-qr" class="qr" alt="QR code for the public event leaderboard" referrerpolicy="no-referrer" hidden>
+          <p id="qr-error" class="muted" role="status" hidden>QR image unavailable. Use the public leaderboard link instead.</p>
+        </section>
+      </div>
+
+      <aside class="cafe-column" aria-label="Café menu and activity guide">
+        <section class="chalkboard" aria-labelledby="menu-heading">
+          <div class="board-heading"><p class="eyebrow">The Level Up Lounge</p><h2 id="menu-heading">House menu</h2><p>Three drinks. One thoughtful change.</p></div>
+          <svg class="cup-art" xmlns="http://www.w3.org/2000/svg" width="400" height="280" viewBox="0 0 400 280" fill="none" role="img" aria-labelledby="cup-title cup-description">
+            <title id="cup-title">Commit and Sip house cup</title>
+            <desc id="cup-description">Original café illustration: a cream cup, hand-drawn coffee swirl, and steam above a brass-colored saucer.</desc>
+            <path d="M188 73c-25-23 28-25 9-53M223 65c-15-17 18-22 10-37" stroke="#E5ECD9" stroke-width="3" stroke-linecap="round" opacity=".65"/>
+            <ellipse cx="207" cy="225" rx="125" ry="22" fill="#162D26"/>
+            <ellipse cx="200" cy="216" rx="117" ry="21" stroke="#E6B875" stroke-width="2"/>
+            <path d="M120 115c0 53 14 96 76 99s84-46 84-99" fill="#F5E8CB" stroke="#F5E8CB" stroke-width="3"/>
+            <path d="M279 125c66-20 58 65-11 52" stroke="#F5E8CB" stroke-width="16"/>
+            <ellipse cx="200" cy="115" rx="80" ry="27" fill="#C08A54" stroke="#F5E8CB" stroke-width="9"/>
+            <ellipse cx="200" cy="115" rx="67" ry="20" fill="#8A5534"/>
+            <path d="M170 113c7-20 33-15 31 0-1-16 26-17 32-4 5 11-18 21-32 24-8-6-35-12-31-20Z" fill="#EDD8AC"/>
+            <path d="M181 111c13 1 18 8 21 17m17-17c-9 1-15 7-17 17" stroke="#C08A54" stroke-width="2" stroke-linecap="round"/>
+            <path d="M141 142c4 30 11 46 25 53" stroke="#DDC79C" stroke-width="4" stroke-linecap="round"/>
+            <path d="m188 161-10 9 10 9m24-18 10 9-10 9m-8-24-8 30" stroke="#385542" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+            <path d="M71 195c-5-4-10-1-10 4s4 8 9 6 6-7 1-10Zm267 7c-5-4-10-1-10 4s4 8 9 6 6-7 1-10Z" stroke="#E6B875" stroke-width="2"/>
+            <path d="m64 202 6-5m261 12 5-5M121 242h35m11 0h12m58 0h42" stroke="#E5ECD9" stroke-width="2" stroke-linecap="round" opacity=".5"/>
+          </svg>
+          <ul id="menu" class="menu">
+            <li><h3>Mona Latte</h3><p>Menu details load with your order.</p></li>
+            <li><h3>Copilot Cortado</h3><p>Menu details load with your order.</p></li>
+            <li><h3>Ducky Cold Brew</h3><p>Menu details load with your order.</p></li>
+          </ul>
+          <p class="board-footer">Review first. Sip second.</p>
+        </section>
+        <section class="guide" aria-labelledby="guide-heading">
+          <p class="eyebrow">First time at the counter?</p><h2 id="guide-heading">Follow the order.</h2>
+          <figure>
+            <div class="walkthrough" role="img" aria-label="Illustrative activity sequence: read the issue, inspect the review, approve the change, then serve the menu">
+              <span>Issue <b aria-hidden="true">→</b></span><span>Review <b aria-hidden="true">→</b></span><span>Approve <b aria-hidden="true">→</b></span><span>Serve</span>
+            </div>
+            <figcaption>Original UI walkthrough schematic — illustrative, not an authentic Copilot App screenshot.</figcaption>
+          </figure>
+          <details><summary>Where do I do the review?</summary>
+            <p>In rehearsal, open Summary, Changes, and Checks above, then confirm the order details. Opening a section alone does not verify its contents. In live mode, review the assigned issue and PR in the native Copilot App.</p>
+            <p>Ask booth host to open assigned issue/PR in Copilot App</p>
+          </details>
+          <div class="screenshot-pending"><strong>Authentic App screenshots pending capture.</strong><p>The screenshot guide is not ready. This schematic is not a substitute for verified App navigation.</p></div>
+        </section>
+      </aside>
+    </div>
+    <footer class="page-footer"><span>Commit &amp; Sip / Level Up Lounge</span><span>Original café artwork · no trademark approval implied</span></footer>
+  </main>
+  <noscript><p class="notice">JavaScript is required to connect to your order. Ask the booth host for help enabling it or reopening the canvas.</p></noscript>
+</body>
+</html>

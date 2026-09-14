@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "completionScore": 1000,
+  "requirements": [
+    "Assigned PR matches exact order and preserves baseline menu",
+    "Required review surfaces evidenced for the same PR head",
+    "Acceptance-criteria answers correct before approval",
+    "Distinct reviewer approval verified against exact head",
+    "Required checks passed for exact head",
+    "Merge and resulting menu independently verified"
+  ],
+  "ties": "Competition rank: 1 + number of accepted results with strictly greater score",
+  "timing": "No speed bonus or penalty",
+  "hints": "No hint or accessibility penalty",
+  "judge": "Optional attributed, moderated commentary only; never changes score"
+}

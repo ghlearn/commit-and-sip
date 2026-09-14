@@ -1,0 +1,26 @@
+[
+  {
+    "id": "mona-latte",
+    "name": "Mona Latte",
+    "price": 5.5,
+    "serving": "hot",
+    "artwork": "original-latte-cup",
+    "description": "An octo-cat classic with espresso and steamed milk."
+  },
+  {
+    "id": "copilot-cortado",
+    "name": "Copilot Cortado",
+    "price": 4.5,
+    "serving": "hot",
+    "artwork": "original-cortado-cup",
+    "description": "A balanced pairing of espresso and warm milk."
+  },
+  {
+    "id": "ducky-cold-brew",
+    "name": "Ducky Cold Brew",
+    "price": 5,
+    "serving": "cold",
+    "artwork": "original-cold-brew-glass",
+    "description": "A smooth, slow-steeped coffee for your next bright idea."
+  }
+]
