@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { loadCatalog } from "../.github/extensions/commit-and-sip/domain.mjs";
+import { loadCatalog, validRunId } from "../.github/extensions/commit-and-sip/domain.mjs";
 import { RunStore } from "../.github/extensions/commit-and-sip/store.mjs";
 import { RunEngine } from "../.github/extensions/commit-and-sip/engine.mjs";
 import { GithubAdapter } from "../.github/extensions/commit-and-sip/services/github.mjs";
@@ -93,6 +93,37 @@ test("truthy non-boolean apply values cannot authorize writes", async t => {
   }
   assert.equal(f.calls.length, 0);
   assert.deepEqual(await readdir(f.directory), ["staff.json"]);
+});
+
+test("prototype-mutating run IDs are rejected before provisioning or canvas persistence", async t => {
+  const f = await fixture(t);
+  assert.equal(validRunId("__proto__"), false);
+  for (const apply of [false, true]) {
+    await assert.rejects(f.provision({ apply }, { ...input, runId: "__proto__" }), { code: "invalid_run" });
+  }
+  const engine = new RunEngine({ store: f.store, catalog, config: f.config, github: f.github });
+  for (const mode of ["rehearsal", "live"]) {
+    await assert.rejects(engine.open({ runId: "__proto__", mode, orderId: order.id }), { code: "invalid_run" });
+  }
+  assert.equal(f.calls.length, 0);
+  assert.deepEqual(await readdir(f.directory), ["staff.json"]);
+  assert.deepEqual(await f.configFile.read(), f.config);
+});
+
+test("valid inherited-property names persist as own run keys across restart", async t => {
+  for (const runId of ["constructor", "toString", "hasOwnProperty"]) {
+    const f = await fixture(t);
+    const result = await f.provision({ apply: true }, { ...input, runId });
+    const config = { ...(await f.configFile.read()), mode: "live" };
+    assert.equal(Object.hasOwn(config.runs, runId), true);
+    const engine = new RunEngine({ store: f.store, catalog, config, github: f.github });
+    await engine.open(result.canvasInput);
+    const restoredStore = new RunStore(f.store.directory);
+    assert.equal(Object.hasOwn((await restoredStore.read()).runs, runId), true);
+    const restored = new RunEngine({ store: restoredStore, catalog, config, github: f.github });
+    assert.equal((await restored.dispatch(runId, "refresh")).runId, runId);
+    assert.equal((await restored.open(result.canvasInput)).phase, "order");
+  }
 });
 
 test("successful provision persists full assignment, preserves config, resumes idempotently and opens gated canvas", async t => {
@@ -364,6 +395,30 @@ test("coordinated config updates during network I/O preserve unrelated assignmen
   assert.equal(installed.note, "newer");
   assert.deepEqual(installed.runs.another, { issueNumber: 40, prNumber: 41 });
   assert.equal(installed.runs[input.runId].issueNumber, 10);
+});
+
+test("explicit null checks on any config re-read block writes and preserve same-run recovery", async t => {
+  for (const changedRead of [2, 3, 4]) {
+    const f = await fixture(t);
+    const configFile = new StaffConfigFile(f.path);
+    const read = configFile.read.bind(configFile);
+    let reads = 0;
+    configFile.read = async () => {
+      if (++reads === changedRead) {
+        await writeFile(f.path, JSON.stringify({ ...f.config, requiredChecks: null }));
+      }
+      return read();
+    };
+    const service = new LiveProvisioner({ store: f.store, catalog, github: f.github, configFile });
+    await assert.rejects(service.provision(input, { apply: true }), { code: "provision_conflict" });
+    const saved = await f.store.read();
+    assert.equal(saved.provisions?.[0]?.stage, { 2: undefined, 3: "creating", 4: "bound" }[changedRead]);
+    assert.equal((await f.configFile.read()).runs[input.runId], undefined);
+    assert.equal(f.calls.filter(call => call.method === "POST").length, changedRead === 2 ? 0 : 1);
+    await writeFile(f.path, JSON.stringify(f.config));
+    assert.equal((await f.provision()).assignment.issueNumber, 10);
+    assert.equal(f.calls.filter(call => call.method === "POST").length, 1);
+  }
 });
 
 test("issue reuse introduced in config before binding blocks installation and keeps the issue", async t => {

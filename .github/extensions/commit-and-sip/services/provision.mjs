@@ -63,7 +63,7 @@ export class LiveProvisioner {
     const checkConfig = config => {
       validateStaffConfig(config);
       requireValue(config.repo === assignment.repo &&
-        same(config.requiredChecks ?? ["menu-validation"], assignment.requiredChecks),
+        same(config.requiredChecks === undefined ? ["menu-validation"] : config.requiredChecks, assignment.requiredChecks),
       "provision_conflict", "Repository or required-check policy changed. Restore the original staff configuration.");
     };
     checkConfig(initialConfig);
