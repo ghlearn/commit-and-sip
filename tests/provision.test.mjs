@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { loadCatalog, validRunId } from "../.github/extensions/commit-and-sip/domain.mjs";
 import { RunStore } from "../.github/extensions/commit-and-sip/store.mjs";
 import { RunEngine } from "../.github/extensions/commit-and-sip/engine.mjs";
@@ -166,6 +167,58 @@ test("timeout after issue creation and process restart reconcile without a secon
   await assert.rejects(f.provision(), { code: "provision_reconciliation_required" });
   assert.equal((await f.store.read()).provisions[0].stage, "creating");
   assert.equal((await f.provision()).assignment.issueNumber, 10);
+  assert.equal(f.calls.filter(call => call.method === "POST").length, 1);
+});
+
+test("crashed ledger writer blocks retries until verified staff lock recovery, without losing the issue", { timeout: 15_000 }, async t => {
+  const f = await fixture(t);
+  f.facts.post = body => {
+    f.issues.push({ ...body, number: 10, state: "open", user: { login: "staff" } });
+    throw new Error("Response lost");
+  };
+  await assert.rejects(f.provision(), { code: "provision_reconciliation_required" });
+  const ledgerBefore = await readFile(f.store.path, "utf8");
+  const configBefore = await readFile(f.path, "utf8");
+  const moduleUrl = new URL("../.github/extensions/commit-and-sip/store.mjs", import.meta.url).href;
+  const child = spawn(process.execPath, ["--input-type=module", "--eval", `
+    import { RunStore } from ${JSON.stringify(moduleUrl)};
+    await new RunStore(${JSON.stringify(f.store.directory)}).transaction(async data => {
+      data.provisions[0].stage = "installed";
+      process.send("locked");
+      await new Promise(() => { setInterval(() => {}, 1000); });
+    });
+  `], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
+  const exited = once(child, "exit");
+  try {
+    const [message] = await Promise.race([
+      once(child, "message"),
+      exited.then(() => { throw new Error("Fixture writer exited before acquiring the lock."); })
+    ]);
+    assert.equal(message, "locked");
+    assert.equal(JSON.parse(await readFile(f.store.lock, "utf8")).pid, child.pid);
+    // This fixture owns the exact child and waits for its death before any lock removal.
+    child.kill("SIGKILL");
+    assert.deepEqual(await exited, [null, "SIGKILL"]);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    await exited;
+  }
+  const lockBefore = await readFile(f.store.lock, "utf8");
+  await assert.rejects(f.provision(), error => {
+    assert.equal(error.code, "store_busy");
+    assert.match(error.message, /lock left after a crash/);
+    assert.match(error.message, /booth\/RUNBOOK\.md/);
+    return true;
+  });
+  assert.equal(await readFile(f.store.lock, "utf8"), lockBefore);
+  assert.equal(await readFile(f.store.path, "utf8"), ledgerBefore);
+  assert.equal(await readFile(f.path, "utf8"), configBefore);
+  assert.equal(f.calls.filter(call => call.method === "POST").length, 1);
+  await writeFile(join(f.directory, "ledger-backup.json"), ledgerBefore);
+  await writeFile(join(f.directory, "lock-backup.json"), lockBefore);
+  await rm(f.store.lock);
+  assert.equal((await f.provision()).assignment.issueNumber, 10);
+  assert.equal((await f.store.read()).provisions[0].stage, "installed");
   assert.equal(f.calls.filter(call => call.method === "POST").length, 1);
 });
 

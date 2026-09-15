@@ -137,8 +137,11 @@ Successful preview/provision commands exit **0**, meaning only that operation su
 
 Always retry the **exact original command, run, staff creator, PR/head/base/order/reviewer, config path, and store**. Do not create a replacement issue manually, change the saved SHA, repurpose the PR, or delete a reservation.
 
+**A process/host crash during a filesystem transaction can leave `ledger.lock` behind.** Restarting the initializer alone does not reclaim it: retries return `store_busy` even when the issue journal is intact. Complete [Lock and storage recovery](#lock-and-storage-recovery) first, then retry the original command. An old timestamp or missing local PID alone cannot establish that every writer is stopped, especially for a shared directory or after a host restart. Never remove a lock automatically, swap to a new store, or reset journal stages to unblock intake.
+
 | Condition | Safe response |
 | --- | --- |
+| `store_busy` persists after process/host restart | Stop intake and all writers using this store; inspect ownership and back up the ledger/lock. Remove only the exact proven-stale lock through the procedure below, then retry the same run. Leave the assignment, create intent, and issue untouched. |
 | Failure while `reserved`, before create intent | Restore the read/config service and retry the same run. No create intent was issued yet. |
 | Timeout/crash while `creating` | Retry to scan and verify the exact original creator/title/body/marker. If the issue exists, it is reused without POST. If none is visible, the command fails with `provision_reconciliation_required`; even a crash before the actual POST stays blocked. |
 | No issue found for an unresolved create | Stop this PR's intake. Inspect staff-only journal, original request/audit evidence, and all repository issues with the stable run marker; wait for any in-flight request. There is intentionally no automatic reset/recreate override. If ownership/outcome remains unknown, preserve the reservation and escalate; do not infer that an empty listing proves no remote write. |
@@ -217,7 +220,7 @@ The store uses `ledger.json` and `ledger.lock`, with atomic fsynced ledger write
 3. If the owner/provider is active, **do not remove the lock**. Allow the operation to finish or shut down the specific extension/provider through the host. Check for other active providers sharing the directory.
 4. Only after confirming no active provider/writer owns or uses this store, make a backup of the ledger and lock in an approved staff-only recovery location. Keep backups out of Git and public attachments.
 5. If the lock is proven stale, remove only that exact `ledger.lock`. Do not use wildcard deletion, erase the ledger, or kill processes by name.
-6. Restart/reload one provider, inspect its health, reopen the same run, and verify the ledger and completed results. Reconcile any uncertain remote completion before retrying.
+6. Restart/reload one provider, inspect its health, reopen the same run, and verify the ledger and completed results. For provisioning, rerun the exact original initializer command so it reconciles the existing issue/create intent; do not create a replacement assignment. Reconcile any uncertain remote completion before retrying.
 
 If ownership is uncertain, leave the lock in place and escalate. If JSON is corrupt or storage is full/unwritable, preserve evidence and restore only through a reviewed backup/reconciliation procedure. Do not replace it with an empty ledger to make the error disappear.
 
