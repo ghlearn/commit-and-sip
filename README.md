@@ -14,6 +14,8 @@ You need only the booth's preconfigured Copilot App and an assigned rehearsal ca
 
 **Resume or retry:** choose **Refresh progress**, or reopen the same assigned run. If serving succeeded but the result is delayed, choose **Retry result**. Staff assign a fresh run for the next attendee; reloading is not a reset. See the [reset procedure](booth/RUNBOOK.md#reset-between-attendees).
 
+Fresh direct rehearsal opens require the drink's `orderId`; only resuming a saved run may omit it. Live staff assignments must pin the intended `baseRef` and effective required checks, and disabled live configuration blocks saved live sessions without resetting their data.
+
 This is a canvas-led adaptation of a GitHub Skills exercise: one learner step with several activities, not a five-step course. Staff initialization is outside the learner step. Actions validate the repository; they do not drive learner transitions, create exercise issues, or gate rehearsal on workflow queue time. There is no Step 2 or automatic issue closure.
 
 ## Status: rehearsal, not production-ready

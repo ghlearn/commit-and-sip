@@ -1,6 +1,6 @@
 import {
   DomainError, requireValue, exactInput, validRunId, makeRun, publicRun,
-  rehearsalIssue, rehearsalReview, generateHandle, liveAssignment
+  rehearsalIssue, rehearsalReview, generateHandle, liveAssignment, validBaseRef
 } from "./domain.mjs";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -15,6 +15,11 @@ export class RunEngine {
     return publicRun(run, { nativeReviewAvailable: run.mode === "live" && typeof this.viewEvidence?.read === "function" });
   }
 
+  requireLiveAdapters() {
+    requireValue(this.config?.mode === "live" && this.github, "live_unconfigured",
+      "Live mode and its GitHub adapter must be configured before opening or using a live run.");
+  }
+
   async open(input, { requireNew = false } = {}) {
     exactInput(input, ["runId", "mode", "orderId"]);
     requireValue(validRunId(input.runId), "invalid_run", "Use a stable run ID of 1-80 letters, digits, hyphens or underscores.", 400);
@@ -26,24 +31,27 @@ export class RunEngine {
         requireValue(run.mode === input.mode && (!input.orderId || input.orderId === run.order.id),
           "run_conflict", "This run ID belongs to a different mode or order. Use a new run ID.");
         if (run.mode === "live") {
-          const assigned = this.config.runs?.[input.runId];
+          this.requireLiveAdapters();
+          const assigned = liveAssignment(this.config, this.catalog, input.runId);
           requireValue(assigned && run.assignment.repo === this.config.repo &&
-            ["issueNumber", "prNumber", "headSha", "reviewer", "orderId"].every(key => assigned[key] === run.assignment[key]),
-          "assignment_changed", "This saved live run belongs to a different repository or assignment. Restore its configuration or create a new run.");
+            ["issueNumber", "prNumber", "headSha", "baseRef", "reviewer", "orderId"].every(key => assigned[key] === run.assignment[key]) &&
+            isDeepStrictEqual(assigned.requiredChecks, run.assignment.requiredChecks),
+          "assignment_changed", "This saved live run has a different or unbound assignment/check policy. Restore its original configuration or create a new run.");
         }
         return this.present(run);
       }
       const assignment = input.mode === "live" ? liveAssignment(this.config, this.catalog, input.runId) : null;
       if (input.mode === "live") {
-        requireValue(this.config.mode === "live" && assignment && this.github, "live_unconfigured",
-          "Staff must configure the live repository and assign this run's issue, PR, reviewer and head SHA.");
+        this.requireLiveAdapters();
         requireValue(!input.orderId || input.orderId === assignment.orderId, "order_conflict", "The order must match the staff assignment.");
         requireValue(!Object.values(data.runs).some(existing => existing.mode === "live" &&
           existing.assignment?.repo === this.config.repo &&
           (existing.assignment.issueNumber === assignment.issueNumber || existing.assignment.prNumber === assignment.prNumber)),
         "assignment_reused", "This issue or PR already belongs to another run. Staff must prepare a fresh issue and PR.");
       }
-      const order = this.catalog.orders.find(item => item.id === (assignment?.orderId ?? input.orderId ?? "mona-latte"));
+      if (input.mode === "rehearsal") requireValue(typeof input.orderId === "string", "order_required",
+        "Choose a catalog drink explicitly when creating a new rehearsal. Omit it only when resuming a saved run.", 400);
+      const order = this.catalog.orders.find(item => item.id === (assignment?.orderId ?? input.orderId));
       requireValue(order, "invalid_order", "Choose Mona Latte, Copilot Cortado, or Ducky Cold Brew.", 400);
       run = makeRun({
         runId: input.runId, mode: input.mode, order,
@@ -58,21 +66,27 @@ export class RunEngine {
     const data = await this.store.read();
     const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
     requireValue(run, "run_missing", "Open this run before continuing.", 404);
+    if (run.mode === "live") this.requireLiveAdapters();
     return this.present(run);
   }
 
   async inspect(run) {
+    requireValue(validBaseRef(run.assignment.baseRef) && Array.isArray(run.assignment.requiredChecks) &&
+      run.assignment.requiredChecks.length > 0 &&
+      run.assignment.requiredChecks.every(name => typeof name === "string" && name.trim().length > 0) &&
+      new Set(run.assignment.requiredChecks).size === run.assignment.requiredChecks.length,
+    "assignment_changed", "This saved run has no valid pinned branch/check policy. Staff must restore its original verified assignment.");
     if (run.approvalAttempt) {
       requireValue(isDeepStrictEqual(run.approvalAttempt.identity, { ...run.assignment, runId: run.runId }),
         "approval_attempt_conflict", "The saved approval attempt belongs to a different assignment. Restore the original assignment.");
     }
     const evidence = await this.github.inspectPullRequest(run.assignment.prNumber, {
       expectedHeadSha: run.assignment.headSha, reviewer: run.assignment.reviewer,
-      order: run.order, requiredChecks: this.config.requiredChecks,
+      order: run.order, requiredChecks: [...run.assignment.requiredChecks], expectedBaseRef: run.assignment.baseRef,
       ...(run.approvalAttempt ? { approvalAttemptId: run.approvalAttempt.id } : {})
     });
-    requireValue(evidence.headSha === run.assignment.headSha && evidence.checksPassed,
-      "evidence_invalid", "The assigned PR head and passing checks must be verified.");
+    requireValue(evidence.headSha === run.assignment.headSha && evidence.baseRef === run.assignment.baseRef && evidence.checksPassed,
+      "evidence_invalid", "The assigned PR head, base branch, and passing checks must be verified.");
     return evidence;
   }
 
@@ -104,6 +118,7 @@ export class RunEngine {
     const state = await this.store.transaction(async data => {
       const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
       requireValue(run, "run_missing", "Open this run before continuing.", 404);
+      if (run.mode === "live") this.requireLiveAdapters();
       const saved = structuredClone(run);
       let verificationFailed = false;
       const verify = async check => {
@@ -242,7 +257,8 @@ export class RunEngine {
             let evidence = await this.inspect(run);
             requireValue(!evidence.merged && (!evidence.approved || evidence.approvedForAttempt === true), "assignment_used", "This PR has an approval from outside this run's learner decision. Ask staff for a fresh assignment.");
             if (!evidence.approved) await this.github.approve(run.assignment.prNumber, {
-              headSha: run.assignment.headSha, reviewer: run.assignment.reviewer, approvalAttemptId: run.approvalAttempt.id
+              headSha: run.assignment.headSha, reviewer: run.assignment.reviewer,
+              expectedBaseRef: run.assignment.baseRef, approvalAttemptId: run.approvalAttempt.id
             });
             evidence = await this.inspect(run);
             requireValue(evidence.approved && evidence.approvedForAttempt === true, "approval_unverified", "Approval has not been verified on GitHub. Retry verification.");
@@ -285,6 +301,7 @@ export class RunEngine {
     await this.store.transaction(data => {
       const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
       requireValue(run && ["served", "completed"].includes(run.phase), "menu_required", "Verify the menu update before requesting a result.");
+      if (run.mode === "live") this.requireLiveAdapters();
       if (!run.handle) {
         run.handle = generateHandle(this.catalog.words, new Set(Object.values(data.runs).map(item => item.handle).filter(Boolean)));
       }

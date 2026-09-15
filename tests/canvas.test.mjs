@@ -163,3 +163,13 @@ test("overlapping selections cannot create two runs behind one panel", async t =
   assert.equal((await first).runId, "first");
   assert.deepEqual(Object.keys((await f.engine.store.read()).runs), ["first"]);
 });
+
+test("direct fresh rehearsals require a drink while saved runs may omit it", async t => {
+  const f = await fixture(t);
+  await assert.rejects(f.open("fresh-no-drink", { runId: "unselected", mode: "rehearsal" }), { code: "order_required" });
+  assert.deepEqual((await f.engine.store.read()).runs, {});
+  await f.open("explicit", { runId: "selected", mode: "rehearsal", orderId: "ducky-cold-brew" });
+  const entry = await f.open("resume-direct", { runId: "selected", mode: "rehearsal" });
+  assert.equal((await client(entry).state()).order.id, "ducky-cold-brew");
+  assert.deepEqual(Object.keys((await f.engine.store.read()).runs), ["selected"]);
+});

@@ -10,6 +10,7 @@
     "replace-with-unique-run-id": {
       "issueNumber": 1,
       "prNumber": 2,
+      "baseRef": "main",
       "headSha": "replace-with-40-character-verified-head-sha",
       "reviewer": "replace-with-booth-reviewer-login",
       "orderId": "mona-latte"

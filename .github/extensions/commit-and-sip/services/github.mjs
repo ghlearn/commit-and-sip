@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
+import { validBaseRef } from '../domain.mjs';
 
 export class GithubAdapterError extends Error {
     constructor(message, code = 'github_validation') {
@@ -101,19 +102,22 @@ export class GithubAdapter {
         return validateMenu(menu);
     }
 
-    validatePr(pr, expectedHeadSha, reviewer) {
+    validatePr(pr, expectedHeadSha, reviewer, expectedBaseRef) {
         if (!pr || !pr.user?.login || !pr.head || !pr.base) fail('GitHub returned an invalid pull request.');
         sha(pr.head.sha);
         sha(pr.base.sha);
         if (expectedHeadSha && pr.head.sha !== sha(expectedHeadSha)) fail('The pull request head changed. Inspect the new commit before continuing.', 'head_changed');
+        if (!validBaseRef(expectedBaseRef)) fail('An explicit application base branch is required.', 'invalid_base_ref');
+        if (pr.base.ref !== expectedBaseRef) fail('The pull request targets a different application branch.', 'base_ref_mismatch');
         if (!sameLogin(pr.head.repo?.full_name, this.repo) || !sameLogin(pr.base.repo?.full_name, this.repo)) fail('Fork pull requests are not supported.');
         if (pr.draft) fail('Draft pull requests cannot complete this activity.');
         if (reviewer && sameLogin(pr.user.login, reviewer)) fail('The reviewer must not be the pull request author.');
         if (!pr.merged && (pr.state !== 'open' || pr.mergeable !== true || ['dirty', 'unknown'].includes(pr.mergeable_state))) fail('The pull request is not confirmed mergeable. Try again after GitHub finishes checking it.');
     }
 
-    async inspectPullRequest(prNumber, { expectedHeadSha, reviewer, order, baseMenuPath = 'src/data/specials.json', requiredChecks = ['menu-validation'], approvalAttemptId }) {
+    async inspectPullRequest(prNumber, { expectedHeadSha, expectedBaseRef, reviewer, order, baseMenuPath = 'src/data/specials.json', requiredChecks = ['menu-validation'], approvalAttemptId }) {
         number(prNumber);
+        if (!validBaseRef(expectedBaseRef)) fail('An explicit application base branch is required.', 'invalid_base_ref');
         const marker = approvalAttemptId === undefined ? null : approvalMarker(approvalAttemptId);
         login(reviewer);
         validateDrink(order);
@@ -122,7 +126,7 @@ export class GithubAdapter {
         const path = `${this.root}/pulls/${prNumber}`;
         const pr = await this.request('GET', path);
         if (pr?.number !== prNumber) fail('GitHub returned the wrong pull request.');
-        this.validatePr(pr, expectedHeadSha, reviewer);
+        this.validatePr(pr, expectedHeadSha, reviewer, expectedBaseRef);
         const headSha = pr.head.sha;
         const baseSha = pr.base.sha;
         const [files, reviews, runs, statuses, baseMenu, menu] = await Promise.all([
@@ -167,34 +171,37 @@ export class GithubAdapter {
         const mergeCommitSha = merged ? sha(pr.merge_commit_sha) : null;
         if (merged && !isDeepStrictEqual(await this.menuAt(baseMenuPath, mergeCommitSha), menu)) fail('The merged commit does not contain the exact inspected menu.');
         const current = await this.request('GET', path);
-        this.validatePr(current, headSha, reviewer);
+        this.validatePr(current, headSha, reviewer, expectedBaseRef);
         if (current.base.sha !== baseSha || current.merged !== pr.merged || current.merge_commit_sha !== pr.merge_commit_sha) fail('The pull request changed during verification. Inspect it again.', 'pr_changed');
         return {
-            headSha, baseSha, author: pr.user.login, reviewer, approved: !!approved, merged, mergeCommitSha,
+            headSha, baseSha, baseRef: pr.base.ref, author: pr.user.login, reviewer, approved: !!approved, merged, mergeCommitSha,
             approvedForAttempt: !!(approved && marker && effective.body === marker),
+            approvedAt: approved ? effective.submitted_at ?? null : null,
             checksPassed: true, menu, summary: [pr.title, pr.body].filter((text) => typeof text === 'string' && text.length).join('\n\n'), files, checks,
         };
     }
 
-    async approve(prNumber, { headSha, reviewer, approvalAttemptId }) {
+    async approve(prNumber, { headSha, expectedBaseRef, reviewer, approvalAttemptId }) {
         number(prNumber); sha(headSha); login(reviewer);
+        if (!validBaseRef(expectedBaseRef)) fail('An explicit application base branch is required.', 'invalid_base_ref');
         const marker = approvalAttemptId === undefined ? null : approvalMarker(approvalAttemptId);
         const user = await this.request('GET', '/user');
         if (!sameLogin(user?.login, reviewer)) fail('The authenticated GitHub user must be the configured reviewer.');
         const path = `${this.root}/pulls/${prNumber}`;
         const pr = await this.request('GET', path);
-        this.validatePr(pr, headSha, reviewer);
+        this.validatePr(pr, headSha, reviewer, expectedBaseRef);
         if (pr.merged) fail('The pull request is already merged.');
         const review = await this.request('POST', `${path}/reviews`, { commit_id: headSha, event: 'APPROVE', ...(marker ? { body: marker } : {}) });
         if (review?.state !== 'APPROVED' || review.commit_id !== headSha || !sameLogin(review.user?.login, reviewer) || (marker && review.body !== marker)) fail('GitHub did not confirm the pinned approval.');
         return review;
     }
 
-    async merge(prNumber, { headSha }) {
+    async merge(prNumber, { headSha, expectedBaseRef }) {
         number(prNumber); sha(headSha);
+        if (!validBaseRef(expectedBaseRef)) fail('An explicit application base branch is required.', 'invalid_base_ref');
         const path = `${this.root}/pulls/${prNumber}`;
         const pr = await this.request('GET', path);
-        this.validatePr(pr, headSha);
+        this.validatePr(pr, headSha, undefined, expectedBaseRef);
         if (pr.merged) fail('The pull request is already merged.');
         const result = await this.request('PUT', `${path}/merge`, { sha: headSha });
         if (result?.merged !== true) fail('GitHub did not confirm the merge.');

@@ -15,8 +15,8 @@ async function fixture(t, options = {}) {
   return { engine, store };
 }
 
-async function review(engine, runId = "test-run", orderId) {
-  const run = await engine.open({ runId, mode: "rehearsal", ...(orderId ? { orderId } : {}) });
+async function review(engine, runId = "test-run", orderId = "mona-latte") {
+  const run = await engine.open({ runId, mode: "rehearsal", orderId });
   await engine.dispatch(runId, "start");
   for (const surface of ["summary", "changes", "checks"]) await engine.dispatch(runId, "view", { surface });
   await engine.dispatch(runId, "check_order", { price: run.order.price, serving: run.order.serving, scope: "one-drink" });
@@ -24,7 +24,7 @@ async function review(engine, runId = "test-run", orderId) {
 
 test("five-minute rehearsal separates review, approval and application; retries preserve one result", async t => {
   const { engine, store } = await fixture(t);
-  const start = await engine.open({ runId: "test-run", mode: "rehearsal" });
+  const start = await engine.open({ runId: "test-run", mode: "rehearsal", orderId: "mona-latte" });
   assert.equal(start.result, null);
   assert.equal("handle" in start, false);
   await assert.rejects(engine.dispatch("test-run", "approve"), { code: "assessment_required" });
@@ -61,7 +61,7 @@ test("all three catalog drinks complete using their own price and serving criter
 
 test("factual checkpoint, sequence, hints and invalid input", async t => {
   const { engine } = await fixture(t);
-  await engine.open({ runId: "test-run", mode: "rehearsal" });
+  await engine.open({ runId: "test-run", mode: "rehearsal", orderId: "mona-latte" });
   await engine.dispatch("test-run", "start");
   await assert.rejects(engine.dispatch("test-run", "view", { surface: "checks" }), { code: "view_sequence" });
   await review(engine);
@@ -103,7 +103,7 @@ test("live is fail-closed without configuration or native evidence", async t => 
   await assert.rejects(basic.engine.open({ runId: "live-run", mode: "live" }), { code: "live_unconfigured" });
   const config = {
     mode: "live", repo: "ghlearn/commit-and-sip",
-    runs: { "live-run": { issueNumber: 1, prNumber: 2, reviewer: "booth", headSha: "a".repeat(40), orderId: "mona-latte" } }
+    runs: { "live-run": { issueNumber: 1, prNumber: 2, baseRef: "main", reviewer: "booth", headSha: "a".repeat(40), orderId: "mona-latte" } }
   };
   const live = await fixture(t, { config, github: {} });
   await live.engine.open({ runId: "live-run", mode: "live" });
@@ -114,7 +114,7 @@ test("live is fail-closed without configuration or native evidence", async t => 
 test("prototype property names are ordinary isolated run IDs, not inherited records", async t => {
   const { engine } = await fixture(t);
   await assert.rejects(engine.get("constructor"), { code: "run_missing" });
-  assert.equal((await engine.open({ runId: "constructor", mode: "rehearsal" })).phase, "order");
+  assert.equal((await engine.open({ runId: "constructor", mode: "rehearsal", orderId: "mona-latte" })).phase, "order");
 });
 
 test("live integration requires distinct verified approval and merged menu; pending results preserve handle", async t => {
@@ -127,7 +127,7 @@ test("live integration requires distinct verified approval and merged menu; pend
   const catalog = await loadCatalog();
   const config = {
     mode: "live", repo: identity.repo,
-    runs: { "live-001": { issueNumber: 1, prNumber: 2, reviewer: "reviewer", headSha, orderId: "mona-latte" } }
+    runs: { "live-001": { issueNumber: 1, prNumber: 2, baseRef: "main", reviewer: "reviewer", headSha, orderId: "mona-latte" } }
   };
   const { engine, store } = await fixture(t, {
     config,
@@ -135,7 +135,7 @@ test("live integration requires distinct verified approval and merged menu; pend
     github: {
       readIssue: async () => ({ number: 1, title: "Order Up", body: "Order instructions" }),
       inspectPullRequest: async () => ({
-        headSha, checksPassed: true, approved, approvedForAttempt: approved, merged,
+        headSha, baseRef: "main", checksPassed: true, approved, approvedForAttempt: approved, merged,
         mergeCommitSha: merged ? "b".repeat(40) : null,
         menu: [catalog.orders[0]], files: [], checks: [], summary: "Actual PR"
       }),
@@ -172,7 +172,9 @@ test("live integration requires distinct verified approval and merged menu; pend
 
 test("hints are limited to pre-serving phases through the engine, including SDK callers", async t => {
   const { engine, store } = await fixture(t);
-  await engine.open({ runId: "hint-run", mode: "rehearsal" });
+  await engine.open({ runId: "hint-run", mode: "rehearsal", orderId: "mona-latte" });
+  engine.config = { mode: "live" };
+  engine.github = {};
   for (const mode of ["rehearsal", "live"]) {
     for (const phase of ["order", "reviewing", "approved", "served", "completed"]) {
       await store.transaction(data => {
@@ -184,7 +186,7 @@ test("hints are limited to pre-serving phases through the engine, including SDK 
       if (["served", "completed"].includes(phase)) {
         await assert.rejects(engine.dispatch("hint-run", "hint"), { code: "wrong_phase" });
         assert.deepEqual(await store.read(), before, `${mode} ${phase} must not mutate saved state`);
-        const restarted = new RunEngine({ store: new RunStore(store.directory), catalog: engine.catalog });
+        const restarted = new RunEngine({ store: new RunStore(store.directory), catalog: engine.catalog, config: engine.config, github: engine.github });
         assert.equal((await restarted.dispatch("hint-run", "refresh")).statusMessage, "Saved phase status");
       } else {
         const state = await engine.dispatch("hint-run", "hint");

@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { DomainError, loadCatalog } from "../.github/extensions/commit-and-sip/domain.mjs";
+import { DomainError, loadCatalog, validateStaffConfig } from "../.github/extensions/commit-and-sip/domain.mjs";
 import { GithubAdapter, GithubError } from "../.github/extensions/commit-and-sip/services/github.mjs";
 import { inspectLivePilot } from "../.github/extensions/commit-and-sip/services/pilot.mjs";
 
@@ -8,7 +8,7 @@ try {
   if (![2, 4].includes(args.length) || args[0] !== "--run" || (args.length === 4 && args[2] !== "--config")) {
     throw new DomainError("usage", "Usage: npm run preflight:live -- --run RUN_ID [--config STAFF_CONFIG_PATH]", 400);
   }
-  const config = JSON.parse(await readFile(args[3] ?? "booth/local-config.json", "utf8"));
+  const config = validateStaffConfig(JSON.parse(await readFile(args[3] ?? "booth/local-config.json", "utf8")));
   const report = await inspectLivePilot({ config, catalog: await loadCatalog(), runId: args[1], github: new GithubAdapter({ repo: config.repo }) });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   process.exitCode = 2;

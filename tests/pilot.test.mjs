@@ -18,14 +18,14 @@ const mergeSha = "c".repeat(40);
 const identity = { runId: "pilot-001", repo: "ghlearn/commit-and-sip", prNumber: 2, headSha };
 const config = {
   mode: "live", repo: identity.repo, requiredChecks: ["menu-validation"],
-  runs: { [identity.runId]: { issueNumber: 1, prNumber: 2, reviewer: "reviewer", headSha, orderId: order.id } }
+  runs: { [identity.runId]: { issueNumber: 1, prNumber: 2, baseRef: "main", reviewer: "reviewer", headSha, orderId: order.id } }
 };
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), "sip-pilot-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const facts = {
-    headSha, checksPassed: true, approved: false, merged: false, mergeCommitSha: null,
+    headSha, baseRef: "main", checksPassed: true, approved: false, merged: false, mergeCommitSha: null,
     menu: [order], files: [{ filename: "src/data/specials.json", patch: "Verified fixture patch" }],
     checks: [{ name: "menu-validation", conclusion: "success" }], summary: "Verified proposal fixture"
   };
@@ -86,7 +86,7 @@ test("trusted partial views synchronize before the checkpoint without treating r
 test("sync cannot accept caller-provided evidence or run in rehearsal", async t => {
   const f = await fixture(t);
   await assert.rejects(f.engine.dispatch(identity.runId, "sync_review", { surfaces: ["summary", "changes", "checks"] }), { code: "invalid_input" });
-  await f.engine.open({ runId: "rehearsal", mode: "rehearsal" });
+  await f.engine.open({ runId: "rehearsal", mode: "rehearsal", orderId: "mona-latte" });
   await assert.rejects(f.engine.dispatch("rehearsal", "sync_review"), { code: "wrong_phase" });
   assert.equal(f.reads(), 0);
 });
@@ -171,7 +171,7 @@ function githubFixture() {
   const root = `/repos/${config.repo}`;
   const pr = {
     number: 2, title: "Add Mona Latte", body: "Menu proposal", user: { login: "author" },
-    head: { sha: headSha, repo: { full_name: config.repo } }, base: { sha: baseSha, repo: { full_name: config.repo } },
+    head: { sha: headSha, repo: { full_name: config.repo } }, base: { sha: baseSha, ref: "main", repo: { full_name: config.repo } },
     state: "open", draft: false, mergeable: true, mergeable_state: "clean", merged: false, merge_commit_sha: null
   };
   const encode = menu => ({ type: "file", encoding: "base64", content: Buffer.from(JSON.stringify(menu)).toString("base64") });
@@ -202,6 +202,8 @@ test("pilot preflight verifies the actual GitHub adapter using GET only and neve
   assert.equal(report.liveReady, false);
   assert.deepEqual(report.order, order);
   assert.equal(report.headSha, headSha);
+  assert.equal(report.baseRef, "main");
+  assert.deepEqual(report.requiredChecks, ["menu-validation"]);
   assert.ok(report.blockers.length);
   assert.ok(f.calls.length > 5);
   assert.equal(f.calls.every(method => method === "GET"), true);
@@ -396,6 +398,9 @@ for (const outage of ["post-write inspection", "lost write response", "before wr
       assert.equal(saved.phase, "reviewing");
       assert.equal(saved.approvalAttempt.id, options.approvalAttemptId, "attempt must be on disk before GitHub is called");
       assert.equal(saved.approvalAttempt.identity.headSha, headSha);
+      assert.equal(saved.approvalAttempt.identity.baseRef, "main");
+      assert.deepEqual(saved.approvalAttempt.identity.requiredChecks, ["menu-validation"]);
+      assert.equal(options.expectedBaseRef, "main");
       if (outage === "before write" && failOnce) { failOnce = false; throw unavailable; }
       remoteWrites++;
       remoteMarker = options.approvalAttemptId;
@@ -449,4 +454,93 @@ test("saved approval attempts cannot be reused for a changed assignment", async 
   await f.engine.store.transaction(data => { data.runs[identity.runId].approvalAttempt.identity.prNumber = 999; });
   await assert.rejects(f.sync(), { code: "approval_attempt_conflict" });
   assert.equal((await f.engine.get(identity.runId)).assessmentPassed, false);
+});
+
+test("live runs pin independent copies of required checks and target branch across restart", async t => {
+  const f = await fixture(t);
+  const assigned = (await f.engine.store.read()).runs[identity.runId].assignment;
+  assert.deepEqual(assigned.requiredChecks, ["menu-validation"]);
+  assert.equal(assigned.baseRef, "main");
+  const restart = changed => new RunEngine({
+    store: new RunStore(f.engine.store.directory), catalog, config: changed, github: f.github, viewEvidence: f.viewEvidence
+  });
+  for (const changed of [
+    { ...config, requiredChecks: ["other-check"] },
+    { ...config, runs: { [identity.runId]: { ...config.runs[identity.runId], baseRef: "other-branch" } } }
+  ]) {
+    await assert.rejects(restart(changed).open({ runId: identity.runId, mode: "live" }), { code: "assignment_changed" });
+    assert.deepEqual((await f.engine.store.read()).runs[identity.runId].assignment, assigned);
+  }
+  const pinnedCalls = [];
+  f.github.inspectPullRequest = async (number, options) => { pinnedCalls.push(options); return { ...f.facts }; };
+  f.engine.config = { ...config, requiredChecks: ["changed-without-restart"] };
+  f.views({ ...identity, surfaces: ["summary", "changes", "checks"] });
+  await f.sync();
+  assert.deepEqual(pinnedCalls[0].requiredChecks, ["menu-validation"]);
+  assert.equal(pinnedCalls[0].expectedBaseRef, "main");
+  const reopened = await restart(config).open({ runId: identity.runId, mode: "live" });
+  assert.equal(reopened.phase, "reviewing");
+});
+
+test("unbound saved check/branch policies cannot inherit new defaults during revalidation", async t => {
+  for (const field of ["requiredChecks", "baseRef"]) {
+    await t.test(field, async t => {
+      const f = await fixture(t);
+      await f.engine.store.transaction(data => { delete data.runs[identity.runId].assignment[field]; });
+      let inspections = 0;
+      f.github.inspectPullRequest = async () => { inspections++; return { ...f.facts }; };
+      await assert.rejects(f.engine.open({ runId: identity.runId, mode: "live" }), { code: "assignment_changed" });
+      f.views({ ...identity, surfaces: ["summary", "changes", "checks"] });
+      await assert.rejects(f.sync(), { code: "assignment_changed" });
+      assert.equal(inspections, 0);
+    });
+  }
+});
+
+test("preflight and live revalidation reject a wrong application base branch", async t => {
+  const f = githubFixture();
+  f.responses[`${f.root}/pulls/2`].base.ref = "not-the-app";
+  await assert.rejects(inspectLivePilot({ config, catalog, runId: identity.runId, github: f.github }), { code: "base_ref_mismatch" });
+  const run = await fixture(t);
+  run.views({ ...identity, surfaces: ["summary", "changes", "checks"] });
+  await run.sync();
+  await run.checkpoint();
+  const prior = (await run.engine.store.read()).runs[identity.runId];
+  run.facts.baseRef = "not-the-app";
+  await assert.rejects(run.sync(), { code: "evidence_invalid" });
+  await assertRevoked(run, prior);
+});
+
+test("saved live runs cannot reopen or refresh while live mode or adapters are disabled", async t => {
+  const f = await fixture(t);
+  const before = await f.engine.store.read();
+  for (const options of [
+    { config: { ...config, mode: "rehearsal" }, github: f.github },
+    { config, github: null },
+    { config: { ...config, mode: undefined }, github: f.github }
+  ]) {
+    const restarted = new RunEngine({ store: new RunStore(f.engine.store.directory), catalog, ...options });
+    await assert.rejects(restarted.open({ runId: identity.runId, mode: "live" }), { code: "live_unconfigured" });
+    await assert.rejects(restarted.get(identity.runId), { code: "live_unconfigured" });
+    await assert.rejects(restarted.dispatch(identity.runId, "refresh"), { code: "live_unconfigured" });
+    await assert.rejects(restarted.dispatch(identity.runId, "hint"), { code: "live_unconfigured" });
+    assert.deepEqual(await f.engine.store.read(), before);
+  }
+  const restored = new RunEngine({ store: new RunStore(f.engine.store.directory), catalog, config, github: f.github });
+  assert.equal((await restored.open({ runId: identity.runId, mode: "live" })).phase, "reviewing");
+});
+
+test("preflight rejects valid JSON with a non-object configuration through the normal exit-1 diagnostic", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "sip-config-shape-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const script = fileURLToPath(new URL("../scripts/preflight-live.mjs", import.meta.url));
+  const file = join(directory, "config.json");
+  for (const configValue of [null, [], "do-not-echo-this-config-value", 1, true, { runs: null }, { runs: [] }]) {
+    await writeFile(file, JSON.stringify(configValue));
+    const result = spawnSync(process.execPath, [script, "--run", identity.runId, "--config", file], { encoding: "utf8" });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^Live preflight failed \(invalid_config\):/);
+    assert.doesNotMatch(result.stderr, /TypeError|at file:|do-not-echo-this-config-value/);
+    assert.equal(result.stdout, "");
+  }
 });

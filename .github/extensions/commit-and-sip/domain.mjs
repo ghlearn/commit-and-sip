@@ -18,6 +18,13 @@ export function validRunId(id) {
   return typeof id === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/.test(id);
 }
 
+export function validBaseRef(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= 255 &&
+    value !== "HEAD" && value !== "@" && !value.startsWith("-") && !value.endsWith(".") &&
+    !/[\u0000-\u0020\u007f~^:?*\[\\]/.test(value) && !value.includes("..") && !value.includes("@{") &&
+    value.split("/").every(part => part.length > 0 && !part.startsWith(".") && !part.endsWith(".lock"));
+}
+
 export function exactInput(input, fields = []) {
   requireValue(input && typeof input === "object" && !Array.isArray(input) &&
     Object.keys(input).every(key => fields.includes(key)),
@@ -50,7 +57,16 @@ export const liveBlockers = [
   "Authentic Copilot App guide screenshots must be captured and approved before booth use."
 ];
 
+export function validateStaffConfig(config) {
+  requireValue(config !== null && typeof config === "object" && !Array.isArray(config),
+    "invalid_config", "Staff configuration must be a non-array JSON object.", 400);
+  requireValue(config.runs === undefined || (config.runs !== null && typeof config.runs === "object" && !Array.isArray(config.runs)),
+    "invalid_config", "Configured runs must be an object keyed by run ID.", 400);
+  return config;
+}
+
 export function liveAssignment(config, catalog, runId) {
+  validateStaffConfig(config);
   const assignment = config.runs && Object.hasOwn(config.runs, runId) ? config.runs[runId] : null;
   requireValue(config.mode === "live" && assignment, "live_unconfigured", "Staff must configure live mode and assign this run before a pilot.");
   requireValue(typeof config.repo === "string" && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(config.repo) &&
@@ -59,8 +75,14 @@ export function liveAssignment(config, catalog, runId) {
     typeof assignment.headSha === "string" && /^[a-f0-9]{40}$/.test(assignment.headSha) &&
     typeof assignment.reviewer === "string" && /^[a-zA-Z0-9-]{1,39}$/.test(assignment.reviewer),
   "invalid_assignment", "The live assignment requires a repository, valid issue/PR numbers, reviewer, and exact head SHA.");
+  requireValue(validBaseRef(assignment.baseRef), "invalid_base_ref", "Assign the intended application base branch before opening a live run.", 400);
+  const requiredChecks = config.requiredChecks === undefined ? ["menu-validation"] : config.requiredChecks;
+  requireValue(Array.isArray(requiredChecks) && requiredChecks.length > 0 &&
+    requiredChecks.every(name => typeof name === "string" && name.trim().length > 0) &&
+    new Set(requiredChecks).size === requiredChecks.length,
+  "invalid_checks", "Configure unique nonempty required check names for the live assignment.", 400);
   requireValue(catalog.orders.some(order => order.id === assignment.orderId), "invalid_order", "The assigned order must exist in the booth catalog.", 400);
-  return { ...assignment, repo: config.repo };
+  return { ...assignment, repo: config.repo, requiredChecks: [...requiredChecks] };
 }
 
 export function makeRun({ runId, mode, order, assignment = null, now = new Date().toISOString() }) {

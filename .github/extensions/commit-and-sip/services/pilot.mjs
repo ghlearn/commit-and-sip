@@ -14,16 +14,17 @@ export async function inspectLivePilot({ config, catalog, runId, github }) {
     typeof issue.body === "string" && issue.body.trim(),
   "invalid_issue", "The assigned exercise issue must be open and contain learner instructions.");
   const evidence = await github.inspectPullRequest(assignment.prNumber, {
-    expectedHeadSha: assignment.headSha, reviewer: assignment.reviewer, order, requiredChecks: config.requiredChecks
+    expectedHeadSha: assignment.headSha, expectedBaseRef: assignment.baseRef,
+    reviewer: assignment.reviewer, order, requiredChecks: assignment.requiredChecks
   });
-  requireValue(evidence.headSha === assignment.headSha && evidence.checksPassed,
+  requireValue(evidence.headSha === assignment.headSha && evidence.baseRef === assignment.baseRef && evidence.checksPassed,
     "evidence_invalid", "The exact assigned revision and passing checks must verify.");
   requireValue(!evidence.approved && !evidence.merged,
     "assignment_used", "Prepare a fresh PR: this pilot assignment is already approved or merged.");
   return {
     status: "assignment-verified", liveReady: false,
     runId, repo: assignment.repo, issueNumber: assignment.issueNumber, prNumber: assignment.prNumber,
-    headSha: assignment.headSha, order,
+    headSha: assignment.headSha, baseRef: assignment.baseRef, requiredChecks: assignment.requiredChecks, order,
     blockers: [
       "Native in-App PR navigation and authenticated view evidence must be supplied by the host integration; this preflight cannot certify them.",
       "Trusted checkpoint evidence and authenticated completion hosting remain required for event results.",

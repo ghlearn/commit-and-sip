@@ -2,7 +2,7 @@ import { joinSession, createCanvas, CanvasError } from "@github/copilot-sdk/exte
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { DomainError, loadCatalog } from "./domain.mjs";
+import { DomainError, loadCatalog, validateStaffConfig } from "./domain.mjs";
 import { RunStore } from "./store.mjs";
 import { RunEngine } from "./engine.mjs";
 import { canvasDefinition } from "./canvas.mjs";
@@ -11,7 +11,7 @@ import { liveAdapters } from "./services/live.mjs";
 const catalog = await loadCatalog();
 let config = {};
 try {
-  config = JSON.parse(await readFile(new URL("../../../booth/local-config.json", import.meta.url), "utf8"));
+  config = validateStaffConfig(JSON.parse(await readFile(new URL("../../../booth/local-config.json", import.meta.url), "utf8")));
 } catch (error) {
   if (error.code !== "ENOENT") throw error;
 }

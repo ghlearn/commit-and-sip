@@ -55,7 +55,7 @@ The destination is ignored. Do not place secrets in it. Configure:
 | `completionEndpoint` | Authenticated server-only verifier endpoint |
 | `qrImageUrl` | Approved publicly readable HTTPS QR image, renderable in an issue |
 | `approvedQrOrigins` | Explicit approved HTTPS QR asset origins; the default empty list does not authorize an image host |
-| `runs` | Fresh run-ID assignments; each includes `issueNumber`, `prNumber`, exact `headSha`, `reviewer`, and `orderId` |
+| `runs` | Fresh run-ID assignments; each includes `issueNumber`, `prNumber`, exact `headSha`, intended application `baseRef`, `reviewer`, and `orderId` |
 
 Example IDs and the example SHA are not usable assignments. Validate the catalog order against the prepared issue and PR. Reload after staff configuration changes.
 
@@ -84,7 +84,7 @@ No local button sequence or permissive evidence stub is an acceptable substitute
 
 `services/authority.mjs` now provides the in-process `CompletionAuthority` building block: durable server-computed receipts, deterministic global handle-collision resolution, idempotent comment finalization with a compatible writer, and anonymous leaderboard projection. It is not an HTTP/authenticated deployment. Operate its authority ledger in a separate dedicated server store, never the client rehearsal data directory. Server-owned assignments and independent GitHub/native-view/checkpoint readers must be configured by deployment staff; clients cannot provide scores or evidence.
 
-The remote `CompletionAuthority.finalize` is the only live completion-comment writer. Configure its trusted `postComment` callback to use `GithubAdapter.upsertCompletionComment`; `prepareCompletionComment` verifies QR/leaderboard configuration and prepares the body before the final comment ID exists. The endpoint must persist and return a positive `commentId` with its receipt. `services/live.mjs` only verifies that receipt and updates local state; never add a local comment writer. Authority leaderboard publication includes confirmed-comment receipts only. Retry failures through the same remote endpoint and run ID, not a manual second comment.
+The remote `CompletionAuthority.finalize` is the only live completion-comment writer. Its trusted `postComment` callback must provide atomic remote deduplication using the supplied idempotency key; `GithubAdapter.upsertCompletionComment` and `IssueCompletionWriter` can supply marker/body reconciliation within that service, but read-then-create alone is not an atomic exactly-once writer. `prepareCompletionComment` verifies QR/leaderboard configuration and prepares the body before the final comment ID exists. The endpoint must persist and return a positive `commentId` with its receipt. `services/live.mjs` only verifies that receipt and updates local state; never add a local comment writer. Authority leaderboard publication includes confirmed-comment receipts only. Retry failures through the same remote endpoint and run ID, not a manual second comment.
 
 If two devices submit the same curated handle phrase, the authority retains the phrase and adds a deterministic eight-hex suffix to resolve the collision. It reserves the canonical handle before commenting, and the client persists that value only from the verified authenticated receipt. A retry with the original candidate returns the same reservation. Do not manually rename handles; an unknown or different phrase for the same run is still rejected.
 
@@ -100,7 +100,7 @@ Use full commit SHAs and the assigned order ID. The command checks the exact com
 
 The successful rehearsal does not certify real GitHub review. Keep rehearsal available while completing the host-owned integration. Do not toggle live mode just to bypass this checklist.
 
-1. Prepare a separate real learner issue and one menu-only PR under a different author from the designated reviewer. Use a fresh run ID and exact head SHA in ignored staff configuration; keep branch protection and required checks intact. This release does not automatically provision issues or PRs.
+1. Prepare a separate real learner issue and one menu-only PR under a different author from the designated reviewer. Use a fresh run ID, exact head SHA, and intended application `baseRef` in ignored staff configuration; keep branch protection and required checks intact. The effective check list is pinned when the run is created and cannot be changed on resume. This release does not automatically provision issues or PRs.
 2. Run `npm run preflight:live -- --run RUN_ID` (optionally `--config PATH`). It is read-only. Compare its catalog criteria with the issue copy and separately confirm reviewer authentication and merge permissions. Exit 1 indicates failure; exit 2 means the assignment verified but live readiness is still blocked. No run, approval, merge, comment, or result is created.
 3. Obtain a documented native App navigation/view-evidence integration from the host owner. The inspected SDK advertises canvas rendering and lifecycle, not authenticated native PR-view events. Inject the trusted reader server-side; never offer an HTTP or canvas action that accepts caller-authored view evidence. There is no production reader supplied in this repository.
 4. In the pilot canvas, use the assigned issue/PR references and live step guide. Staff open native PR views inside the App until a supported navigation API is wired. After inspecting those views, choose **Refresh verified review**. Partial observations show progress; only all three verified views allow the factual checkpoint. **Refresh progress** does not verify views. Verification failures revoke saved progress and relock the checkpoint.
@@ -122,7 +122,13 @@ Every correct completion earns 1,000 points. Tied scores share rank. Do not intr
 
 If a live approval write may have succeeded but verification failed, keep the original run. Its private attempt marker was saved before the write. Restore native/GitHub evidence, choose **Refresh verified review**, repeat the factual checkpoint, and explicitly retry approval. Only the exact effective reviewer/head/attempt match is reconciled; an unrelated pre-existing approval still requires a fresh assignment. Do not erase or replace the attempt to recover, and do not manually copy its marker into another review.
 
-Authority reservations are bound to the original repository, issue/PR, head, reviewer, order, and required checks. Restore that registration before retrying finalization. Changing the registration cannot move the receipt to a new issue. A legacy reservation with no saved assignment is blocked; staff must recover its original independently verified binding, not infer it from current configuration or reset the run to conceal an uncertain result.
+Authority reservations are bound to the original repository, issue/PR, head, target branch, reviewer, order, required checks, and trusted approval attempt/timing proof. Restore that registration before retrying finalization. Changing the registration cannot move the receipt to a new issue. A legacy reservation with no saved assignment or proof is blocked; staff must recover its original independently verified binding, not infer it from current configuration or reset the run to conceal an uncertain result.
+
+The production host/server integration must register the attempt UUID and chronological `reviewedAt`, `checkpointAt`, and `decidedAt` times. Independent view/checkpoint readers must confirm the corresponding `completedAt` values, and GitHub must confirm this attempt's marked review and submission time. Do not hand-fill these values from a rehearsal or current clock to make a pilot pass; that would not establish authentic learner ordering.
+
+Authority work uses per-run ownership claims with a default 60-second lifetime and periodic renewal, not a global lock around remote calls. `completion_busy` means this run is still owned by another worker; retry the same run later. `completion_claim_lost` means an expired/replaced worker cannot commit; reconcile through the same finalization service rather than manually posting another comment. Claims and persisted candidate/assignment bindings must not be deleted to force completion. Atomic remote comment deduplication remains a production requirement even though normal overlapping work is excluded.
+
+Turning off live mode or omitting the GitHub adapter blocks saved live runs as well as new ones; restore the original configuration to resume. A valid JSON file containing `null`, an array, or a scalar is not valid staff configuration and should be corrected using the explicit `invalid_config` diagnostic, not treated as a network error.
 
 ## Reset between attendees
 
@@ -161,7 +167,7 @@ For a fresh **live** attendee, staff must provision a new clean issue/PR and uni
 
 ## Lock and storage recovery
 
-The store uses `ledger.json` and `ledger.lock`, with atomic fsynced ledger writes. Slow I/O or a long live operation can legitimately hold the lock.
+The store uses `ledger.json` and `ledger.lock`, with atomic fsynced ledger writes. Slow I/O or a client engine live operation can legitimately hold the lock. The completion authority releases the global lock before remote calls and uses separate per-run ownership claims with heartbeats; do not erase those claims to bypass an active worker or change a reserved assignment.
 
 1. Stop intake and note the affected run IDs. Inspect the exact provider log and lock metadata. Determine the actual data directory from the host environment; do not guess.
 2. Verify the recorded lock-owner PID with `ps -p <pid> -o pid,ppid,lstart,command`. Compare the process identity/start time, not just PID existence; PIDs can be reused.

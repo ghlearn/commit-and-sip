@@ -53,7 +53,10 @@ export function canvasDefinition({ engine, guarded = fn => fn(), reportError = (
         properties: {
           runId: { type: "string", pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$" },
           mode: { enum: ["rehearsal", "live"] },
-          orderId: { enum: engine.catalog.orders.map(order => order.id) }
+          orderId: {
+            enum: engine.catalog.orders.map(order => order.id),
+            description: "Required for a new rehearsal; omit only to resume a saved run or use a live staff assignment."
+          }
         },
         required: ["runId", "mode"], additionalProperties: false
       }

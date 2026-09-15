@@ -10,8 +10,8 @@ const base = [{ id: 'tea', name: 'Tea', description: 'Green tea', price: 3, serv
 const root = '/repos/cafe/menu';
 const menuPath = 'src/data/specials.json';
 const encode = (menu) => ({ type: 'file', encoding: 'base64', content: Buffer.from(JSON.stringify(menu)).toString('base64') });
-const pr = () => ({ number: 2, title: 'Actual PR title', body: 'Actual PR description', user: { login: 'author' }, head: { sha: HEAD, repo: { full_name: 'cafe/menu' } }, base: { sha: BASE, repo: { full_name: 'cafe/menu' } }, state: 'open', draft: false, mergeable: true, mergeable_state: 'clean', merged: false, merge_commit_sha: null });
-const approval = (id = 1) => ({ id, user: { login: 'reviewer' }, state: 'APPROVED', commit_id: HEAD });
+const pr = () => ({ number: 2, title: 'Actual PR title', body: 'Actual PR description', user: { login: 'author' }, head: { sha: HEAD, repo: { full_name: 'cafe/menu' } }, base: { sha: BASE, ref: 'main', repo: { full_name: 'cafe/menu' } }, state: 'open', draft: false, mergeable: true, mergeable_state: 'clean', merged: false, merge_commit_sha: null });
+const approval = (id = 1) => ({ id, user: { login: 'reviewer' }, state: 'APPROVED', commit_id: HEAD, submitted_at: '2026-09-15T10:00:00Z' });
 const check = (id = 1) => ({ id, name: 'menu-validation', app: { id: 15368, slug: 'github-actions' }, head_sha: HEAD, status: 'completed', conclusion: 'success' });
 const issue = { number: 1, title: 'Order', user: { login: 'author' } };
 
@@ -39,7 +39,7 @@ function fixture(overrides = {}, adapterOptions = {}) {
     } });
     return { adapter, calls };
 }
-const inspect = (adapter, options = {}) => adapter.inspectPullRequest(2, { expectedHeadSha: HEAD, reviewer: 'reviewer', order, ...options });
+const inspect = (adapter, options = {}) => adapter.inspectPullRequest(2, { expectedHeadSha: HEAD, expectedBaseRef: 'main', reviewer: 'reviewer', order, ...options });
 
 test('validates exact appended menu and pinned effective approval', async () => {
     const result = await inspect(fixture().adapter);
@@ -136,18 +136,18 @@ test('merged evidence requires the exact intended menu at the actual merge SHA',
 
 test('approval verifies identity and creates only a commit-pinned review', async () => {
     const { adapter, calls } = fixture({ [`POST ${root}/pulls/2/reviews`]: approval() });
-    await adapter.approve(2, { headSha: HEAD, reviewer: 'reviewer' });
+    await adapter.approve(2, { headSha: HEAD, expectedBaseRef: 'main', reviewer: 'reviewer' });
     assert.deepEqual(calls.filter(({ method }) => method !== 'GET'), [{ method: 'POST', path: `${root}/pulls/2/reviews`, body: { commit_id: HEAD, event: 'APPROVE' } }]);
     const denied = fixture({ '/user': { login: 'someoneelse' } });
-    await assert.rejects(denied.adapter.approve(2, { headSha: HEAD, reviewer: 'reviewer' }), /authenticated/);
+    await assert.rejects(denied.adapter.approve(2, { headSha: HEAD, expectedBaseRef: 'main', reviewer: 'reviewer' }), /authenticated/);
     assert.ok(denied.calls.every(({ method }) => method === 'GET'));
 });
 
 test('merge uses GitHub SHA guard and requires confirmed success', async () => {
     const { adapter, calls } = fixture({ [`PUT ${root}/pulls/2/merge`]: { merged: true, sha: MERGE } });
-    await adapter.merge(2, { headSha: HEAD });
+    await adapter.merge(2, { headSha: HEAD, expectedBaseRef: 'main' });
     assert.deepEqual(calls.at(-1).body, { sha: HEAD });
-    await assert.rejects(fixture({ [`PUT ${root}/pulls/2/merge`]: { merged: false } }).adapter.merge(2, { headSha: HEAD }), /did not confirm/);
+    await assert.rejects(fixture({ [`PUT ${root}/pulls/2/merge`]: { merged: false } }).adapter.merge(2, { headSha: HEAD, expectedBaseRef: 'main' }), /did not confirm/);
 });
 
 test('readIssue rejects pull requests and invalid issue numbers', async () => {
@@ -238,7 +238,7 @@ test('approval attempts are written as exact review markers and matched to the e
     const body = `<!-- commit-and-sip-approval:${id} -->`;
     const written = { ...approval(), body };
     const f = fixture({ [`POST ${root}/pulls/2/reviews`]: written, [`${root}/pulls/2/reviews?per_page=100&page=1`]: [written] });
-    await f.adapter.approve(2, { headSha: HEAD, reviewer: 'reviewer', approvalAttemptId: id });
+    await f.adapter.approve(2, { headSha: HEAD, expectedBaseRef: 'main', reviewer: 'reviewer', approvalAttemptId: id });
     assert.deepEqual(f.calls.find(call => call.method === 'POST').body, { commit_id: HEAD, event: 'APPROVE', body });
     assert.equal((await inspect(f.adapter, { approvalAttemptId: id })).approvedForAttempt, true);
     assert.equal((await inspect(f.adapter)).approvedForAttempt, false);
@@ -251,6 +251,40 @@ test('approval attempts are written as exact review markers and matched to the e
     assert.equal((await inspect(replaced.adapter, { approvalAttemptId: id })).approvedForAttempt, false);
     const invalid = fixture();
     await assert.rejects(inspect(invalid.adapter, { approvalAttemptId: 'invalid' }), /Invalid approval attempt/);
-    await assert.rejects(invalid.adapter.approve(2, { headSha: HEAD, reviewer: 'reviewer', approvalAttemptId: 'invalid' }), /Invalid approval attempt/);
+    await assert.rejects(invalid.adapter.approve(2, { headSha: HEAD, expectedBaseRef: 'main', reviewer: 'reviewer', approvalAttemptId: 'invalid' }), /Invalid approval attempt/);
     assert.equal(invalid.calls.length, 0);
+});
+
+test('the intended base branch must match on initial and final reads, including merged PRs', async () => {
+    for (const merged of [false, true]) {
+        const wrong = { ...pr(), merged, merge_commit_sha: merged ? MERGE : null, base: { ...pr().base, ref: 'other-branch' } };
+        const f = fixture({ [`${root}/pulls/2`]: wrong });
+        await assert.rejects(inspect(f.adapter), { code: 'base_ref_mismatch' });
+        assert.equal(f.calls.length, 1);
+    }
+    let reads = 0;
+    const retargeted = fixture({
+        [`${root}/pulls/2`]: () => ++reads === 1 ? pr() : { ...pr(), base: { ...pr().base, ref: 'other-branch' } }
+    });
+    await assert.rejects(inspect(retargeted.adapter), { code: 'base_ref_mismatch' });
+    assert.equal(reads, 2);
+    const release = fixture({ [`${root}/pulls/2`]: { ...pr(), base: { ...pr().base, ref: 'release/2026.09' } } });
+    const result = await inspect(release.adapter, { expectedBaseRef: 'release/2026.09' });
+    assert.equal(result.baseRef, 'release/2026.09');
+    assert.equal(result.approvedAt, approval().submitted_at);
+});
+
+test('missing or invalid assigned branches fail before network access and write methods reject retargeting', async () => {
+    for (const expectedBaseRef of [undefined, null, '', 'HEAD', '-branch', 'bad..ref', 'bad ref', 'a/.hidden', 'a.lock', 'a//b', 'a\\b', 'a@{b']) {
+        const f = fixture();
+        await assert.rejects(inspect(f.adapter, { expectedBaseRef }), { code: 'invalid_base_ref' });
+        await assert.rejects(f.adapter.approve(2, { headSha: HEAD, reviewer: 'reviewer', expectedBaseRef }), { code: 'invalid_base_ref' });
+        await assert.rejects(f.adapter.merge(2, { headSha: HEAD, expectedBaseRef }), { code: 'invalid_base_ref' });
+        assert.equal(f.calls.length, 0);
+    }
+    for (const method of ['approve', 'merge']) {
+        const f = fixture({ [`${root}/pulls/2`]: { ...pr(), base: { ...pr().base, ref: 'wrong-branch' } } });
+        await assert.rejects(f.adapter[method](2, { headSha: HEAD, expectedBaseRef: 'main', reviewer: 'reviewer' }), { code: 'base_ref_mismatch' });
+        assert.ok(f.calls.every(call => call.method === 'GET'));
+    }
 });
