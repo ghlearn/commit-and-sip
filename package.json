@@ -9,7 +9,8 @@
     "check": "node scripts/check-syntax.mjs",
     "qr": "node scripts/generate-qr.mjs",
     "reset": "node scripts/reset-exercise.mjs",
-    "preflight:live": "node scripts/preflight-live.mjs"
+    "preflight:live": "node scripts/preflight-live.mjs",
+    "provision:live": "node scripts/provision-live.mjs"
   },
   "engines": { "node": ">=22" },
   "devDependencies": {

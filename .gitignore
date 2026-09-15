@@ -1,6 +1,7 @@
 node_modules/
 .DS_Store
 booth/local-config.json
+.staff-config-*.tmp
 .commit-and-sip/
 coverage/
 .playwright-mcp/
