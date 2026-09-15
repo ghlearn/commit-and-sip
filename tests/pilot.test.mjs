@@ -238,3 +238,138 @@ test("preflight CLI reports missing or malformed staff configuration without lea
     assert.equal(result.stdout, "");
   }
 });
+
+async function prepareRevalidation(t, action) {
+  const f = await fixture(t);
+  f.views({ ...identity, surfaces: ["summary", "changes", "checks"] });
+  await f.sync();
+  await f.checkpoint();
+  if (["serve", "complete"].includes(action)) await f.engine.dispatch(identity.runId, "approve");
+  if (action === "complete") {
+    Object.assign(f.facts, { merged: true, mergeCommitSha: mergeSha });
+    const unavailable = new Error("Completion transport unavailable");
+    f.engine.completion = { finish: async () => { throw unavailable; } };
+    await assert.rejects(f.engine.dispatch(identity.runId, "serve"), error => error === unavailable);
+  }
+  return f;
+}
+
+async function assertRevoked(f, previous) {
+  const stored = (await f.engine.store.read()).runs[identity.runId];
+  assert.deepEqual(stored.views, []);
+  assert.equal(stored.evidenceHeadSha, null);
+  assert.equal(stored.assessmentPassed, false);
+  assert.equal(stored.review, null);
+  assert.equal(stored.reviewSyncedAt, null);
+  for (const key of ["phase", "events", "issue", "menu", "servedCommitSha", "handle", "commentId", "result", "completionPending", "assessmentAttempts"]) {
+    assert.deepEqual(stored[key], previous[key], `Preserve durable ${key} after failed verification`);
+  }
+  const restarted = new RunEngine({ store: new RunStore(f.engine.store.directory), catalog, config,
+    github: f.github, viewEvidence: f.viewEvidence, completion: f.engine.completion });
+  const refreshed = await restarted.dispatch(identity.runId, "refresh");
+  assert.deepEqual(refreshed.views, []);
+  assert.equal(refreshed.assessmentPassed, false);
+  assert.equal(refreshed.review, null);
+  assert.equal(refreshed.verification.syncedAt, null);
+  assert.match(refreshed.statusMessage, /verification failed/);
+  assert.equal((await f.engine.store.read()).results.length, 0);
+}
+
+for (const action of ["check_order", "approve", "serve", "complete"]) {
+  test(`${action} durably revokes all stale review fields for every live evidence failure`, async t => {
+    const cases = [
+      ["missing reader", f => { f.engine.viewEvidence = null; }, "native_views_unavailable"],
+      ["incomplete views", f => f.views({ ...identity, surfaces: ["summary"] }), "native_views_incomplete"],
+      ["wrong native head", f => f.views({ ...identity, headSha: mergeSha, surfaces: [] }), "native_views_invalid"],
+      ["changed GitHub head", f => { f.facts.headSha = mergeSha; }, "evidence_invalid"],
+      ["failed check", f => { f.facts.checksPassed = false; }, "evidence_invalid"],
+      ["GitHub transport failure", f => {
+        f.github.inspectPullRequest = async () => { throw new DomainError("github_unavailable", "GitHub unavailable"); };
+      }, "github_unavailable"],
+      ["view transport failure", f => f.fail(new DomainError("reader_unavailable", "Reader unavailable")), "reader_unavailable"]
+    ];
+    if (["check_order", "approve"].includes(action)) {
+      cases.push(["premature merge", f => { f.facts.merged = true; }, action === "approve" ? "assignment_used" : "already_merged"]);
+    }
+    if (["serve", "complete"].includes(action)) {
+      cases.push(["approval withdrawn", f => { f.facts.approved = false; }, action === "serve" ? "merge_pending" : "completion_evidence"]);
+      cases.push(["merge pending", f => { f.facts.merged = false; }, action === "serve" ? "merge_pending" : "completion_evidence"]);
+    }
+    for (const [name, invalidate, code] of cases) {
+      await t.test(name, async t => {
+        const f = await prepareRevalidation(t, action);
+        const previous = (await f.engine.store.read()).runs[identity.runId];
+        invalidate(f);
+        const input = action === "check_order" ? { price: order.price, serving: order.serving, scope: "one-drink" } : {};
+        await assert.rejects(f.engine.dispatch(identity.runId, action, input), { code });
+        await assertRevoked(f, previous);
+      });
+    }
+  });
+}
+
+test("approval verification after the GitHub write also commits revocation without an approval event", async t => {
+  const f = await prepareRevalidation(t, "approve");
+  const previous = (await f.engine.store.read()).runs[identity.runId];
+  const failure = new Error("Post-approval inspection unavailable");
+  f.github.approve = async () => {
+    f.facts.approved = true;
+    f.github.inspectPullRequest = async () => { throw failure; };
+  };
+  await assert.rejects(f.engine.dispatch(identity.runId, "approve"), error => error === failure);
+  await assertRevoked(f, previous);
+  assert.equal(f.facts.approved, true, "Remote outcome is not rolled back or falsely recorded locally");
+});
+
+test("approval write failure and start inspection failure use the shared revocation path", async t => {
+  const f = await prepareRevalidation(t, "approve");
+  let previous = (await f.engine.store.read()).runs[identity.runId];
+  const failure = new Error("GitHub unavailable");
+  f.github.approve = async () => { throw failure; };
+  await assert.rejects(f.engine.dispatch(identity.runId, "approve"), error => error === failure);
+  await assertRevoked(f, previous);
+  await f.engine.store.transaction(data => { data.runs[identity.runId] = { ...previous, phase: "order" }; });
+  previous = (await f.engine.store.read()).runs[identity.runId];
+  f.github.readIssue = async () => ({ number: 1, title: "Tentative new issue", body: "Do not persist on failure" });
+  f.github.inspectPullRequest = async () => { throw failure; };
+  await assert.rejects(f.engine.dispatch(identity.runId, "start"), error => error === failure);
+  await assertRevoked(f, previous);
+});
+
+test("non-verification input and completion transport errors preserve verified evidence", async t => {
+  const f = await prepareRevalidation(t, "check_order");
+  const beforeInput = (await f.engine.store.read()).runs[identity.runId];
+  await assert.rejects(f.engine.dispatch(identity.runId, "check_order", { price: "invalid", serving: "hot", scope: "one-drink" }), { code: "invalid_answers" });
+  assert.deepEqual((await f.engine.store.read()).runs[identity.runId], beforeInput);
+  const pending = await prepareRevalidation(t, "complete");
+  const beforeRetry = (await pending.engine.store.read()).runs[identity.runId];
+  const failure = new Error("Result service unavailable");
+  pending.engine.completion = { finish: async () => { throw failure; } };
+  await assert.rejects(pending.engine.dispatch(identity.runId, "complete"), error => error === failure);
+  assert.deepEqual((await pending.engine.store.read()).runs[identity.runId], beforeRetry);
+});
+
+test("restoring evidence permits recovery without replacing an approved or served run", async t => {
+  for (const action of ["check_order", "approve", "serve", "complete"]) {
+    await t.test(action, async t => {
+      const f = await prepareRevalidation(t, action);
+      const previous = (await f.engine.store.read()).runs[identity.runId];
+      f.facts.checksPassed = false;
+      await assert.rejects(action === "check_order" ? f.checkpoint() : f.engine.dispatch(identity.runId, action), { code: "evidence_invalid" });
+      await assertRevoked(f, previous);
+      f.facts.checksPassed = true;
+      if (["check_order", "approve"].includes(action)) {
+        await f.sync();
+        await f.checkpoint();
+        if (action === "approve") assert.equal((await f.engine.dispatch(identity.runId, "approve")).phase, "approved");
+      } else {
+        Object.assign(f.facts, { merged: true, mergeCommitSha: mergeSha });
+        f.engine.completion = { finish: async run => ({ runId: run.runId, handle: run.handle, score: 1000, rankAtCompletion: 1 }) };
+        const complete = await f.engine.dispatch(identity.runId, action);
+        assert.equal(complete.phase, "completed");
+        assert.deepEqual(complete.menu, [order]);
+        if (previous.handle) assert.equal(complete.result.handle, previous.handle);
+      }
+    });
+  }
+});

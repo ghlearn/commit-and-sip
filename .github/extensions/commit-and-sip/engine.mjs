@@ -92,12 +92,46 @@ export class RunEngine {
     run.evidenceHeadSha = run.assignment.headSha;
   }
 
-  async syncReview(runId) {
+  async runTransaction(runId, operation) {
     let failure;
     const state = await this.store.transaction(async data => {
       const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
-      requireValue(run?.mode === "live" && run.phase === "reviewing", "wrong_phase", "Refresh verified review while reviewing a live assignment.");
+      requireValue(run, "run_missing", "Open this run before continuing.", 404);
+      const saved = structuredClone(run);
+      let verificationFailed = false;
+      const verify = async check => {
+        try { return await check(); }
+        catch (error) {
+          verificationFailed = true;
+          throw error;
+        }
+      };
       try {
+        return await operation(run, data, verify);
+      } catch (error) {
+        if (run.mode !== "live" || !verificationFailed) throw error;
+        // Roll back tentative work, but commit revocation under the same lock before rethrowing.
+        saved.views = [];
+        saved.evidenceHeadSha = null;
+        saved.assessmentPassed = false;
+        saved.reviewSyncedAt = null;
+        saved.review = null;
+        saved.statusMessage = saved.phase === "reviewing"
+          ? "Review verification failed. Approval is locked; restore the trusted evidence and refresh verified review."
+          : "Live verification failed. Saved progress is preserved; restore the trusted evidence and retry the current step.";
+        data.runs[runId] = saved;
+        failure = { error };
+        return this.present(saved);
+      }
+    });
+    if (failure) throw failure.error;
+    return state;
+  }
+
+  async syncReview(runId) {
+    return this.runTransaction(runId, async (run, data, verify) => {
+      requireValue(run.mode === "live" && run.phase === "reviewing", "wrong_phase", "Refresh verified review while reviewing a live assignment.");
+      await verify(async () => {
         const views = await this.readViews(run);
         const evidence = await this.inspect(run);
         requireValue(!evidence.merged, "already_merged", "This PR was merged before this run's approval. Ask staff for a fresh assignment.");
@@ -109,20 +143,9 @@ export class RunEngine {
         run.statusMessage = views.length === 3
           ? "All three native PR views and current checks verified. Compare the order and complete the factual checkpoint."
           : `${views.length} of 3 native PR views verified. Inspect the remaining sections in the App, then refresh verified review.`;
-      } catch (error) {
-        // Persist revocation before surfacing failure so stale evidence cannot leave the UI unlocked.
-        run.views = [];
-        run.evidenceHeadSha = null;
-        run.assessmentPassed = false;
-        run.reviewSyncedAt = null;
-        run.review = null;
-        run.statusMessage = "Review verification failed. Approval is locked; restore the trusted evidence and refresh verified review.";
-        failure = error;
-      }
+      });
       return this.present(run);
     });
-    if (failure) throw failure;
-    return state;
   }
 
   async dispatch(runId, action, input = {}) {
@@ -130,9 +153,7 @@ export class RunEngine {
     if (action === "refresh") { exactInput(input); return this.get(runId); }
     if (action === "sync_review") { exactInput(input); return this.syncReview(runId); }
     if (action === "complete") { exactInput(input); return this.complete(runId); }
-    const state = await this.store.transaction(async data => {
-      const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
-      requireValue(run, "run_missing", "Open this run before continuing.", 404);
+    const state = await this.runTransaction(runId, async (run, data, verify) => {
       const rehearsal = run.mode === "rehearsal";
       switch (action) {
         case "start": {
@@ -142,10 +163,12 @@ export class RunEngine {
             run.issue = rehearsalIssue(run);
             run.review = rehearsalReview(run);
           } else {
-            const issue = await this.github.readIssue(run.assignment.issueNumber);
-            run.issue = { title: issue.title, body: issue.body, number: issue.number, url: issue.html_url };
-            const evidence = await this.inspect(run);
-            run.review = { summary: evidence.summary, files: evidence.files, checks: evidence.checks, headSha: evidence.headSha };
+            await verify(async () => {
+              const issue = await this.github.readIssue(run.assignment.issueNumber);
+              run.issue = { title: issue.title, body: issue.body, number: issue.number, url: issue.html_url };
+              const evidence = await this.inspect(run);
+              run.review = { summary: evidence.summary, files: evidence.files, checks: evidence.checks, headSha: evidence.headSha };
+            });
           }
           run.phase = "reviewing";
           run.events.push({ type: "started", at: new Date().toISOString() });
@@ -171,7 +194,11 @@ export class RunEngine {
         case "check_order": {
           exactInput(input, ["price", "serving", "scope"]);
           requireValue(run.phase === "reviewing", "wrong_phase", "Check the order while reviewing.");
-          if (!rehearsal) { await this.verifyViews(run); await this.inspect(run); }
+          if (!rehearsal) await verify(async () => {
+            await this.verifyViews(run);
+            const evidence = await this.inspect(run);
+            requireValue(!evidence.merged, "already_merged", "This PR was merged before this run's approval. Ask staff for a fresh assignment.");
+          });
           requireValue(run.views.length === 3, "review_incomplete", "Inspect the summary, changes, and checks first.");
           requireValue(typeof input.price === "number" && Number.isFinite(input.price) && input.price >= 0 && input.price <= 100 &&
             ["hot", "cold"].includes(input.serving) && ["one-drink", "unrelated-edits"].includes(input.scope),
@@ -186,17 +213,17 @@ export class RunEngine {
           exactInput(input);
           if (["approved", "served", "completed"].includes(run.phase)) break;
           requireValue(run.phase === "reviewing" && run.assessmentPassed, "assessment_required", "Complete the acceptance-criteria checkpoint before approving.");
-          if (!rehearsal) await this.verifyViews(run);
-          requireValue(run.views.length === 3, "review_incomplete", "Inspect summary, changes, and checks before approving.");
-          if (!rehearsal) {
+          if (!rehearsal) await verify(async () => {
+            await this.verifyViews(run);
             let evidence = await this.inspect(run);
-requireValue(!evidence.merged && !evidence.approved, "assignment_used", "This run's PR was approved before the learner decision. Ask staff for a fresh assignment.");
+            requireValue(!evidence.merged && !evidence.approved, "assignment_used", "This run's PR was approved before the learner decision. Ask staff for a fresh assignment.");
             if (!evidence.approved) await this.github.approve(run.assignment.prNumber, {
               headSha: run.assignment.headSha, reviewer: run.assignment.reviewer
             });
             evidence = await this.inspect(run);
             requireValue(evidence.approved, "approval_unverified", "Approval has not been verified on GitHub. Retry verification.");
-          }
+          });
+          requireValue(run.views.length === 3, "review_incomplete", "Inspect summary, changes, and checks before approving.");
           run.phase = "approved";
           run.events.push({ type: rehearsal ? "rehearsal_approved" : "github_approval_verified", at: new Date().toISOString() });
           run.statusMessage = rehearsal ? "Rehearsal approval recorded. Apply the menu separately." : "GitHub approval verified. A separate merge must succeed before the drink is served.";
@@ -206,14 +233,15 @@ requireValue(!evidence.merged && !evidence.approved, "assignment_used", "This ru
           exactInput(input);
           if (["served", "completed"].includes(run.phase)) break;
           requireValue(run.phase === "approved", "approval_required", "Approve the correct PR before applying the menu.");
-          if (!rehearsal) {
+          if (!rehearsal) await verify(async () => {
             await this.verifyViews(run);
             const evidence = await this.inspect(run);
             requireValue(evidence.approved && evidence.merged && evidence.mergeCommitSha,
               "merge_pending", "Approval is not a merge. Wait for the authorized merge, then verify the merged menu again.");
             run.menu = evidence.menu;
             run.servedCommitSha = evidence.mergeCommitSha;
-          } else run.menu = [run.order];
+          });
+          else run.menu = [run.order];
           run.phase = "served";
           run.completionPending = true;
           run.events.push({ type: rehearsal ? "rehearsal_menu_applied" : "merged_menu_verified", at: new Date().toISOString() });
@@ -237,8 +265,7 @@ requireValue(!evidence.merged && !evidence.approved, "assignment_used", "This ru
         run.handle = generateHandle(this.catalog.words, new Set(Object.values(data.runs).map(item => item.handle).filter(Boolean)));
       }
     });
-    return this.store.transaction(async data => {
-      const run = data.runs[runId];
+    return this.runTransaction(runId, async (run, data, verify) => {
       if (run.phase === "completed") return this.present(run);
       if (run.mode === "rehearsal") {
         let result = data.results.find(item => item.runId === runId);
@@ -254,11 +281,13 @@ requireValue(!evidence.merged && !evidence.approved, "assignment_used", "This ru
         }
         run.result = result;
       } else {
-        requireValue(this.completion && this.viewEvidence, "completion_unconfigured",
-          "The authenticated leaderboard completion service and native review evidence must be configured. Your verified menu update is preserved.");
-        await this.verifyViews(run);
-        const evidence = await this.inspect(run);
-        requireValue(evidence.approved && evidence.merged, "completion_evidence", "GitHub approval and merged menu must still verify before completion.");
+        await verify(async () => {
+          await this.verifyViews(run);
+          const evidence = await this.inspect(run);
+          requireValue(evidence.approved && evidence.merged, "completion_evidence", "GitHub approval and merged menu must still verify before completion.");
+        });
+        requireValue(this.completion, "completion_unconfigured",
+          "The authenticated leaderboard completion service must be configured. Your verified menu update is preserved.");
         run.result = await this.completion.finish(run);
       }
       run.phase = "completed";
