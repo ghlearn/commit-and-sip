@@ -139,7 +139,9 @@ function validateReceipt(receipt, { runId, handle, requireCommentId = false } = 
     if (handle !== undefined) {
         handleOf(handle);
         const phrase = handle.split('-').slice(0, 3).join('-');
-        if (receipt.handle !== handle && !(receipt.handle.startsWith(`${phrase}-`) && /^-[a-f0-9]{8}$/.test(receipt.handle.slice(phrase.length)))) fail('The leaderboard receipt does not match the persisted handle phrase.');
+        const acceptsCollision = !/-[a-f0-9]{8}$/.test(handle) &&
+            receipt.handle.startsWith(`${phrase}-`) && /^-[a-f0-9]{8}$/.test(receipt.handle.slice(phrase.length));
+        if (receipt.handle !== handle && !acceptsCollision) fail('The leaderboard receipt does not match the persisted handle phrase.');
     }
     rankOf(receipt.rank); rankOf(receipt.rankAtCompletion);
     if (typeof receipt.recordedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(receipt.recordedAt) || !Number.isFinite(Date.parse(receipt.recordedAt)) || new Date(receipt.recordedAt).toISOString().slice(0, 19) !== receipt.recordedAt.slice(0, 19)) fail('The leaderboard receipt requires a valid UTC record timestamp.');
