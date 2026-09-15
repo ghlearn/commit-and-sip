@@ -291,6 +291,17 @@ function observe(promise, t) {
   return pending;
 }
 
+async function waitFor(promise, label) {
+  let timeout;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), 5000);
+    })]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function secondRun(f) {
   f.options.assignments.another = { ...structuredClone(f.assignment), issueNumber: 3, prNumber: 4,
     approvalAttempt: { ...approvalAttempt, id: randomUUID() } };
@@ -651,29 +662,36 @@ test("heartbeats retain ownership for healthy slow verification and comment writ
         };
       }
       const transaction = f.options.store.transaction.bind(f.options.store);
+      let now = 100_000;
+      let initialClaim;
       let heartbeatCount = 0;
       let confirmRenewals;
       const renewed = new Promise(resolve => { confirmRenewals = resolve; });
       f.options.store.transaction = async callback => {
         let heartbeat = false;
         const result = await transaction(data => {
-          const claim = data.completionClaims?.[0];
-          const previousExpiry = claim?.expiresAt;
+          const previous = structuredClone(data.completionClaims?.[0]);
+          // Scheduling/fsync delays must not consume the synthetic lease. Advance only when
+          // the active worker enters a transaction, by less than one lease duration.
+          if (previous?.stage === stage && previous.owner) now += 200;
           const value = callback(data);
-          heartbeat = claim?.stage === stage && claim.owner && claim.expiresAt > previousExpiry;
+          const claim = data.completionClaims?.[0];
+          if (!initialClaim && claim?.stage === stage && claim.owner) initialClaim = structuredClone(claim);
+          heartbeat = previous?.stage === stage && previous.owner &&
+            claim?.owner === previous.owner && claim.fence === previous.fence &&
+            claim.expiresAt > previous.expiresAt;
           return value;
         });
         if (heartbeat && ++heartbeatCount === 4) confirmRenewals();
         return result;
       };
-      const options = { ...f.options, claimTtlMs: 600 };
+      const options = { ...f.options, now: () => now, claimTtlMs: 600 };
       const authority = new CompletionAuthority(options);
       const pending = observe(authority.finalize(f.input), t);
-      await blocked.entered;
-      const initialClaim = (await f.options.store.read()).completionClaims[0];
-      await renewed;
+      await waitFor(blocked.entered, `${stage} remote gate`);
+      await waitFor(renewed, `${stage} lease renewals`);
       const currentClaim = (await f.options.store.read()).completionClaims[0];
-      assert.ok(Date.now() >= initialClaim.expiresAt);
+      assert.ok(now >= initialClaim.expiresAt);
       assert.ok(currentClaim.expiresAt > initialClaim.expiresAt);
       assert.equal(currentClaim.owner, initialClaim.owner);
       assert.equal(currentClaim.fence, initialClaim.fence);
@@ -683,7 +701,7 @@ test("heartbeats retain ownership for healthy slow verification and comment writ
       await assert.rejects(restarted.finalize(f.input), { code: "completion_busy" });
       assert.equal(calls, 1);
       blocked.release();
-      const complete = await pending;
+      const complete = await waitFor(pending, `${stage} completion`);
       assert.equal(complete.error, undefined);
       assert.equal(complete.value.commentId, 42);
       assert.equal((await f.options.store.read()).completionClaims[0].owner, null);
