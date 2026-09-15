@@ -118,6 +118,12 @@ The successful rehearsal does not certify real GitHub review. Keep rehearsal ava
 
 Every correct completion earns 1,000 points. Tied scores share rank. Do not introduce speed, hint, retry, or accessibility penalties. Optional Copilot judging remains unavailable unless a real attributed and moderated trusted service is configured; never read fictional model feedback as authentic.
 
+## Approval and reservation retry recovery
+
+If a live approval write may have succeeded but verification failed, keep the original run. Its private attempt marker was saved before the write. Restore native/GitHub evidence, choose **Refresh verified review**, repeat the factual checkpoint, and explicitly retry approval. Only the exact effective reviewer/head/attempt match is reconciled; an unrelated pre-existing approval still requires a fresh assignment. Do not erase or replace the attempt to recover, and do not manually copy its marker into another review.
+
+Authority reservations are bound to the original repository, issue/PR, head, reviewer, order, and required checks. Restore that registration before retrying finalization. Changing the registration cannot move the receipt to a new issue. A legacy reservation with no saved assignment is blocked; staff must recover its original independently verified binding, not infer it from current configuration or reset the run to conceal an uncertain result.
+
 ## Reset between attendees
 
 For a fresh **rehearsal**:

@@ -231,3 +231,26 @@ test('staff can override trusted publisher slug and additionally pin its ID', as
         requiredCheckAppIds: { 'menu-validation': 13 }, requiredCheckAppSlugs: { 'menu-validation': 'trusted-ci' },
     }).adapter), { code: 'checks_not_passed' });
 });
+
+
+test('approval attempts are written as exact review markers and matched to the effective reviewer/head', async () => {
+    const id = '12345678-1234-1234-1234-123456789abc';
+    const body = `<!-- commit-and-sip-approval:${id} -->`;
+    const written = { ...approval(), body };
+    const f = fixture({ [`POST ${root}/pulls/2/reviews`]: written, [`${root}/pulls/2/reviews?per_page=100&page=1`]: [written] });
+    await f.adapter.approve(2, { headSha: HEAD, reviewer: 'reviewer', approvalAttemptId: id });
+    assert.deepEqual(f.calls.find(call => call.method === 'POST').body, { commit_id: HEAD, event: 'APPROVE', body });
+    assert.equal((await inspect(f.adapter, { approvalAttemptId: id })).approvedForAttempt, true);
+    assert.equal((await inspect(f.adapter)).approvedForAttempt, false);
+    for (const change of [{ body: undefined }, { body: `${body}other` }, { commit_id: BASE }, { user: { login: 'other' } },
+        { state: 'DISMISSED' }, { body: '<!-- commit-and-sip-approval:aaaaaaaa-1234-1234-1234-123456789abc -->' }]) {
+        const result = await inspect(fixture({ [`${root}/pulls/2/reviews?per_page=100&page=1`]: [{ ...written, ...change }] }).adapter, { approvalAttemptId: id });
+        assert.equal(result.approvedForAttempt, false);
+    }
+    const replaced = fixture({ [`${root}/pulls/2/reviews?per_page=100&page=1`]: [written, approval(2)] });
+    assert.equal((await inspect(replaced.adapter, { approvalAttemptId: id })).approvedForAttempt, false);
+    const invalid = fixture();
+    await assert.rejects(inspect(invalid.adapter, { approvalAttemptId: 'invalid' }), /Invalid approval attempt/);
+    await assert.rejects(invalid.adapter.approve(2, { headSha: HEAD, reviewer: 'reviewer', approvalAttemptId: 'invalid' }), /Invalid approval attempt/);
+    assert.equal(invalid.calls.length, 0);
+});

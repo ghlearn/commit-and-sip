@@ -11,6 +11,10 @@ export class GithubAdapterError extends Error {
 export { GithubAdapterError as GithubError };
 
 const fail = (message, code) => { throw new GithubAdapterError(message, code); };
+const approvalMarker = id => {
+    if (typeof id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id)) fail('Invalid approval attempt ID.');
+    return `<!-- commit-and-sip-approval:${id} -->`;
+};
 const sameLogin = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
 const number = (value) => Number.isSafeInteger(value) && value > 0 ? value : fail('Invalid GitHub issue or pull request number.');
 const sha = (value) => typeof value === 'string' && /^[a-f0-9]{40}$/i.test(value) ? value : fail('A full Git commit SHA is required.', 'invalid_sha');
@@ -108,8 +112,9 @@ export class GithubAdapter {
         if (!pr.merged && (pr.state !== 'open' || pr.mergeable !== true || ['dirty', 'unknown'].includes(pr.mergeable_state))) fail('The pull request is not confirmed mergeable. Try again after GitHub finishes checking it.');
     }
 
-    async inspectPullRequest(prNumber, { expectedHeadSha, reviewer, order, baseMenuPath = 'src/data/specials.json', requiredChecks = ['menu-validation'] }) {
+    async inspectPullRequest(prNumber, { expectedHeadSha, reviewer, order, baseMenuPath = 'src/data/specials.json', requiredChecks = ['menu-validation'], approvalAttemptId }) {
         number(prNumber);
+        const marker = approvalAttemptId === undefined ? null : approvalMarker(approvalAttemptId);
         login(reviewer);
         validateDrink(order);
         if (!/^[a-zA-Z0-9_./-]+$/.test(baseMenuPath) || baseMenuPath.startsWith('/') || baseMenuPath.split('/').some((part) => !part || part === '.' || part === '..')) fail('Invalid menu path.');
@@ -166,20 +171,22 @@ export class GithubAdapter {
         if (current.base.sha !== baseSha || current.merged !== pr.merged || current.merge_commit_sha !== pr.merge_commit_sha) fail('The pull request changed during verification. Inspect it again.', 'pr_changed');
         return {
             headSha, baseSha, author: pr.user.login, reviewer, approved: !!approved, merged, mergeCommitSha,
+            approvedForAttempt: !!(approved && marker && effective.body === marker),
             checksPassed: true, menu, summary: [pr.title, pr.body].filter((text) => typeof text === 'string' && text.length).join('\n\n'), files, checks,
         };
     }
 
-    async approve(prNumber, { headSha, reviewer }) {
+    async approve(prNumber, { headSha, reviewer, approvalAttemptId }) {
         number(prNumber); sha(headSha); login(reviewer);
+        const marker = approvalAttemptId === undefined ? null : approvalMarker(approvalAttemptId);
         const user = await this.request('GET', '/user');
         if (!sameLogin(user?.login, reviewer)) fail('The authenticated GitHub user must be the configured reviewer.');
         const path = `${this.root}/pulls/${prNumber}`;
         const pr = await this.request('GET', path);
         this.validatePr(pr, headSha, reviewer);
         if (pr.merged) fail('The pull request is already merged.');
-        const review = await this.request('POST', `${path}/reviews`, { commit_id: headSha, event: 'APPROVE' });
-        if (review?.state !== 'APPROVED' || review.commit_id !== headSha || !sameLogin(review.user?.login, reviewer)) fail('GitHub did not confirm the pinned approval.');
+        const review = await this.request('POST', `${path}/reviews`, { commit_id: headSha, event: 'APPROVE', ...(marker ? { body: marker } : {}) });
+        if (review?.state !== 'APPROVED' || review.commit_id !== headSha || !sameLogin(review.user?.login, reviewer) || (marker && review.body !== marker)) fail('GitHub did not confirm the pinned approval.');
         return review;
     }
 

@@ -93,7 +93,7 @@ export function rehearsalReview(run) {
 }
 
 export function publicRun(run, { nativeReviewAvailable = false } = {}) {
-  const { assignment, events, handle, commentId, ...publicState } = run;
+  const { assignment, approvalAttempt, events, handle, commentId, ...publicState } = run;
   // Only explicitly selected, non-credential state crosses the renderer boundary.
   return {
     ...publicState,

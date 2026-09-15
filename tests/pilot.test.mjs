@@ -36,7 +36,7 @@ async function fixture(t) {
     repo: config.repo,
     readIssue: async () => ({ number: 1, state: "open", title: "Review your order", body: "Assigned criteria" }),
     inspectPullRequest: async () => ({ ...facts }),
-    approve: async () => { facts.approved = true; }
+    approve: async () => { facts.approved = true; facts.approvedForAttempt = true; }
   };
   const viewEvidence = { read: async request => {
     assert.deepEqual(request, identity);
@@ -372,4 +372,81 @@ test("restoring evidence permits recovery without replacing an approved or serve
       }
     });
   }
+});
+
+
+for (const outage of ["post-write inspection", "lost write response", "before write"]) {
+  test(`approval reconciles the same durable attempt after ${outage} and restart`, async t => {
+    const f = await prepareRevalidation(t, "approve");
+    let remoteMarker = null;
+    let requests = 0;
+    let remoteWrites = 0;
+    let failOnce = true;
+    const unavailable = new Error("Simulated GitHub outage");
+    f.github.inspectPullRequest = async (number, options) => {
+      if (outage === "post-write inspection" && remoteMarker && failOnce) {
+        failOnce = false;
+        throw unavailable;
+      }
+      return { ...f.facts, approvedForAttempt: !!(f.facts.approved && remoteMarker === options.approvalAttemptId) };
+    };
+    f.github.approve = async (number, options) => {
+      requests++;
+      const saved = (await f.engine.store.read()).runs[identity.runId];
+      assert.equal(saved.phase, "reviewing");
+      assert.equal(saved.approvalAttempt.id, options.approvalAttemptId, "attempt must be on disk before GitHub is called");
+      assert.equal(saved.approvalAttempt.identity.headSha, headSha);
+      if (outage === "before write" && failOnce) { failOnce = false; throw unavailable; }
+      remoteWrites++;
+      remoteMarker = options.approvalAttemptId;
+      f.facts.approved = true;
+      if (outage === "lost write response" && failOnce) { failOnce = false; throw unavailable; }
+    };
+    await assert.rejects(f.engine.dispatch(identity.runId, "approve"), error => error === unavailable);
+    const pending = (await f.engine.store.read()).runs[identity.runId];
+    assert.equal(pending.phase, "reviewing");
+    assert.equal(pending.assessmentPassed, false);
+    assert.ok(pending.approvalAttempt.id);
+    const restarted = new RunEngine({ store: new RunStore(f.engine.store.directory), catalog, config, github: f.github, viewEvidence: f.viewEvidence });
+    assert.equal("approvalAttempt" in await restarted.get(identity.runId), false);
+    await restarted.dispatch(identity.runId, "sync_review");
+    await restarted.dispatch(identity.runId, "check_order", { price: order.price, serving: order.serving, scope: "one-drink" });
+    const approved = await restarted.dispatch(identity.runId, "approve");
+    assert.equal(approved.phase, "approved");
+    await restarted.dispatch(identity.runId, "approve");
+    assert.equal(remoteWrites, 1);
+    assert.equal(requests, outage === "before write" ? 2 : 1);
+    const saved = (await restarted.store.read()).runs[identity.runId];
+    assert.deepEqual(saved.approvalAttempt, pending.approvalAttempt);
+    assert.equal(saved.events.filter(event => event.type === "github_approval_verified").length, 1);
+  });
+}
+
+test("pre-existing or unrelated approvals cannot borrow a run's pending attempt", async t => {
+  const f = await prepareRevalidation(t, "approve");
+  f.facts.approved = true;
+  await assert.rejects(f.engine.dispatch(identity.runId, "approve"), { code: "assignment_used" });
+  assert.equal((await f.engine.store.read()).runs[identity.runId].approvalAttempt, undefined);
+  f.facts.approved = false;
+  await f.sync();
+  await f.checkpoint();
+  f.github.approve = async () => { throw new Error("Write not sent"); };
+  await assert.rejects(f.engine.dispatch(identity.runId, "approve"), /Write not sent/);
+  const pending = (await f.engine.store.read()).runs[identity.runId].approvalAttempt;
+  f.facts.approved = true;
+  f.facts.approvedForAttempt = false;
+  await f.sync();
+  await f.checkpoint();
+  await assert.rejects(f.engine.dispatch(identity.runId, "approve"), { code: "assignment_used" });
+  assert.deepEqual((await f.engine.store.read()).runs[identity.runId].approvalAttempt, pending);
+});
+
+
+test("saved approval attempts cannot be reused for a changed assignment", async t => {
+  const f = await prepareRevalidation(t, "approve");
+  f.github.approve = async () => { throw new Error("Write unavailable"); };
+  await assert.rejects(f.engine.dispatch(identity.runId, "approve"), /Write unavailable/);
+  await f.engine.store.transaction(data => { data.runs[identity.runId].approvalAttempt.identity.prNumber = 999; });
+  await assert.rejects(f.sync(), { code: "approval_attempt_conflict" });
+  assert.equal((await f.engine.get(identity.runId)).assessmentPassed, false);
 });

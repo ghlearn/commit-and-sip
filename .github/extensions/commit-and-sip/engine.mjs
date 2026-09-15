@@ -2,6 +2,8 @@ import {
   DomainError, requireValue, exactInput, validRunId, makeRun, publicRun,
   rehearsalIssue, rehearsalReview, generateHandle, liveAssignment
 } from "./domain.mjs";
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { checkpointFeedback } from "./content.mjs";
 
 export class RunEngine {
@@ -60,9 +62,14 @@ export class RunEngine {
   }
 
   async inspect(run) {
+    if (run.approvalAttempt) {
+      requireValue(isDeepStrictEqual(run.approvalAttempt.identity, { ...run.assignment, runId: run.runId }),
+        "approval_attempt_conflict", "The saved approval attempt belongs to a different assignment. Restore the original assignment.");
+    }
     const evidence = await this.github.inspectPullRequest(run.assignment.prNumber, {
       expectedHeadSha: run.assignment.headSha, reviewer: run.assignment.reviewer,
-      order: run.order, requiredChecks: this.config.requiredChecks
+      order: run.order, requiredChecks: this.config.requiredChecks,
+      ...(run.approvalAttempt ? { approvalAttemptId: run.approvalAttempt.id } : {})
     });
     requireValue(evidence.headSha === run.assignment.headSha && evidence.checksPassed,
       "evidence_invalid", "The assigned PR head and passing checks must be verified.");
@@ -148,11 +155,26 @@ export class RunEngine {
     });
   }
 
+  async prepareApproval(runId) {
+    return this.runTransaction(runId, async (run, data, verify) => {
+      if (run.mode !== "live" || ["approved", "served", "completed"].includes(run.phase)) return;
+      requireValue(run.phase === "reviewing" && run.assessmentPassed, "assessment_required", "Complete the acceptance-criteria checkpoint before approving.");
+      await verify(async () => {
+        await this.verifyViews(run);
+        const evidence = await this.inspect(run);
+        requireValue(!evidence.merged && (!evidence.approved || (run.approvalAttempt && evidence.approvedForAttempt === true)),
+          "assignment_used", "This PR has an approval from outside this run's learner decision. Ask staff for a fresh assignment.");
+        if (!run.approvalAttempt) run.approvalAttempt = { id: randomUUID(), identity: structuredClone({ ...run.assignment, runId }) };
+      });
+    });
+  }
+
   async dispatch(runId, action, input = {}) {
     requireValue(validRunId(runId), "invalid_run", "Invalid run ID.", 400);
     if (action === "refresh") { exactInput(input); return this.get(runId); }
     if (action === "sync_review") { exactInput(input); return this.syncReview(runId); }
     if (action === "complete") { exactInput(input); return this.complete(runId); }
+    if (action === "approve") { exactInput(input); await this.prepareApproval(runId); }
     const state = await this.runTransaction(runId, async (run, data, verify) => {
       const rehearsal = run.mode === "rehearsal";
       switch (action) {
@@ -218,12 +240,12 @@ export class RunEngine {
           if (!rehearsal) await verify(async () => {
             await this.verifyViews(run);
             let evidence = await this.inspect(run);
-            requireValue(!evidence.merged && !evidence.approved, "assignment_used", "This run's PR was approved before the learner decision. Ask staff for a fresh assignment.");
+            requireValue(!evidence.merged && (!evidence.approved || evidence.approvedForAttempt === true), "assignment_used", "This PR has an approval from outside this run's learner decision. Ask staff for a fresh assignment.");
             if (!evidence.approved) await this.github.approve(run.assignment.prNumber, {
-              headSha: run.assignment.headSha, reviewer: run.assignment.reviewer
+              headSha: run.assignment.headSha, reviewer: run.assignment.reviewer, approvalAttemptId: run.approvalAttempt.id
             });
             evidence = await this.inspect(run);
-            requireValue(evidence.approved, "approval_unverified", "Approval has not been verified on GitHub. Retry verification.");
+            requireValue(evidence.approved && evidence.approvedForAttempt === true, "approval_unverified", "Approval has not been verified on GitHub. Retry verification.");
           });
           requireValue(run.views.length === 3, "review_incomplete", "Inspect summary, changes, and checks before approving.");
           run.phase = "approved";

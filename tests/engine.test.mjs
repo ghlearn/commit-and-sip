@@ -135,7 +135,7 @@ test("live integration requires distinct verified approval and merged menu; pend
     github: {
       readIssue: async () => ({ number: 1, title: "Order Up", body: "Order instructions" }),
       inspectPullRequest: async () => ({
-        headSha, checksPassed: true, approved, merged,
+        headSha, checksPassed: true, approved, approvedForAttempt: approved, merged,
         mergeCommitSha: merged ? "b".repeat(40) : null,
         menu: [catalog.orders[0]], files: [], checks: [], summary: "Actual PR"
       }),
