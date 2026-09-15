@@ -53,16 +53,21 @@ test("both entrypoints share the light palette and artwork follows semantic colo
   assert.doesNotMatch(html, /cream cup|brass-colored saucer/);
 });
 
-test("local font roles keep readable guides, distinct cafe display type, and tabular results", async () => {
-  assert.match(css, /--body-font: var\(--font-sans, "Avenir Next"/);
-  assert.match(css, /--display-font: "Iowan Old Style"/);
+test("bundled Mona Sans covers reading and display roles while retaining monospace and tabular results", async () => {
+  assert.match(css, /--body-font: "Mona Sans",/);
+  assert.match(css, /--display-font: var\(--body-font\)/);
   assert.match(css, /--utility-font: var\(--font-mono/);
   assert.match(css, /h2 \{ font-family: var\(--body-font\); font-weight: 600;/);
   assert.match(css, /details p \{ max-width: 70ch; font-size: 15px;/);
   assert.match(css, /font-variant-numeric: tabular-nums/);
-  assert.doesNotMatch(css, /@import|@font-face|url\(https?:/);
+  assert.equal((css.match(/@font-face/g) ?? []).length, 2);
+  assert.equal((css.match(/font-weight: 200 900/g) ?? []).length, 2);
+  assert.equal((css.match(/font-display: swap/g) ?? []).length, 2);
+  assert.match(css, /font-optical-sizing: auto/);
+  assert.doesNotMatch(css, /@import|url\(["']?https?:/);
   for (const filename of ["index.html", "launcher.html"]) {
     const html = await readFile(new URL(filename, renderer), "utf8");
-    assert.doesNotMatch(html, /fonts\.googleapis|fonts\.gstatic|rel="preload"[^>]*as="font"/);
+    assert.doesNotMatch(html, /fonts\.googleapis|fonts\.gstatic/);
+    assert.match(html, /rel="preload" href="\/fonts\/MonaSansVF\.woff2" as="font" type="font\/woff2" crossorigin/);
   }
 });

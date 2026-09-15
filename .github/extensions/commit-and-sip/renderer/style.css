@@ -1,3 +1,18 @@
+@font-face {
+  font-family: "Mona Sans";
+  src: url("/fonts/MonaSansVF.woff2") format("woff2");
+  font-weight: 200 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Mona Sans";
+  src: url("/fonts/MonaSansVF-Italic.woff2") format("woff2");
+  font-weight: 200 900;
+  font-style: italic;
+  font-display: swap;
+}
+
 /* Keep the cafe green and white even when the surrounding host uses a dark theme. */
 :root {
   color-scheme: light;
@@ -22,14 +37,14 @@
   --board-highlight: #bde9cc;
   --cup-white: #ffffff;
   --cup-shade: #d0e7d8;
-  --body-font: var(--font-sans, "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  --body-font: "Mona Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --utility-font: var(--font-mono, "SFMono-Regular", Consolas, "Liberation Mono", monospace);
   --label-font: var(--body-font);
-  --display-font: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+  --display-font: var(--body-font);
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; background: var(--page); color: var(--text); font: 16px/1.6 var(--body-font); }
+body { margin: 0; background: var(--page); color: var(--text); font: 16px/1.6 var(--body-font); font-optical-sizing: auto; }
 button, a, summary { -webkit-tap-highlight-color: transparent; }
 button, .button-link { min-height: 46px; border: 1px solid var(--line); border-radius: 7px; padding: 10px 17px; font: 600 14px/1.5 var(--body-font); color: var(--text); background: var(--page); cursor: pointer; text-align: center; }
 button:hover:not(:disabled), .button-link:hover { border-color: var(--focus); }

@@ -9,7 +9,10 @@ const assets = new Map([
   ["/launcher.js", ["launcher.js", "text/javascript; charset=utf-8"]],
   ["/app.js", ["app.js", "text/javascript; charset=utf-8"]],
   ["/result-links.mjs", ["result-links.mjs", "text/javascript; charset=utf-8"]],
-  ["/style.css", ["style.css", "text/css; charset=utf-8"]]
+  ["/style.css", ["style.css", "text/css; charset=utf-8"]],
+  ["/fonts/MonaSansVF.woff2", ["fonts/MonaSansVF.woff2", "font/woff2"]],
+  ["/fonts/MonaSansVF-Italic.woff2", ["fonts/MonaSansVF-Italic.woff2", "font/woff2"]],
+  ["/fonts/OFL.txt", ["fonts/OFL.txt", "text/plain; charset=utf-8"]]
 ]);
 
 function authorized(request, ticket) {
@@ -39,7 +42,7 @@ export async function startServer({ engine, runId, reportError = () => {} }) {
     response.setHeader("Referrer-Policy", "no-referrer");
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader("Content-Security-Policy",
-      "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self'; base-uri 'none'; form-action 'none'");
+      "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: https:; connect-src 'self'; base-uri 'none'; form-action 'none'");
     const json = (status, value) => {
       response.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
       response.end(JSON.stringify(value));
