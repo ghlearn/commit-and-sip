@@ -1,3 +1,5 @@
+import { resultLinks } from "./result-links.mjs";
+
 (() => {
   "use strict";
 
@@ -44,21 +46,6 @@
     const amount = typeof value === "number" ? value
       : typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value.trim()) ? Number(value) : NaN;
     return Number.isFinite(amount) ? currency.format(amount) : String(value);
-  }
-
-  function publicUrl(value) {
-    if (typeof value !== "string" || !value.startsWith("https://")) return null;
-    try {
-      const url = new URL(value);
-      const host = url.hostname.toLowerCase();
-      if (url.username || url.password || url.port && url.port !== "443") return null;
-      if (!host.includes(".") || host.endsWith(".local") || host.endsWith(".localhost") ||
-          host.endsWith(".internal") || host === "github.com" || host.endsWith(".github.com") ||
-          /^[\d.]+$/.test(host) || host.includes(":")) return null;
-      return url.href;
-    } catch {
-      return null;
-    }
   }
 
   function fail(error, fromAction = false) {
@@ -234,14 +221,13 @@
     const commentary = judge?.source === "copilot" && judge.moderated === true && typeof judge.text === "string"
       ? judge.text.trim() : "";
     text("judge", commentary ? `Copilot: ${commentary}` : "Copilot commentary not configured");
-    const url = rehearsal ? null : publicUrl(result.leaderboardUrl);
+    const { leaderboardUrl: url, qrImageUrl: qr } = resultLinks(state);
     $("leaderboard-link").hidden = !url;
     if (url) $("leaderboard-link").href = url;
     else $("leaderboard-link").removeAttribute("href");
     text("leaderboard-note", rehearsal
       ? "Rank is a local rehearsal snapshot, not a live event standing. Equal scores share a rank. Rehearsal QR not configured; no public leaderboard link."
       : url ? "Rank is a completion-time snapshot; equal scores share a rank. Public leaderboard opens in a new tab." : "A verified public leaderboard link is not available. Ask the booth host.");
-    const qr = url ? publicUrl(result.qrImageUrl) : null;
     $("leaderboard-qr").hidden = !qr;
     if (qr && $("leaderboard-qr").getAttribute("src") !== qr) {
       $("qr-error").hidden = true;

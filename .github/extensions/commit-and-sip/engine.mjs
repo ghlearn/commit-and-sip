@@ -188,6 +188,8 @@ export class RunEngine {
         }
         case "hint":
           exactInput(input);
+          requireValue(["order", "reviewing", "approved"].includes(run.phase), "wrong_phase",
+            "Hints are available before serving. Your saved menu and completion result are unchanged.");
           run.hintCount++;
           run.statusMessage = `Compare the added item with the issue: $${run.order.price.toFixed(2)}, ${run.order.serving}, and only one new drink. Hints never reduce your score.`;
           break;

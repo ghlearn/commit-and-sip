@@ -84,6 +84,8 @@ Receipt validation permits only the client's original curated phrase or its cano
 
 The loopback server is an implementation detail, not public hosting. It uses a per-panel connection ticket, same-origin/host checks, bounded JSON actions, and a fixed run binding. Do not share its URL or ticket. None of those controls establishes native review provenance.
 
+Hints are limited in the engine to order/reviewing/approved phases, not just disabled in the UI; post-serving calls cannot alter saved completion copy or hint counts.
+
 Rehearsal has no remote GitHub writes or event submissions. Its persistent local results must remain segregated from live results. All correct completions score 1,000; hints and timing are not penalty inputs.
 
 The live adapter must validate the exact changed menu and head, required checks, reviewer identity and approval, and merged menu. No secrets belong in renderer code or committed configuration. Public anonymity does not eliminate the need to protect private run/issue/reviewer mappings.
@@ -145,3 +147,5 @@ This verifies the local renderer and engine, not the Copilot App extension lifec
 6. Recorded pilots against the targets in the preserved outline; targets are not measured outcomes.
 
 The [approved outline](exercise-outline.md) remains unchanged. Its source SHA-256 is `8a9090ed93894edfb6e17fc322dde0e1a8ee05cfcd16bfe125edba0df02443b6`. Implementation clarifications belong in current documentation, not edits to that preserved source.
+
+The renderer uses `renderer/result-links.mjs` for completed live result links, trusting the server-validated host projection (including public IP literals) rather than reimplementing public-address policy. Safe HTTPS syntax remains checked in the browser; network/QR-origin validation remains server-side.

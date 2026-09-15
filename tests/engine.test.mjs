@@ -168,3 +168,29 @@ test("live integration requires distinct verified approval and merged menu; pend
   assert.equal(submissions, 2);
   assert.equal((await store.read()).results.length, 0, "live result never enters local rehearsal rankings");
 });
+
+
+test("hints are limited to pre-serving phases through the engine, including SDK callers", async t => {
+  const { engine, store } = await fixture(t);
+  await engine.open({ runId: "hint-run", mode: "rehearsal" });
+  for (const mode of ["rehearsal", "live"]) {
+    for (const phase of ["order", "reviewing", "approved", "served", "completed"]) {
+      await store.transaction(data => {
+        Object.assign(data.runs["hint-run"], { mode, phase, hintCount: 2,
+          statusMessage: "Saved phase status", menu: phase === "served" || phase === "completed" ? [engine.catalog.orders[0]] : [],
+          result: phase === "completed" ? { handle: "brisk-brews-coffee", score: 1000 } : null });
+      });
+      const before = await store.read();
+      if (["served", "completed"].includes(phase)) {
+        await assert.rejects(engine.dispatch("hint-run", "hint"), { code: "wrong_phase" });
+        assert.deepEqual(await store.read(), before, `${mode} ${phase} must not mutate saved state`);
+        const restarted = new RunEngine({ store: new RunStore(store.directory), catalog: engine.catalog });
+        assert.equal((await restarted.dispatch("hint-run", "refresh")).statusMessage, "Saved phase status");
+      } else {
+        const state = await engine.dispatch("hint-run", "hint");
+        assert.equal(state.hintCount, 3);
+        assert.match(state.statusMessage, /Hints never reduce your score/);
+      }
+    }
+  }
+});

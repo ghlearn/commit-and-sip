@@ -51,6 +51,8 @@ Selection binds the running panel, not the persisted exercise. Iframe reloads an
 | `refresh` | `{}` | Read persisted state; does not create review evidence |
 | `sync_review` | `{}` | In live reviewing only, read an injected trusted native-view provider and independently recheck the assigned PR revision |
 
+Hints are accepted only in `order`, `reviewing`, and `approved`, matching the renderer controls. HTTP and SDK callers receive `wrong_phase` after serving or completion, with no change to status, hint count, menu, or result.
+
 Checkpoint enums: `serving` is `hot` or `cold`; `scope` is `one-drink` or `unrelated-edits`. Unexpected input properties are rejected. Serving initiates completion, so a completion-service failure can follow a successful, durable menu update.
 
 `completionPending` means finalization remains unfinished, not that a worker is currently running. A served run must offer **Retry result** after an error or reload; the renderer disables actions only during its active request, and the server serializes concurrent attempts.
@@ -179,3 +181,8 @@ After live serving verifies the actual merge, the engine persists `servedCommitS
 - Generate `.github/images/leaderboard-qr.png` only after URL approval, using `npm run qr -- <configured HTTPS URL>`. Publish it at the approved public asset location without credential-bearing URLs.
 - Copilot commentary is unavailable by default. Enable it only through a real attributed, moderated, trusted judge with reviewed configuration; never fabricate model output. Commentary does not change deterministic score/rank.
 - Complete branding, authentic screenshots, privacy/retention decisions, and pilot acceptance before claiming production readiness.
+
+
+## Completion URL rendering
+
+The completion service remains the authority for public-address/DNS validation, HTTPS reachability, and approved QR origins. Its normalized result URLs may use public IPv4 or IPv6 literals as well as DNS names. The browser's `result-links.mjs` presents those URLs only for completed live runs; it checks safe HTTPS syntax but does not impose a second hostname/IP policy that could hide accepted results. Private/reserved addresses remain rejected by the existing server validator. Rehearsal and pending results never expose event links. The module is served from the loopback asset allowlist and loaded by the module entrypoint.
