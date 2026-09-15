@@ -190,7 +190,7 @@ export class RunEngine {
           requireValue(run.views.length === 3, "review_incomplete", "Inspect summary, changes, and checks before approving.");
           if (!rehearsal) {
             let evidence = await this.inspect(run);
-            requireValue(!evidence.merged, "already_merged", "This run's PR was merged before the approval step. Ask staff for a fresh assignment.");
+requireValue(!evidence.merged && !evidence.approved, "assignment_used", "This run's PR was approved before the learner decision. Ask staff for a fresh assignment.");
             if (!evidence.approved) await this.github.approve(run.assignment.prNumber, {
               headSha: run.assignment.headSha, reviewer: run.assignment.reviewer
             });
