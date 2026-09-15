@@ -100,3 +100,16 @@ test("checkpoint feedback identifies one mismatch at a time for every catalog or
     assert.equal(checkpointFeedback(order, answers), null);
   }
 });
+
+test("live guide remains one Skills step and explains native evidence and pending app results", () => {
+  const run = makeRun({ runId: "live-guide", mode: "live", order: orders[0] });
+  const content = exerciseContent(run);
+  assert.equal(content.title, "Step 1: Review and serve your order");
+  const copy = content.sections.flatMap(section => section.paragraphs).join(" ");
+  assert.match(copy, /Refresh verified review/);
+  assert.match(copy, /separate from Refresh progress/);
+  assert.match(copy, /served drink is not proof/);
+  assert.match(copy, /authentic native PR views/);
+  assert.doesNotMatch(copy, /Choose Start rehearsal order|Apply rehearsal menu/);
+  assert.equal(content.completion, null);
+});

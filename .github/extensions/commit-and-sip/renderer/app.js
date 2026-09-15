@@ -89,6 +89,7 @@
       const action = button.dataset.action;
       button.disabled = busy || !ticket || !state ||
         (stale && action !== "refresh") ||
+        (action === "sync_review" && (state.mode !== "live" || state.phase !== "reviewing" || !state.verification?.nativeReviewAvailable)) ||
         (action === "view" && (state.mode !== "rehearsal" || state.phase !== "reviewing")) ||
         (action === "hint" && !["order", "reviewing", "approved"].includes(state.phase));
     });
@@ -105,7 +106,7 @@
     text("exercise-progress", state.phase === "completed"
       ? "Step 1 of 1 complete. Your result is below; there is no next learner step."
       : `Step 1 of 1: ${labels[state.phase]}. Read, review, approve, and serve are activities within this step.`);
-    $("exercise-guide").hidden = state.mode !== "rehearsal";
+    $("exercise-guide").hidden = false;
     const signature = JSON.stringify(state.exercise.sections);
     if (guideSignature !== signature) {
       const sections = state.exercise.sections.map(({ heading, paragraphs }) => {
@@ -178,9 +179,16 @@
     });
     text("view-count", `${surfaces.filter((surface) => state.views.includes(surface)).length} / 3`);
     $("view-count").setAttribute("aria-label", `${surfaces.filter((surface) => state.views.includes(surface)).length} of 3 review sections opened`);
+    $("sync-review-action").hidden = rehearsal;
+    $("verified-review-status").hidden = rehearsal;
+    text("verified-review-status", state.verification?.nativeReviewAvailable
+      ? state.verification.syncedAt
+        ? `Trusted review evidence checked at ${state.verification.syncedAt}. Refresh again after visiting another native section.`
+        : "Native review reader connected. Open the assigned PR sections in the App, then refresh verified review."
+      : "Native review integration is unavailable. Staff must connect the trusted reader; approval remains locked.");
     text("review-help", rehearsal
       ? "Review all three sections, then check the order details before approving. These are simulated PR details, not native App screenshots."
-      : "Review in the native Copilot App. Opening details here does not certify a live review; native observation is unresolved.");
+      : "Review in the native Copilot App, then use Refresh verified review. Opening these copied details or refreshing saved progress does not certify a live review.");
     $("order-check").hidden = state.phase === "order";
     const reviewed = surfaces.every((surface) => state.views.includes(surface));
     if (state.assessmentPassed === true) {
@@ -194,6 +202,21 @@
       : !reviewed ? "Review all three sections to unlock this factual check."
         : state.assessmentAttempts > 0 ? "Order details have not passed. Review the order and try again."
           : "Order details not checked yet."} Attempts: ${state.assessmentAttempts ?? 0}.`);
+  }
+
+  function paintAppResult() {
+    $("app-result").hidden = state.mode !== "live";
+    const served = ["served", "completed"].includes(state.phase);
+    text("app-result-status", state.phase === "completed" ? "Served — event result recorded"
+      : served ? "Served — event result pending"
+        : state.phase === "approved" ? "Approved — waiting for an authorized merge"
+          : "Not served — review and approval required");
+    text("app-result-detail", served
+      ? `${state.order.name} is on the verified menu below. ${state.phase === "completed"
+        ? "The accepted exercise result is recorded."
+        : "No event score or issue update is confirmed yet. Your menu is saved; use Retry result after staff restore finalization."}`
+      : "Approval alone does not change the menu. Verify the merged menu after the separate authorized merge.");
+    text("served-revision", served && state.servedCommitSha ? `Verified merge revision: ${state.servedCommitSha}` : "");
   }
 
   function paintResult() {
@@ -248,6 +271,11 @@
     text("issue-title", state.issue?.title || (rehearsal ? `Order: ${state.order?.name || "pending"}` : "Assigned issue not available yet."));
     text("issue-body", state.issue?.body || (rehearsal ? `Prepare the assigned ${state.order?.name || "drink"}. Read the order requirements, inspect the summary, changes, and checks, then approve and apply the rehearsal menu.` : "Ask booth host to open assigned issue/PR in Copilot App"));
     $("native-guidance").hidden = rehearsal;
+    $("review-target").hidden = rehearsal;
+    const target = state.reviewTarget;
+    text("review-target", target
+      ? `Assigned issue: ${target.repo}#${target.issueNumber} · Pull request: ${target.repo}#${target.prNumber} · Revision: ${target.headSha}`
+      : "Assigned review reference unavailable. Ask staff to check this run.");
     const blockers = state.blockers.map((blocker) => element("li", blocker));
     $("blockers").replaceChildren(...blockers);
     $("blocker-region").hidden = !blockers.length;
@@ -267,6 +295,7 @@
     paintExercise();
     paintMenu();
     paintReview();
+    paintAppResult();
     paintResult();
   }
 

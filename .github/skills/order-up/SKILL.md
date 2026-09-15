@@ -33,7 +33,7 @@ Rehearsal uses local fixtures and persistent local results. It performs no real 
 
 - `start({})`: show the assigned issue/order.
 - Ask the learner to inspect the summary, changed files, and checks. Rehearsal uses `view({"surface":"summary"})`, then `changes`, then `checks`.
-- Live mode must use authentic native App surfaces and trusted server-side view evidence. Canvas clicks cannot certify live views. If the integration is unavailable, explain the blocker and hand off to staff; do not fabricate evidence.
+- Live mode must use authentic native App surfaces and trusted server-side view evidence. After those views are opened, use `sync_review({})` / **Refresh verified review** to read the trusted provider and current GitHub checks; never send a surfaces/evidence payload. Normal `refresh({})` only reads saved state. Partial progress does not unlock approval; failed verification clears progress. Canvas clicks cannot certify live views. If the integration is unavailable, explain the blocker and hand off to staff; do not fabricate evidence.
 - Point to authentic captures only after they exist. See [the image checklist](../../images/README.md). Do not describe planned images as already supplied.
 - Ask the learner to compare name, price, serving style, artwork, description, and one-drink scope with the actual diff.
 - Offer `hint({})` freely. Hints, speed, retries, and accessibility assistance never lower the score.
@@ -54,7 +54,7 @@ Serving initiates completion. The handle is generated only after the menu succee
 
 If finalization fails, preserve the same run and handle candidate/reservation; ask staff to restore service and invoke `complete({})`. The authority may resolve a global collision by adding a deterministic eight-hex suffix to the same curated phrase; the client persists that canonical handle only from a verified authenticated receipt. This is not permission to invent or manually change a handle. Use `refresh({})` to read saved state, not to invent new evidence. Do not duplicate results/comments, regenerate phrases, or reset a served run to conceal a failure.
 
-In live mode, return to the assigned exercise issue only when the final update is confirmed. It should contain the accepted handle, score/rank, approved leaderboard link, and real issue-renderable QR. No public destination is currently deployed; do not invent a URL or display a placeholder as a production QR.
+In live mode, point to **Your app result** and **House menu** after verified serving. **Served — event result pending** means the app menu is saved but no score, final issue update, or Skills completion is confirmed. Use the live step guide in the canvas; do not label this pending state complete. Return to the assigned exercise issue only when the final update is confirmed. It should contain the accepted handle, score/rank, approved leaderboard link, and real issue-renderable QR. No public destination is currently deployed; do not invent a URL or display a placeholder as a production QR.
 
 Copilot commentary is unavailable unless a real attributed, moderated, trusted judge is configured. Never impersonate a judge or invent model output.
 

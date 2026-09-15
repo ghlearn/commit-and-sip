@@ -1,12 +1,16 @@
 import {
   DomainError, requireValue, exactInput, validRunId, makeRun, publicRun,
-  rehearsalIssue, rehearsalReview, generateHandle
+  rehearsalIssue, rehearsalReview, generateHandle, liveAssignment
 } from "./domain.mjs";
 import { checkpointFeedback } from "./content.mjs";
 
 export class RunEngine {
   constructor({ store, catalog, config = {}, github = null, completion = null, viewEvidence = null }) {
     Object.assign(this, { store, catalog, config, github, completion, viewEvidence });
+  }
+
+  present(run) {
+    return publicRun(run, { nativeReviewAvailable: run.mode === "live" && typeof this.viewEvidence?.read === "function" });
   }
 
   async open(input, { requireNew = false } = {}) {
@@ -25,17 +29,12 @@ export class RunEngine {
             ["issueNumber", "prNumber", "headSha", "reviewer", "orderId"].every(key => assigned[key] === run.assignment[key]),
           "assignment_changed", "This saved live run belongs to a different repository or assignment. Restore its configuration or create a new run.");
         }
-        return publicRun(run);
+        return this.present(run);
       }
-      const assignment = input.mode === "live" ? this.config.runs?.[input.runId] : null;
+      const assignment = input.mode === "live" ? liveAssignment(this.config, this.catalog, input.runId) : null;
       if (input.mode === "live") {
         requireValue(this.config.mode === "live" && assignment && this.github, "live_unconfigured",
           "Staff must configure the live repository and assign this run's issue, PR, reviewer and head SHA.");
-        requireValue(Number.isSafeInteger(assignment.issueNumber) && assignment.issueNumber > 0 &&
-          Number.isSafeInteger(assignment.prNumber) && assignment.prNumber > 0 &&
-          /^[a-f0-9]{40}$/.test(assignment.headSha) &&
-          typeof assignment.reviewer === "string" && /^[a-zA-Z0-9-]{1,39}$/.test(assignment.reviewer),
-        "invalid_assignment", "The live assignment requires valid issue/PR numbers, reviewer, and exact head SHA.");
         requireValue(!input.orderId || input.orderId === assignment.orderId, "order_conflict", "The order must match the staff assignment.");
         requireValue(!Object.values(data.runs).some(existing => existing.mode === "live" &&
           existing.assignment?.repo === this.config.repo &&
@@ -49,7 +48,7 @@ export class RunEngine {
         assignment: assignment ? { ...assignment, repo: this.config.repo } : null
       });
       data.runs[input.runId] = run;
-      return publicRun(run);
+      return this.present(run);
     });
   }
 
@@ -57,7 +56,7 @@ export class RunEngine {
     const data = await this.store.read();
     const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
     requireValue(run, "run_missing", "Open this run before continuing.", 404);
-    return publicRun(run);
+    return this.present(run);
   }
 
   async inspect(run) {
@@ -70,25 +69,66 @@ export class RunEngine {
     return evidence;
   }
 
-  async verifyViews(run) {
-    requireValue(this.viewEvidence, "native_views_unavailable",
+  async readViews(run) {
+    requireValue(typeof this.viewEvidence?.read === "function", "native_views_unavailable",
       "Native App view evidence is not configured. Canvas clicks cannot certify live PR review.");
     const evidence = await this.viewEvidence.read({
-      runId: run.runId, repo: this.config.repo, prNumber: run.assignment.prNumber,
+      runId: run.runId, repo: run.assignment.repo, prNumber: run.assignment.prNumber,
       headSha: run.assignment.headSha
     });
+    const surfaces = ["summary", "changes", "checks"];
     requireValue(evidence?.runId === run.runId && evidence.headSha === run.assignment.headSha &&
-      evidence.prNumber === run.assignment.prNumber && evidence.repo === this.config.repo &&
-      Array.isArray(evidence.surfaces) &&
-      ["summary", "changes", "checks"].every(surface => evidence.surfaces.includes(surface)),
-    "native_views_incomplete", "Open the assigned PR summary, changed files and checks in the App before approving.");
-    run.views = ["summary", "changes", "checks"];
-    run.evidenceHeadSha = evidence.headSha;
+      evidence.prNumber === run.assignment.prNumber && evidence.repo === run.assignment.repo &&
+      Array.isArray(evidence.surfaces) && evidence.surfaces.every(surface => surfaces.includes(surface)) &&
+      new Set(evidence.surfaces).size === evidence.surfaces.length,
+    "native_views_invalid", "Review evidence does not match this run, repository, PR, and revision. Ask staff to verify the assignment.");
+    return surfaces.filter(surface => evidence.surfaces.includes(surface));
+  }
+
+  async verifyViews(run) {
+    const views = await this.readViews(run);
+    requireValue(views.length === 3, "native_views_incomplete", "Open the assigned PR summary, changed files and checks in the App before approving.");
+    run.views = views;
+    run.evidenceHeadSha = run.assignment.headSha;
+  }
+
+  async syncReview(runId) {
+    let failure;
+    const state = await this.store.transaction(async data => {
+      const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
+      requireValue(run?.mode === "live" && run.phase === "reviewing", "wrong_phase", "Refresh verified review while reviewing a live assignment.");
+      try {
+        const views = await this.readViews(run);
+        const evidence = await this.inspect(run);
+        requireValue(!evidence.merged, "already_merged", "This PR was merged before this run's approval. Ask staff for a fresh assignment.");
+        run.views = views;
+        run.evidenceHeadSha = views.length === 3 ? run.assignment.headSha : null;
+        if (views.length !== 3) run.assessmentPassed = false;
+        run.review = { summary: evidence.summary, files: evidence.files, checks: evidence.checks, headSha: evidence.headSha };
+        run.reviewSyncedAt = new Date().toISOString();
+        run.statusMessage = views.length === 3
+          ? "All three native PR views and current checks verified. Compare the order and complete the factual checkpoint."
+          : `${views.length} of 3 native PR views verified. Inspect the remaining sections in the App, then refresh verified review.`;
+      } catch (error) {
+        // Persist revocation before surfacing failure so stale evidence cannot leave the UI unlocked.
+        run.views = [];
+        run.evidenceHeadSha = null;
+        run.assessmentPassed = false;
+        run.reviewSyncedAt = null;
+        run.review = null;
+        run.statusMessage = "Review verification failed. Approval is locked; restore the trusted evidence and refresh verified review.";
+        failure = error;
+      }
+      return this.present(run);
+    });
+    if (failure) throw failure;
+    return state;
   }
 
   async dispatch(runId, action, input = {}) {
     requireValue(validRunId(runId), "invalid_run", "Invalid run ID.", 400);
     if (action === "refresh") { exactInput(input); return this.get(runId); }
+    if (action === "sync_review") { exactInput(input); return this.syncReview(runId); }
     if (action === "complete") { exactInput(input); return this.complete(runId); }
     const state = await this.store.transaction(async data => {
       const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
@@ -172,6 +212,7 @@ export class RunEngine {
             requireValue(evidence.approved && evidence.merged && evidence.mergeCommitSha,
               "merge_pending", "Approval is not a merge. Wait for the authorized merge, then verify the merged menu again.");
             run.menu = evidence.menu;
+            run.servedCommitSha = evidence.mergeCommitSha;
           } else run.menu = [run.order];
           run.phase = "served";
           run.completionPending = true;
@@ -181,7 +222,7 @@ export class RunEngine {
         }
         default: throw new DomainError("unknown_action", "This canvas action is not supported.", 400);
       }
-      return publicRun(run);
+      return this.present(run);
     });
     if (state.phase === "served") return this.complete(runId);
     return state;
@@ -198,7 +239,7 @@ export class RunEngine {
     });
     return this.store.transaction(async data => {
       const run = data.runs[runId];
-      if (run.phase === "completed") return publicRun(run);
+      if (run.phase === "completed") return this.present(run);
       if (run.mode === "rehearsal") {
         let result = data.results.find(item => item.runId === runId);
         if (!result) {
@@ -224,7 +265,7 @@ export class RunEngine {
       run.completionPending = false;
       run.statusMessage = run.mode === "rehearsal" ? "Rehearsal complete. No real PR, issue comment or event leaderboard was changed." :
         "Completed. Your final result is recorded in the exercise issue.";
-      return publicRun(run);
+      return this.present(run);
     });
   }
 }

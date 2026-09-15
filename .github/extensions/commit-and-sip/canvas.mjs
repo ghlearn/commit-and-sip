@@ -20,7 +20,7 @@ const actionSchemas = {
       }
     ]
   },
-  start: empty, refresh: empty, hint: empty, approve: empty, serve: empty, complete: empty,
+  start: empty, refresh: empty, sync_review: empty, hint: empty, approve: empty, serve: empty, complete: empty,
   view: { type: "object", properties: { surface: { enum: ["summary", "changes", "checks"] } }, required: ["surface"], additionalProperties: false },
   check_order: {
     type: "object", properties: {
@@ -31,6 +31,7 @@ const actionSchemas = {
 };
 const descriptions = {
   select_run: "Explicitly create or resume a rehearsal from the setup screen; never resets a run or falls back from live.",
+  sync_review: "Read trusted native PR view evidence and independently recheck the assigned revision; cannot accept client-supplied evidence.",
   start: "Load the assigned issue and PR (explicit rehearsal fixtures or configured live GitHub data).",
   refresh: "Read saved run progress without changing review evidence.",
   hint: "Show acceptance-criteria guidance; hints have no score penalty.",

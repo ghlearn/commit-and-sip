@@ -32,13 +32,15 @@ export function renderTemplate(template, values) {
   return rendered.trim();
 }
 
-const [step, orderTemplate, feedbackTemplate, completionTemplate] = await Promise.all([
+const [step, orderTemplate, feedbackTemplate, completionTemplate, liveStep] = await Promise.all([
   "../../steps/1-review-and-serve.md",
   "../../markdown-templates/rehearsal-order.md",
   "../../markdown-templates/order-feedback.md",
-  "../../markdown-templates/step-completion.md"
+  "../../markdown-templates/step-completion.md",
+  "../../markdown-templates/live-review-guide.md"
 ].map(path => readFile(new URL(path, import.meta.url), "utf8")));
 const guide = parseStep(step);
+const liveGuide = parseStep(liveStep);
 
 export function renderRehearsalOrder(order) {
   if (typeof order.price !== "number" || !Number.isFinite(order.price) || order.price < 0 || order.price > 100) {
@@ -62,7 +64,7 @@ export function checkpointFeedback(order, answers) {
 
 export function exerciseContent(run) {
   return {
-    ...guide,
+    ...(run.mode === "live" ? liveGuide : guide),
     completion: run.phase === "completed"
       ? renderTemplate(completionTemplate, { name: run.order.name }) : null
   };

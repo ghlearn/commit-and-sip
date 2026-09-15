@@ -49,6 +49,7 @@ Selection binds the running panel, not the persisted exercise. Iframe reloads an
 | `serve` | `{}` | Simulate rehearsal menu or verify authorized live merge |
 | `complete` | `{}` | Retry finalization after serving; retain identity/result |
 | `refresh` | `{}` | Read persisted state; does not create review evidence |
+| `sync_review` | `{}` | In live reviewing only, read an injected trusted native-view provider and independently recheck the assigned PR revision |
 
 Checkpoint enums: `serving` is `hot` or `cold`; `scope` is `one-drink` or `unrelated-edits`. Unexpected input properties are rejected. Serving initiates completion, so a completion-service failure can follow a successful, durable menu update.
 
@@ -90,6 +91,12 @@ The production provider still needs a documented native host integration that:
 4. Rejects replay, cross-run/session/device substitution, and invented surface names.
 5. Invalidates evidence when the PR head changes; staff then create a fresh assigned run.
 6. Supplies verifiable signed/authorized facts to the completion service, not merely the engine's projected `surfaces` array.
+
+The explicit `sync_review` action closes the UI dependency between native views and the factual checkpoint. It accepts no evidence payload. An injected trusted provider may return a partial, duplicate-free subset of `summary`, `changes`, and `checks` for the exact identity; synchronization projects that progress after independent GitHub verification. Missing/invalid evidence, failed checks, stale head, or a premature merge clears saved views, checkpoint success, copied review data, and synchronization time before surfacing the error. Losing a required surface also resets checkpoint success. `refresh` and normal polling remain read-only; they do not contact the provider or GitHub.
+
+The public run adds a non-reviewer assignment projection, `reviewTarget: {repo, issueNumber, prNumber, headSha}`, and `verification: {nativeReviewAvailable, syncedAt}`. Provider availability only means a server-injected `read` function exists; it is not native provenance or deployment certification. With no reader, the canvas explains the blocker and disables **Refresh verified review**. Approval and serving still independently reverify all three surfaces and GitHub facts.
+
+The existing extension does not inject a production provider. Inspection of the installed SDK's `canvas.d.ts`, `generated/rpc.d.ts`, and `generated/session-events.d.ts` found canvas lifecycle types and a `CanvasHostContextCapabilities.canvases` rendering flag, but no documented native PR-navigation or view-observation interface. This is a gap in the inspected integration surface, not proof that no future or separate host API exists. A host-owned contract must be supplied before the live pilot can run; no guessed RPC, session text, agent tool activity, or canvas-open event is used as a substitute.
 
 The current engine checks the trusted provider's identity projection and surface coverage; that does **not** implement host authentication, event provenance, or replay defenses. Those are requirements on the missing integration. Do not wire a permissive stub into live mode to make the flow appear complete.
 
@@ -154,6 +161,14 @@ The deployed remote service must independently establish:
 Handle candidates are generated only after the menu succeeds and persisted before any network submission. The authority reserves the canonical handle before commenting; the authenticated finalized receipt lets the client persist that canonical value. Recovery retains the run, candidate/reservation identity, served/completed state, and previously accepted result/comment. An unknown remote outcome must be reconciled using the same run ID, not posted under a fresh key.
 
 Public output contains generated handles and approved score/rank information, not attendee names, GitHub usernames, booth account identifiers, credentials, or free-form attendee text. Private operational run/issue mappings need an approved access and retention policy before live collection.
+
+## Staff preflight and app-result projection
+
+`services/pilot.mjs` reuses shared `liveAssignment` validation and the real `GithubAdapter` to inspect a prepared issue/PR using GET requests only. `scripts/preflight-live.mjs` exposes it as `npm run preflight:live -- --run RUN_ID [--config PATH]`. A verified report contains assignment references and catalog criteria for staff comparison, not reviewer identity or tokens. It always sets `liveReady: false`; the command exits 2 after GitHub verification and 1 on invalid input or failed verification. It cannot prove native navigation, learner understanding, issue-copy parity, reviewer authentication, merge permission, or completion hosting. It does not change the ledger or call approve/merge/comment APIs.
+
+Live learner instructions are rendered from `.github/markdown-templates/live-review-guide.md`, with the same single-step parser as rehearsal. The canvas shows the PR/issue references as text; there are no invented App deep links or automatic GitHub.com navigation. Until a documented native navigation API exists, staff must open the actual PR in the App.
+
+After live serving verifies the actual merge, the engine persists `servedCommitSha` with the menu. The canvas's **Your app result** displays serving independently of event finalization. `phase: served` still has no accepted score/rank or Step 1 completion summary; the menu remains visible with pending-result guidance. `complete` uses the same authority endpoint and identity as before. Existing runs lacking `servedCommitSha` remain readable without inventing a historical revision.
 
 ## Unresolved: host navigation, hosting, and judging
 

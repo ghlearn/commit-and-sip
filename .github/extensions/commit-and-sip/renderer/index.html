@@ -65,6 +65,7 @@
               <p id="issue-title">Waiting for the assigned issue.</p>
               <pre id="issue-body"></pre>
             </section>
+            <p id="review-target" class="mono-caption" hidden></p>
             <p id="native-guidance" class="native-guidance" hidden>Ask booth host to open assigned issue/PR in Copilot App</p>
           </div>
           <div class="ticket-bottom"><span>Made with a little care &amp; a code review</span><small id="run-id">Run pending</small></div>
@@ -75,6 +76,8 @@
           <ol class="steps" aria-label="Activities within Step 1">
             <li data-phase="order">Order</li><li data-phase="reviewing">Review</li><li data-phase="approved">Approve</li><li data-phase="served">Serve</li>
           </ol>
+          <p id="verified-review-status" class="status-line" role="status" aria-live="polite" hidden></p>
+          <button id="sync-review-action" type="button" data-action="sync_review" hidden>Refresh verified review</button>
           <p id="review-help">Start your order to review the summary, changed files, and checks.</p>
           <div id="review-surfaces" class="review-surfaces" hidden>
             <section class="review-surface" aria-labelledby="summary-heading">
@@ -113,6 +116,13 @@
           <p id="action-help" class="muted">Approval needs all three review sections plus a passed order-details checkpoint.</p>
           <p id="hint-count" class="mono-caption">Hints used: 0</p>
           <p class="scoring-note">Hints are free. Complete the activity to earn 1,000 points. Equal scores share a rank.</p>
+        </section>
+
+        <section id="app-result" class="result" aria-labelledby="app-result-heading" hidden>
+          <h2 id="app-result-heading">Your app result</h2>
+          <p id="app-result-status" role="status" aria-live="polite"></p>
+          <p id="app-result-detail"></p>
+          <p id="served-revision" class="mono-caption"></p>
         </section>
 
         <section id="result" class="result" aria-labelledby="result-heading" hidden tabindex="-1">

@@ -52,3 +52,17 @@ test("both entrypoints share the light palette and artwork follows semantic colo
   assert.match(html, /stroke="var\(--board-highlight\)"/);
   assert.doesNotMatch(html, /cream cup|brass-colored saucer/);
 });
+
+test("local font roles keep readable guides, distinct cafe display type, and tabular results", async () => {
+  assert.match(css, /--body-font: var\(--font-sans, "Avenir Next"/);
+  assert.match(css, /--display-font: "Iowan Old Style"/);
+  assert.match(css, /--utility-font: var\(--font-mono/);
+  assert.match(css, /h2 \{ font-family: var\(--body-font\); font-weight: 600;/);
+  assert.match(css, /details p \{ max-width: 70ch; font-size: 15px;/);
+  assert.match(css, /font-variant-numeric: tabular-nums/);
+  assert.doesNotMatch(css, /@import|@font-face|url\(https?:/);
+  for (const filename of ["index.html", "launcher.html"]) {
+    const html = await readFile(new URL(filename, renderer), "utf8");
+    assert.doesNotMatch(html, /fonts\.googleapis|fonts\.gstatic|rel="preload"[^>]*as="font"/);
+  }
+});

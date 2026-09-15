@@ -24,6 +24,22 @@ Live use is blocked pending trusted native App view evidence, an independently v
 
 The server-side `CompletionAuthority` module implements independent evidence checks, durable 1,000-point receipts, handle reservation, comment finalization, and an anonymous leaderboard projection. It is a deployment building block, not a hosted/authenticated service. Trusted native-view and factual-checkpoint readers, HTTP/auth integration, and a separate dedicated authority store are still required; see the [integration contract](docs/integration-contract.md).
 
+## What the live Skills experience will look like
+
+The canvas remains the learner's home for **Step 1: Review and serve your order**. It displays the assigned GitHub issue, order criteria, PR number and revision, and the step guide. The learner inspects the real PR's Summary, Changes, and Checks in native Copilot App views, then returns to the canvas to refresh verified review, answer the factual checkpoint, and explicitly approve.
+
+The **Your app result** panel distinguishes **Not served**, **Approved — waiting for an authorized merge**, **Served — event result pending**, and **Served — event result recorded**. Once the separate authorized merge is verified, the actual menu appears in the canvas even if finalization is unavailable. Only an accepted completion receipt unlocks the handle, score/rank, final learning summary, and confirmed issue update. It is one learner step, not a new series of issue workflows.
+
+**Implemented foundation, not a runnable live booth yet:** the engine supports explicit trusted-evidence synchronization and the canvas has live guidance, assignment context, and app-result states. No production native evidence reader or navigation API is wired. The installed SDK's documented canvas host capability describes rendering support, not native PR-view observation; we did not invent a hook or turn canvas clicks into evidence.
+
+Staff can inspect a prepared assignment without approving, merging, commenting, creating a run, or submitting a score:
+
+```sh
+npm run preflight:live -- --run ASSIGNED_RUN_ID
+```
+
+The command uses ignored `booth/local-config.json` (or `--config STAFF_CONFIG_PATH`) and server-side `gh`. It checks an open issue, exact menu-only PR delta, trusted passing checks, and unused approval/merge state. Exit **1** means invalid configuration or failed verification; exit **2** means the GitHub assignment verified but the live integration remains blocked. It never returns a production-ready success status. See the [pilot checklist](booth/RUNBOOK.md#staff-only-live-pilot-preflight).
+
 ## Staff: open a rehearsal
 
 Staff need Node.js 22 or newer and a Copilot App/CLI build supporting project canvas extensions. Open this repository in that host.

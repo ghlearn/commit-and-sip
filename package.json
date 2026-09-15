@@ -8,7 +8,8 @@
     "test": "node --test tests/*.test.mjs",
     "check": "node scripts/check-syntax.mjs",
     "qr": "node scripts/generate-qr.mjs",
-    "reset": "node scripts/reset-exercise.mjs"
+    "reset": "node scripts/reset-exercise.mjs",
+    "preflight:live": "node scripts/preflight-live.mjs"
   },
   "engines": { "node": ">=22" },
   "devDependencies": {

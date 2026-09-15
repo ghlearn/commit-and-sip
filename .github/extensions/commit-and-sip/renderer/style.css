@@ -24,6 +24,7 @@
   --cup-shade: #d0e7d8;
   --body-font: var(--font-sans, "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
   --utility-font: var(--font-mono, "SFMono-Regular", Consolas, "Liberation Mono", monospace);
+  --label-font: var(--body-font);
   --display-font: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
 }
 * { box-sizing: border-box; }
@@ -40,19 +41,21 @@ a { color: inherit; text-underline-offset: 4px; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; }
 .ticket :focus-visible { outline-color: var(--focus); }
 h1, h2, h3, p { margin: 0; }
-h1, h2 { font-family: var(--display-font); font-weight: 500; }
-h1 { font-size: clamp(42px, 6.7vw, 74px); line-height: 1.04; letter-spacing: -.045em; }
+h1 { font-family: var(--display-font); font-weight: 500; }
+h2 { font-family: var(--body-font); font-weight: 600; }
+h1 { font-size: clamp(42px, 6.7vw, 74px); line-height: 1.04; letter-spacing: -.035em; }
 h2 { font-size: 30px; line-height: 1.18; letter-spacing: -.02em; }
+h1, h2, h3 { text-wrap: balance; overflow-wrap: anywhere; }
 h3 { font-size: 16px; line-height: 1.4; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.65 var(--utility-font); margin: 12px 0 0; }
 small, .mono-caption { font: 12px/1.6 var(--utility-font); overflow-wrap: anywhere; }
 .muted, .mono-caption { color: var(--muted); }
-.eyebrow { font: 600 11px/1.5 var(--utility-font); text-transform: uppercase; letter-spacing: .14em; margin-bottom: 12px; }
+.eyebrow { font: 600 12px/1.5 var(--label-font); text-transform: uppercase; letter-spacing: .14em; margin-bottom: 12px; }
 .skip-link { position: fixed; left: 16px; top: -100px; z-index: 10; padding: 12px 20px; background: var(--page); border: 2px solid var(--focus); }
 .skip-link:focus { top: 12px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .masthead { max-width: 1220px; margin: auto; padding: 26px 44px 22px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--line); }
-.wordmark { font: 700 30px/1 var(--display-font); letter-spacing: -.06em; text-decoration: none; white-space: nowrap; }
+.wordmark { font: 700 30px/1 var(--display-font); letter-spacing: -.035em; text-decoration: none; white-space: nowrap; }
 .wordmark > span { padding: 0 4px; font-style: italic; color: var(--accent); }
 .wordmark .wordmark-dot { padding: 0; }
 .lounge { text-transform: uppercase; letter-spacing: .12em; font-size: 11px; font-weight: 700; text-align: right; }
@@ -72,10 +75,10 @@ main { max-width: 1220px; margin: auto; padding: 22px 44px 30px; }
 .ticket-top { padding: 18px 27px; display: flex; justify-content: space-between; align-items: center; gap: 16px; border-bottom: 2px dashed var(--line); font: 700 13px/1.3 var(--utility-font); text-transform: uppercase; letter-spacing: .1em; }
 #phase-stamp { color: var(--accent); border: 2px solid currentColor; padding: 6px 10px; transform: rotate(-4deg); font-size: 11px; }
 .ticket-content { padding: 27px; }
-.ticket h2 { font-size: clamp(29px, 3.7vw, 42px); margin-bottom: 13px; }
+.ticket h2 { font-family: var(--display-font); font-weight: 500; font-size: clamp(29px, 3.7vw, 42px); margin-bottom: 13px; }
 #order-description { font-size: 15px; }
 .order-specs { display: grid; grid-template-columns: 1fr 1fr; margin: 22px 0 12px; gap: 14px; border-top: 1px solid var(--line); padding-top: 16px; }
-dt { font: 11px/1.5 var(--utility-font); text-transform: uppercase; letter-spacing: .06em; }
+dt { font: 12px/1.5 var(--label-font); text-transform: uppercase; letter-spacing: .06em; }
 dd { margin: 3px 0 0; font-weight: 600; overflow-wrap: anywhere; }
 .ticket-caption { font: 12px/1.5 var(--utility-font); }
 .exercise-issue { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 17px; }
@@ -89,7 +92,7 @@ dd { margin: 3px 0 0; font-weight: 600; overflow-wrap: anywhere; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .review-count { font: 14px var(--utility-font); border: 1px solid var(--line); border-radius: 50%; width: 58px; height: 58px; display: grid; place-items: center; flex-shrink: 0; }
 .steps { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 0; margin: 24px 0 16px; }
-.steps li { border-top: 3px solid var(--line); padding-top: 7px; font: 12px/1.5 var(--utility-font); color: var(--muted); }
+.steps li { border-top: 3px solid var(--line); padding-top: 7px; font: 13px/1.5 var(--label-font); color: var(--muted); }
 .steps li.is-done, .steps li[aria-current="step"] { border-color: var(--accent); color: var(--text); }
 .steps li[aria-current="step"] { font-weight: 700; }
 #review-help, #action-help { font-size: 13px; }
@@ -121,7 +124,7 @@ button.quiet { background: transparent; }
 #check-order-action { margin-top: 16px; }
 .chalkboard { background: var(--cafe-board); color: var(--cafe-chalk); border: 9px solid var(--board-frame); outline: 1px solid var(--board-line); outline-offset: -5px; padding: 27px 24px 17px; box-shadow: inset 0 0 0 1px var(--board-line), 0 12px 20px #143d2a18; }
 .board-heading { text-align: center; }
-.board-heading h2 { font-style: italic; font-size: 43px; }
+.board-heading h2 { font-family: var(--display-font); font-weight: 500; font-style: italic; font-size: 43px; }
 .board-heading .eyebrow { font-size: 10px; }
 .board-heading > p:last-child { font-size: 12px; margin-top: 9px; }
 .cup-art { width: min(100%, 310px); height: auto; display: block; margin: 2px auto -3px; }
@@ -130,7 +133,7 @@ button.quiet { background: transparent; }
 .menu-heading { display: flex; justify-content: space-between; gap: 14px; align-items: baseline; }
 .menu h3 { font: 500 23px/1.3 var(--display-font); }
 .menu-price { font: 12px var(--utility-font); flex-shrink: 0; }
-.menu p { font-size: 12px; color: var(--board-muted); margin-top: 7px; }
+.menu p { font-size: 14px; color: var(--board-muted); margin-top: 7px; }
 .menu .assigned { font: 10px/1.4 var(--utility-font); color: var(--board-highlight); text-transform: uppercase; letter-spacing: .09em; }
 .board-footer { text-align: center; font: italic 19px var(--display-font); padding: 14px 0 0; border-top: 1px solid var(--board-line); }
 .guide { padding: 30px 4px 0; }
@@ -140,12 +143,12 @@ figure { margin: 18px 0; }
 .walkthrough b { color: var(--muted); margin-left: 7px; font-weight: 400; }
 figcaption { font-size: 11px; color: var(--muted); margin-top: 9px; }
 summary { cursor: pointer; min-height: 44px; padding: 10px 0; font-size: 14px; font-weight: 600; }
-details p { font-size: 13px; margin: 10px 0; }
+details p { max-width: 70ch; font-size: 15px; margin: 10px 0; }
 .screenshot-pending { border: 1px dashed var(--line); padding: 12px; margin-top: 15px; font-size: 12px; }
 .screenshot-pending p { margin-top: 8px; }
 .notice { background: var(--surface); border: 1px solid var(--line); padding: 18px 22px; margin: 18px 0; }
 .notice h2 { font: 600 17px/1.4 var(--body-font); }
-.notice p { margin: 9px 0; font-size: 14px; }
+.notice p { max-width: 70ch; margin: 9px 0; font-size: 15px; }
 .notice ul { margin-bottom: 0; padding-left: 20px; overflow-wrap: anywhere; }
 .error-notice { background: var(--error-surface); color: var(--error); border-color: var(--error); }
 .result { background: var(--surface); margin-top: 30px; padding: 26px; border: 1px solid var(--line); border-top: 4px solid var(--accent); }
@@ -193,4 +196,10 @@ details p { font-size: 13px; margin: 10px 0; }
 .launcher input, .launcher select { width: 100%; min-width: 0; min-height: 46px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--page); color: var(--text); font: inherit; }
 .launcher button[type="submit"] { margin-top: 22px; }
 .launcher p { overflow-wrap: anywhere; }
-.launcher #setup-run-help { font-size: 13px; margin-top: 10px; }
+.launcher #setup-run-help { max-width: 70ch; font-size: 14px; margin-top: 10px; }
+
+#app-result h2 { font-size: 24px; }
+#app-result-status { font-weight: 600; }
+#app-result-detail { max-width: 70ch; }
+#review-target { margin-top: 14px; }
+.order-specs dd, .result-details dd, .menu-price { font-variant-numeric: tabular-nums; }

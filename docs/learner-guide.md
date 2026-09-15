@@ -18,4 +18,4 @@ Rehearsal is a local simulation, not a real GitHub review or event submission. Y
 
 Staff handle setup, connection problems, and fresh runs between attendees using the [booth runbook](../booth/RUNBOOK.md). You never need a terminal, GitHub.com, or an external editor.
 
-Live use is not ready. Future live review may open authentic native PR views elsewhere inside the App, but canvas clicks cannot replace trusted review evidence. Approval is not a merge; live serving requires a separately authorized, verified merge.
+Live use is not ready. Its canvas now has a live step guide, assigned issue/PR references, **Refresh verified review**, and **Your app result**. The last panel distinguishes approval, actual serving, and event-result recording, so a served menu can remain visible while finalization is pending. Future live review may open authentic native PR views elsewhere inside the App, but canvas clicks cannot replace trusted review evidence. Approval is not a merge; live serving requires a separately authorized, verified merge.

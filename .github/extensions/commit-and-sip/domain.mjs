@@ -50,6 +50,19 @@ export const liveBlockers = [
   "Authentic Copilot App guide screenshots must be captured and approved before booth use."
 ];
 
+export function liveAssignment(config, catalog, runId) {
+  const assignment = config.runs && Object.hasOwn(config.runs, runId) ? config.runs[runId] : null;
+  requireValue(config.mode === "live" && assignment, "live_unconfigured", "Staff must configure live mode and assign this run before a pilot.");
+  requireValue(typeof config.repo === "string" && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(config.repo) &&
+    Number.isSafeInteger(assignment.issueNumber) && assignment.issueNumber > 0 &&
+    Number.isSafeInteger(assignment.prNumber) && assignment.prNumber > 0 &&
+    typeof assignment.headSha === "string" && /^[a-f0-9]{40}$/.test(assignment.headSha) &&
+    typeof assignment.reviewer === "string" && /^[a-zA-Z0-9-]{1,39}$/.test(assignment.reviewer),
+  "invalid_assignment", "The live assignment requires a repository, valid issue/PR numbers, reviewer, and exact head SHA.");
+  requireValue(catalog.orders.some(order => order.id === assignment.orderId), "invalid_order", "The assigned order must exist in the booth catalog.", 400);
+  return { ...assignment, repo: config.repo };
+}
+
 export function makeRun({ runId, mode, order, assignment = null, now = new Date().toISOString() }) {
   return {
     runId, mode, order, assignment, phase: "order", createdAt: now,
@@ -79,13 +92,17 @@ export function rehearsalReview(run) {
   };
 }
 
-export function publicRun(run) {
+export function publicRun(run, { nativeReviewAvailable = false } = {}) {
   const { assignment, events, handle, commentId, ...publicState } = run;
   // Only explicitly selected, non-credential state crosses the renderer boundary.
   return {
     ...publicState,
     exercise: exerciseContent(run),
-    blockers: run.mode === "live" ? liveBlockers : [],
+    reviewTarget: run.mode === "live" && assignment ? {
+      repo: assignment.repo, issueNumber: assignment.issueNumber, prNumber: assignment.prNumber, headSha: assignment.headSha
+    } : null,
+    verification: { nativeReviewAvailable: run.mode === "live" && nativeReviewAvailable, syncedAt: run.reviewSyncedAt ?? null },
+    blockers: run.mode === "live" ? liveBlockers.filter((_, index) => index !== 0 || !nativeReviewAvailable) : [],
     completionPending: run.phase === "served" || run.completionPending
   };
 }

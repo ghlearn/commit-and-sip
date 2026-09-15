@@ -96,6 +96,17 @@ node scripts/grade-order.mjs --base <FULL_BASE_SHA> --head <FULL_HEAD_SHA> --ord
 
 Use full commit SHAs and the assigned order ID. The command checks the exact committed menu-only delta; it does not approve or merge anything and does not replace native evidence or live GitHub verification.
 
+## Staff-only live pilot preflight
+
+The successful rehearsal does not certify real GitHub review. Keep rehearsal available while completing the host-owned integration. Do not toggle live mode just to bypass this checklist.
+
+1. Prepare a separate real learner issue and one menu-only PR under a different author from the designated reviewer. Use a fresh run ID and exact head SHA in ignored staff configuration; keep branch protection and required checks intact. This release does not automatically provision issues or PRs.
+2. Run `npm run preflight:live -- --run RUN_ID` (optionally `--config PATH`). It is read-only. Compare its catalog criteria with the issue copy and separately confirm reviewer authentication and merge permissions. Exit 1 indicates failure; exit 2 means the assignment verified but live readiness is still blocked. No run, approval, merge, comment, or result is created.
+3. Obtain a documented native App navigation/view-evidence integration from the host owner. The inspected SDK advertises canvas rendering and lifecycle, not authenticated native PR-view events. Inject the trusted reader server-side; never offer an HTTP or canvas action that accepts caller-authored view evidence. There is no production reader supplied in this repository.
+4. In the pilot canvas, use the assigned issue/PR references and live step guide. Staff open native PR views inside the App until a supported navigation API is wired. After inspecting those views, choose **Refresh verified review**. Partial observations show progress; only all three verified views allow the factual checkpoint. **Refresh progress** does not verify views. Verification failures revoke saved progress and relock the checkpoint.
+5. Have the learner answer the checkpoint and explicitly approve. Let the separate authorized operator merge, then choose **Verify merged menu**. Confirm **Your app result** and **House menu** show the verified drink and merge revision. If event services are missing, **Served — event result pending** is the expected boundary, not completed Skills or leaderboard success.
+6. Restore finalization and retry the same run to obtain an accepted receipt before claiming a final issue update, score, or rank. No pilot result can enter rehearsal rankings. Capture authentic App screenshots and record native integration/permission evidence before admitting live attendees.
+
 ## Facilitate a run
 
 1. Confirm the assigned run and mode before opening the order.
