@@ -2,9 +2,11 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { DomainError, exactInput, requireValue } from "./domain.mjs";
+import { PanelRun } from "./panel.mjs";
 
 const assets = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
+  ["/launcher.js", ["launcher.js", "text/javascript; charset=utf-8"]],
   ["/app.js", ["app.js", "text/javascript; charset=utf-8"]],
   ["/style.css", ["style.css", "text/css; charset=utf-8"]]
 ]);
@@ -28,6 +30,7 @@ async function bodyJSON(request) {
 }
 
 export async function startServer({ engine, runId, reportError = () => {} }) {
+  const panel = new PanelRun(engine, runId);
   const ticket = randomBytes(32).toString("hex");
   let origin;
   const server = createServer(async (request, response) => {
@@ -45,7 +48,8 @@ export async function startServer({ engine, runId, reportError = () => {} }) {
         "host_rejected", "Unrecognized loopback host.", 403);
       const url = new URL(request.url, origin);
       if (request.method === "GET" && assets.has(url.pathname)) {
-        const [file, type] = assets.get(url.pathname);
+        let [file, type] = assets.get(url.pathname);
+        if (url.pathname === "/" && !panel.runId) file = "launcher.html";
         const bytes = await readFile(new URL(`renderer/${file}`, import.meta.url));
         response.writeHead(200, { "Content-Type": type });
         response.end(bytes);
@@ -55,13 +59,13 @@ export async function startServer({ engine, runId, reportError = () => {} }) {
       requireValue(!request.headers.origin || request.headers.origin === origin,
         "origin_rejected", "Cross-origin access is not allowed.", 403);
       if (url.pathname === "/api/state" && request.method === "GET") {
-        json(200, await engine.get(runId));
+        json(200, await panel.get());
       } else if (url.pathname === "/api/action" && request.method === "POST") {
         requireValue(request.headers.origin === origin, "origin_required", "Actions require a same-origin request.", 403);
         const body = await bodyJSON(request);
         exactInput(body, ["action", "input"]);
         requireValue(typeof body.action === "string", "invalid_action", "Choose a supported action.", 400);
-        json(200, await engine.dispatch(runId, body.action, body.input ?? {}));
+        json(200, await panel.dispatch(body.action, body.input ?? {}));
       } else {
         throw new DomainError("not_found", "This canvas endpoint does not exist.", 404);
       }
@@ -83,6 +87,9 @@ export async function startServer({ engine, runId, reportError = () => {} }) {
   });
   origin = `http://127.0.0.1:${server.address().port}`;
   return {
+    get runId() { return panel.runId; },
+    get: () => panel.get(),
+    dispatch: (action, input) => panel.dispatch(action, input),
     server, url: `${origin}/?ticket=${ticket}`,
     close: () => new Promise((resolve, reject) => {
       server.close(error => error ? reject(error) : resolve());

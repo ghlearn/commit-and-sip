@@ -2,6 +2,16 @@
 
 This document separates supported extension behavior from unresolved production integrations. It is not evidence that a live booth deployment has been approved.
 
+## Confirmed Skills adaptation
+
+The current delivery is a rehearsal-first, single-step exercise. The canvas owns initialization, review activities, checkpoint feedback, approval, serving, and the local result. Staff initialization is outside the learner step. Actions remain repository validation only: no issue-driven Step 0/Step 1 transition workflows, automatic issue closure, or Step 2 are added.
+
+`.github/steps/1-review-and-serve.md` is the canonical rehearsal guide. `content.mjs` loads it and the repository-owned Markdown templates at module initialization; no dependency install or remote content fetch occurs during play. The public run projection includes `exercise: { title, sections: [{ heading, paragraphs }], completion }`. Completion text is `null` until `phase` is `completed`, and is presentation only, not completion evidence. Existing saved runs obtain current guide content without changing their persisted phases, events, results, or issue body.
+
+The renderer uses text nodes for the guide and templates, not HTML evaluation or a general Markdown renderer. The guide permits one Step 1 heading, level-two activity headings, and plain paragraphs. Missing content, unsupported structure, or unresolved placeholders fails explicitly. Reload the extension after changing content. Rehearsal order text is rendered from `booth/orders.json`; live assigned issues and the remote completion-comment writer retain their existing ownership.
+
+Rehearsal stays entirely in the panel. Future live review may open authentic native PR views elsewhere inside the Copilot App. This scope decision does not implement native navigation or evidence capture; all existing live gates remain mandatory. No learner GitHub.com navigation, production deployment, or simulated live certification is introduced.
+
 ## Supported canvas boundary
 
 The project extension entrypoint is `.github/extensions/commit-and-sip/extension.mjs`. The installed host's extension SDK documentation is the authority for `joinSession`, `createCanvas`, lifecycle callbacks, action schemas, and error handling. Consult that installed documentation or the host extension authoring guide; do not infer undocumented navigation or telemetry APIs from the existence of a canvas.
@@ -10,14 +20,27 @@ The SDK is host-resolved. No standalone SDK installation is required.
 
 Registered canvas ID: `commit-and-sip`.
 
+Open with omitted input or `{}` to display an unassigned setup screen. No run, review, mode, or result is created by that open. The schema also accepts a complete assignment for a direct open:
+
 ```json
 {"runId":"rehearsal-demo-001","mode":"rehearsal","orderId":"mona-latte"}
 ```
+
+Partial inputs such as `{"runId":"example"}` still fail. An invalid live assignment never falls back to rehearsal.
+
+The setup screen requires an explicit **Create new rehearsal** or **Resume saved rehearsal** decision. It suggests a random run ID for new runs without saving it until selection; the learner/staff chooses the catalog drink. Resume requires an existing rehearsal ID and takes its saved order. It does not create missing runs, list other attendees' data, overwrite existing runs, or resume live runs as rehearsal.
+
+The `select_run` action takes `{"operation":"new","runId":"UNUSED_ID","mode":"rehearsal","orderId":"mona-latte"}` or `{"operation":"resume","runId":"EXISTING_ID","mode":"rehearsal"}`. Both HTTP and SDK actions route through the same per-panel binding. A selected panel cannot switch to another run; retrying the same confirmed selection returns its saved state. Other exercise actions require selection first; `refresh` can inspect setup without creating evidence.
+
+Setup state is `{phase:"setup", mode:null, suggestedRunId, orders:[{id,name}]}`. Existing bound-state projections are unchanged. Setup pages and selection APIs retain the same loopback capability, origin, host, and bounded-request protections as the exercise.
+
+Selection binds the running panel, not the persisted exercise. Iframe reloads and repeated opens keep that binding while the provider lives. On provider/App restart, an empty-input open returns to setup: explicitly resume by the original run ID. A complete assignment rehydrates directly from its saved input. No persistent record is keyed by `instanceId`, and reopening setup never resets exercise data.
 
 `runId` is stable domain identity: 1–80 letters, digits, hyphens, or underscores, starting with a letter or digit. `mode` is explicitly `rehearsal` or `live`. Live `orderId` must match the staff assignment. A panel's caller-selected `instanceId` is a separate lifecycle handle. Reopen the same domain run to resume; use a new panel instance for a different run.
 
 | Action | Input | Meaning |
 | --- | --- | --- |
+| `select_run` | Explicit new/resume rehearsal selection (above) | Bind an unassigned setup panel without starting review |
 | `start` | `{}` | Load assigned issue and review data |
 | `view` | `{"surface":"summary"}` (also `changes`, `checks`) | Rehearsal-only sequential view progression; never live certification |
 | `hint` | `{}` | Acceptance-criteria guidance without score penalty |

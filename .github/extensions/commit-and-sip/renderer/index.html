@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <meta name="color-scheme" content="dark light">
+  <meta name="color-scheme" content="light">
   <title>Commit &amp; Sip · Level Up Lounge</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/style.css">
@@ -23,9 +23,17 @@
       <span id="mode-description">Waiting for the booth connection. No actions are available yet.</span>
     </div>
     <div class="intro">
-      <div><p class="eyebrow">A five-minute Order Up activity</p><h1>One good change.<br>One great cup.</h1></div>
+      <div><p class="eyebrow">A five-minute GitHub Skills exercise</p><h1>One good change.<br>One great cup.</h1></div>
       <p class="intro-note">Read the order. Review the change.<br>Approve it, then serve it up.</p>
     </div>
+    <section class="notice" aria-labelledby="exercise-title">
+      <h2 id="exercise-title">Step 1: Review and serve your order</h2>
+      <p id="exercise-progress" role="status" aria-live="polite">Step 1 of 1. Waiting for your saved progress.</p>
+      <details id="exercise-guide" hidden>
+        <summary>Read the step guide</summary>
+        <div id="exercise-sections"></div>
+      </details>
+    </section>
     <section id="error-region" class="notice error-notice" role="alert" hidden>
       <h2>Let’s get you back to the counter</h2>
       <p id="error-message"></p>
@@ -64,7 +72,7 @@
 
         <section class="review-station" aria-labelledby="review-heading">
           <div class="section-heading"><div><p class="eyebrow">At the review counter</p><h2 id="review-heading">Check before you pour.</h2></div><span id="view-count" class="review-count">0 / 3</span></div>
-          <ol class="steps" aria-label="Order progress">
+          <ol class="steps" aria-label="Activities within Step 1">
             <li data-phase="order">Order</li><li data-phase="reviewing">Review</li><li data-phase="approved">Approve</li><li data-phase="served">Serve</li>
           </ol>
           <p id="review-help">Start your order to review the summary, changed files, and checks.</p>
@@ -74,7 +82,7 @@
               <div id="summary-content" hidden><p id="review-summary"></p><p id="head-sha" class="mono-caption"></p></div>
             </section>
             <section class="review-surface" aria-labelledby="changes-heading">
-              <div class="surface-heading"><h3 id="changes-heading">Changes</h3><button type="button" data-action="view" data-surface="changes">Open changes</button></div>
+              <div class="surface-heading"><h3 id="changes-heading" tabindex="-1">Changes</h3><button type="button" data-action="view" data-surface="changes">Open changes</button></div>
               <div id="changes-content" hidden></div>
             </section>
             <section class="review-surface" aria-labelledby="checks-heading">
@@ -94,6 +102,7 @@
               </div>
               <button id="check-order-action" type="submit" disabled>Check order details</button>
             </fieldset>
+            <a id="review-feedback-link" href="#changes-heading" hidden>Return to Changes to compare your answer</a>
             <p id="assessment-status" class="mono-caption" role="status" aria-live="polite" aria-atomic="true">Order details not checked yet. Attempts: 0.</p>
           </form>
           <div class="action-bar">
@@ -109,6 +118,7 @@
         <section id="result" class="result" aria-labelledby="result-heading" hidden tabindex="-1">
           <p class="eyebrow">Order collected</p><h2 id="result-heading">That’s a wrap. Take a sip.</h2>
           <p id="result-context"></p>
+          <div id="learning-summary"></div>
           <dl class="result-details">
             <div><dt>Handle</dt><dd id="result-handle"></dd></div>
             <div><dt>Score</dt><dd id="result-score"></dd></div>
@@ -127,20 +137,20 @@
           <div class="board-heading"><p class="eyebrow">The Level Up Lounge</p><h2 id="menu-heading">House menu</h2><p>Three drinks. One thoughtful change.</p></div>
           <svg class="cup-art" xmlns="http://www.w3.org/2000/svg" width="400" height="280" viewBox="0 0 400 280" fill="none" role="img" aria-labelledby="cup-title cup-description">
             <title id="cup-title">Commit and Sip house cup</title>
-            <desc id="cup-description">Original café illustration: a cream cup, hand-drawn coffee swirl, and steam above a brass-colored saucer.</desc>
-            <path d="M188 73c-25-23 28-25 9-53M223 65c-15-17 18-22 10-37" stroke="#E5ECD9" stroke-width="3" stroke-linecap="round" opacity=".65"/>
-            <ellipse cx="207" cy="225" rx="125" ry="22" fill="#162D26"/>
-            <ellipse cx="200" cy="216" rx="117" ry="21" stroke="#E6B875" stroke-width="2"/>
-            <path d="M120 115c0 53 14 96 76 99s84-46 84-99" fill="#F5E8CB" stroke="#F5E8CB" stroke-width="3"/>
-            <path d="M279 125c66-20 58 65-11 52" stroke="#F5E8CB" stroke-width="16"/>
-            <ellipse cx="200" cy="115" rx="80" ry="27" fill="#C08A54" stroke="#F5E8CB" stroke-width="9"/>
+            <desc id="cup-description">Original café illustration: a white cup, hand-drawn coffee swirl, and steam above a pale-green saucer.</desc>
+            <path d="M188 73c-25-23 28-25 9-53M223 65c-15-17 18-22 10-37" stroke="var(--board-muted)" stroke-width="3" stroke-linecap="round" opacity=".65"/>
+            <ellipse cx="207" cy="225" rx="125" ry="22" fill="var(--cafe-board)"/>
+            <ellipse cx="200" cy="216" rx="117" ry="21" stroke="var(--board-highlight)" stroke-width="2"/>
+            <path d="M120 115c0 53 14 96 76 99s84-46 84-99" fill="var(--cup-white)" stroke="var(--cup-white)" stroke-width="3"/>
+            <path d="M279 125c66-20 58 65-11 52" stroke="var(--cup-white)" stroke-width="16"/>
+            <ellipse cx="200" cy="115" rx="80" ry="27" fill="#C08A54" stroke="var(--cup-white)" stroke-width="9"/>
             <ellipse cx="200" cy="115" rx="67" ry="20" fill="#8A5534"/>
-            <path d="M170 113c7-20 33-15 31 0-1-16 26-17 32-4 5 11-18 21-32 24-8-6-35-12-31-20Z" fill="#EDD8AC"/>
+            <path d="M170 113c7-20 33-15 31 0-1-16 26-17 32-4 5 11-18 21-32 24-8-6-35-12-31-20Z" fill="var(--cup-white)"/>
             <path d="M181 111c13 1 18 8 21 17m17-17c-9 1-15 7-17 17" stroke="#C08A54" stroke-width="2" stroke-linecap="round"/>
-            <path d="M141 142c4 30 11 46 25 53" stroke="#DDC79C" stroke-width="4" stroke-linecap="round"/>
-            <path d="m188 161-10 9 10 9m24-18 10 9-10 9m-8-24-8 30" stroke="#385542" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
-            <path d="M71 195c-5-4-10-1-10 4s4 8 9 6 6-7 1-10Zm267 7c-5-4-10-1-10 4s4 8 9 6 6-7 1-10Z" stroke="#E6B875" stroke-width="2"/>
-            <path d="m64 202 6-5m261 12 5-5M121 242h35m11 0h12m58 0h42" stroke="#E5ECD9" stroke-width="2" stroke-linecap="round" opacity=".5"/>
+            <path d="M141 142c4 30 11 46 25 53" stroke="var(--cup-shade)" stroke-width="4" stroke-linecap="round"/>
+            <path d="m188 161-10 9 10 9m24-18 10 9-10 9m-8-24-8 30" stroke="var(--accent)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+            <path d="M71 195c-5-4-10-1-10 4s4 8 9 6 6-7 1-10Zm267 7c-5-4-10-1-10 4s4 8 9 6 6-7 1-10Z" stroke="var(--board-highlight)" stroke-width="2"/>
+            <path d="m64 202 6-5m261 12 5-5M121 242h35m11 0h12m58 0h42" stroke="var(--board-muted)" stroke-width="2" stroke-linecap="round" opacity=".5"/>
           </svg>
           <ul id="menu" class="menu">
             <li><h3>Mona Latte</h3><p>Menu details load with your order.</p></li>

@@ -4,8 +4,11 @@
 
 | Component | Responsibility |
 | --- | --- |
-| `extension.mjs` | Register `commit-and-sip`, validate open/action schemas, manage panel lifecycle |
+| `extension.mjs` | Join the SDK session and wire configuration, error reporting, and live adapters |
+| `canvas.mjs` | Declare the canvas and schemas, permit empty setup opens, guard assignments and manage panel lifecycle |
+| `panel.mjs` | Bind explicit new/resume rehearsal selections to a running panel; preserve stable run identity and forbid switching/fallback |
 | `domain.mjs` | Orders, domain validation, rehearsal fixtures, safe public run projection, handle generation |
+| `content.mjs` | Load the canonical single-step guide and Markdown templates; render catalog-driven rehearsal instructions, field-specific feedback, and final learning summary |
 | `store.mjs` | Persistent run/result ledger, exclusive file lock, atomic fsynced persistence |
 | `engine.mjs` | State transitions, factual checkpoint, live evidence gates, approval/serve separation, completion retries |
 | `server.mjs` | Per-panel loopback HTTP boundary and renderer assets; dispatch only validated actions for the bound run |
@@ -17,6 +20,28 @@
 | `scripts/` and `tests/` | Maintainer validation, explicit rehearsal reset, approved-URL QR generation |
 
 The state/engine/server/renderer/services boundaries matter: the browser renders a public projection and requests actions; only the engine and trusted service adapters may validate authoritative facts.
+
+## Single-step content and lifecycle
+
+`.github/steps/1-review-and-serve.md` is the canonical learner guide, presented inside the rehearsal canvas as text-only sections. Keep its format to one Step 1 title, level-two headings, and plain paragraphs; the small content parser rejects unsupported structure instead of guessing how to render it. `.github/markdown-templates/` contains rehearsal-order, order-feedback, and step-completion copy. Template inputs must be present and unresolved placeholders fail explicitly. No runtime package or external Markdown service is needed.
+
+The public `exercise` projection is computed from current content, not persisted as another source of truth. Existing runs keep their assigned issue bodies and saved state. Fresh rehearsal issues use the current template and catalog. Completion copy is available only after finalization; it never substitutes for the authority's live receipt or comment. The UI moves keyboard focus to the result after a successful serve/retry and offers an in-panel link back to Changes for incorrect checkpoint answers.
+
+The existing state phases are activities within one Skills step. Actions validate code and menu data only; they do not initialize learner issues, advance steps, close issues, or compete with `CompletionAuthority.finalize`. Staff preparation is outside the learner step. Future native PR panels may open elsewhere inside the App, but trusted live evidence remains unresolved.
+
+## Canvas color palette
+
+The setup and exercise share an intentionally light green-and-white palette in `renderer/style.css`: white canvas and receipt, pale-green supporting surfaces, forest-green text and primary actions, and a dark-green menu with white lettering. Semantic tokens cover text, muted text, borders, action/hover/focus, menu contrast, and red error feedback. Host font tokens are retained; host color overrides are intentionally not used so a dark surrounding App cannot replace the requested white canvas. Both HTML entrypoints declare a light color scheme; forced-colors support remains available.
+
+Cup and saucer artwork use the same palette tokens, with brown reserved for the coffee itself. Errors retain literal messages and distinct red treatment; progress still uses labels and borders rather than color alone. `tests/palette.test.mjs` checks the authored text, controls, and focus contrast ratios, including disabled controls. Palette values are locally authored, not outputs from an asset-generator service.
+
+## Canvas opening and setup
+
+The existing SDK registration is retained, with its declaration extracted into `canvas.mjs` for direct lifecycle testing. Empty/omitted open input displays `renderer/launcher.html`; partial assignments are still invalid. This fixes the previous empty-open `runId`/`mode` schema failure without inventing those values or silently creating a rehearsal.
+
+`PanelRun` is an ephemeral binding shared by SDK and HTTP actions. An explicit new selection calls the existing engine with atomic `requireNew`; resume first verifies the ID exists and is rehearsal. A panel cannot switch runs, and overlapping selections cannot create two runs behind one panel. Same-selection retries reconcile uncertain responses; `refresh` returns either setup or the bound run. Live setup remains staff-assigned via a complete open input.
+
+The server serves the launcher until selection, then the existing exercise page at the same URL. Selection is protected by the existing ticket/origin/host checks. Launcher input and returned catalog names render as text, not HTML. A suggested ID is not a persisted run; no attendee data is enumerated. On provider restart, empty-input opens return to setup and require explicit resume by domain run ID. Complete assignments rehydrate directly. Neither path deletes or rekeys saved exercise data.
 
 ## State and retry behavior
 
@@ -74,6 +99,9 @@ The grader validates the exact committed menu-only delta against the assigned ca
 
 Keep regression coverage for:
 
+- Empty and complete canvas opens, rejection of partial input, authenticated setup, new/resume separation, conflict/overlap protection, and provider-restart resume without duplicate runs or live fallback.
+- Shared guide/template rendering, required template values, catalog parity, single-step completion timing, and one actionable checkpoint mismatch at a time.
+- Full loopback rehearsal lifecycle, persistence across new engine/panel instances, and zero remote calls even when adapters are supplied.
 - View order and factual checkpoint gating; invalid inputs and mismatched order IDs.
 - Live refusal without native evidence; exact run/repository/PR/head identity matching.
 - Head changes, missing or failed required checks, unrelated menu changes, wrong reviewer, and premature merge.
@@ -83,6 +111,14 @@ Keep regression coverage for:
 - QR target public reachability, generated PNG/manifest consistency, and independent `jsqr` decoding of the generated image.
 
 Passing local tests is not acceptance evidence for missing native host integration, remote verification, public hosting, real App navigation, or phone QR scanning.
+
+## Rehearsal validation boundary
+
+The Node suite includes catalog-wide guide/template and loopback lifecycle coverage. A local headless Chromium walkthrough also exercised all three drinks at 1280px, 390px, and 320px widths: keyboard-operated guide and return-to-Changes link, blank learner answers, failed checkpoint recovery, explicit approval before serving, result focus, resume with the same handle, and one durable result per run. It made no nonlocal requests, opened no extra pages, and reported no renderer errors or horizontal page overflow at those widths. Browser validation tooling was session-local, not added to attendee dependencies.
+
+The rebuilt launch layer was additionally checked with strict AJV schema compilation and a headless browser: omitted/empty inputs, new rehearsal creation, missing/duplicate-ID rejection, same-panel reload, provider-restart simulation followed by explicit resume, SDK selection reflected in the setup UI, and full exercise completion. Setup fit 320px, 390px, and 1280px widths and opened no external pages. The automated Node suite includes seven canvas lifecycle/selection regressions alongside the existing exercise checks.
+
+This verifies the local renderer and engine, not the Copilot App extension lifecycle. Host tools were unavailable for extension reload and in-App navigation verification. Staff must still perform the runbook warm-up in the actual booth build; native live review, real GitHub writes, public QR scanning, and pilot targets are not certified by this rehearsal walkthrough.
 
 ## Release evidence still needed
 

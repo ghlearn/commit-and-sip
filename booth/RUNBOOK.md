@@ -4,6 +4,14 @@
 
 Attendees stay in the App. Commands below are staff-only and run from the repository root unless stated otherwise.
 
+## Exercise shape
+
+There is one learner step: **Review and serve your order**. The canvas's **Read the step guide** displays the [canonical instructions](../.github/steps/1-review-and-serve.md). Order, review, checkpoint, approval, serving, and result are activities within it. Staff initialization is not another learner step. Actions validate the repository, not learner progress; no real issue, PR, workflow transition, or issue closure is needed for rehearsal.
+
+Keep rehearsal inside the panel. Native PR views elsewhere in the Copilot App are permitted for future live mode, but its missing integrations remain blockers. Do not send attendees to GitHub.com to work around them.
+
+Reload extensions after changing the step or Markdown templates as well as extension code. Existing saved issue bodies are preserved; use a fresh rehearsal run to preview a changed order template.
+
 ## Before a session
 
 1. Use Node.js 22+ and a Copilot host supporting project canvas extensions.
@@ -14,13 +22,19 @@ Attendees stay in the App. Commands below are staff-only and run from the reposi
 
 Host tool sequence: `extensions_reload` → `extensions_manage` with `list`/`inspect` → `list_canvas_capabilities` → `open_canvas`. These names are not terminal commands. Use the actual loaded extension ID and log location reported by the host.
 
-Example open input:
+For a clickable, unassigned canvas, open with no input or `{}`. The setup screen lets staff/learners explicitly create a rehearsal with a selected drink and never-used run ID, or resume an existing rehearsal by its exact run ID. Write down the assigned ID. Merely opening setup does not create an order; it does not list other attendees' runs or allow live mode.
+
+Use a complete assignment when you want automatic direct recovery after extension restart. Example open input:
 
 ```json
 {"runId":"rehearsal-demo-001","mode":"rehearsal","orderId":"mona-latte"}
 ```
 
 Choose a distinct panel `instanceId`. Actions address that instance; persistent data uses `runId`.
+
+If the provider/App restarts after an empty-input launch, the panel returns to setup. Choose **Resume saved rehearsal** with the original ID, not New. Iframe reloads within a running provider keep the selected run. Fully specified inputs resume directly after restart. Missing IDs, reused new IDs, and live-as-rehearsal selections fail without creating or replacing records.
+
+The old error `runId is a required property; mode is a required property` indicates the runtime still has the old declaration. Staff with host tooling must reload extensions and inspect the provider before retrying an empty open. Reload tools are host capabilities, not shell commands; repository changes alone do not restart a loaded provider.
 
 ## Live configuration checklist — blocked until integrations exist
 
@@ -89,7 +103,7 @@ Use full commit SHAs and the assigned order ID. The command checks the exact com
 3. Ask them to compare the full order and answer the factual checkpoint.
 4. Let them explicitly choose approval. If live, wait for the separate authorized merge.
 5. Serve only after merge/menu verification. A generated handle should not exist before serving succeeds.
-6. Confirm one result and, in live mode, one final issue update. Completion retries retain the saved handle and run.
+6. Confirm **Step 1 complete**, the learning summary, and one local result in rehearsal. In live mode, require one independently confirmed final issue update. Completion retries retain the saved handle and run; there is no next learner step.
 
 Every correct completion earns 1,000 points. Tied scores share rank. Do not introduce speed, hint, retry, or accessibility penalties. Optional Copilot judging remains unavailable unless a real attributed and moderated trusted service is configured; never read fictional model feedback as authentic.
 

@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { randomInt, randomUUID } from "node:crypto";
+import { exerciseContent, renderRehearsalOrder } from "./content.mjs";
 
 export class DomainError extends Error {
   constructor(code, message, status = 409) {
@@ -65,11 +66,7 @@ export function rehearsalIssue(run) {
     title: `Order Up! Review ${order.name}`,
     number: null,
     url: null,
-    body: `Rehearsal exercise issue\n\nYour order: ${order.name}, $${order.price.toFixed(2)}, ${order.serving}.\n` +
-      `Description: "${order.description}"\nArtwork: ${order.artwork} (original cafe illustration).\n\n` +
-      "Inspect the PR summary, actual menu diff, and checks. Confirm only this drink is added, " +
-      "then answer the acceptance-criteria checkpoint and approve. Approval is not a merge: apply the rehearsal menu separately.\n\n" +
-      "This is a simulation, not a real GitHub issue. Live orders and onboarding must live in the assigned exercise issue."
+    body: renderRehearsalOrder(order)
   };
 }
 
@@ -87,6 +84,7 @@ export function publicRun(run) {
   // Only explicitly selected, non-credential state crosses the renderer boundary.
   return {
     ...publicState,
+    exercise: exerciseContent(run),
     blockers: run.mode === "live" ? liveBlockers : [],
     completionPending: run.phase === "served" || run.completionPending
   };

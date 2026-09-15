@@ -24,6 +24,7 @@
   let lastPaint = "";
   let actionError = false;
   let activeSurface = null;
+  let guideSignature = "";
 
   function text(id, value) {
     const node = $(id);
@@ -99,6 +100,24 @@
     $("counter").setAttribute("aria-busy", String(busy));
   }
 
+  function paintExercise() {
+    text("exercise-title", state.exercise.title);
+    text("exercise-progress", state.phase === "completed"
+      ? "Step 1 of 1 complete. Your result is below; there is no next learner step."
+      : `Step 1 of 1: ${labels[state.phase]}. Read, review, approve, and serve are activities within this step.`);
+    $("exercise-guide").hidden = state.mode !== "rehearsal";
+    const signature = JSON.stringify(state.exercise.sections);
+    if (guideSignature !== signature) {
+      const sections = state.exercise.sections.map(({ heading, paragraphs }) => {
+        const section = element("section");
+        section.append(element("h3", heading), ...paragraphs.map(paragraph => element("p", paragraph)));
+        return section;
+      });
+      $("exercise-sections").replaceChildren(...sections);
+      guideSignature = signature;
+    }
+  }
+
   function paintMenu() {
     const menu = document.createDocumentFragment();
     state.menu.forEach((drink) => {
@@ -169,6 +188,7 @@
       $("check-serving").value = state.order.serving;
       $("check-scope").value = "one-drink";
     }
+    $("review-feedback-link").hidden = state.phase !== "reviewing" || state.assessmentPassed || !state.assessmentAttempts;
     text("assessment-status", `${state.assessmentPassed === true
       ? "Order details match the validated change."
       : !reviewed ? "Review all three sections to unlock this factual check."
@@ -178,11 +198,12 @@
 
   function paintResult() {
     const result = state.result;
-    const show = ["served", "completed"].includes(state.phase) && !!result;
+    const show = state.phase === "completed" && !!result;
     $("result").hidden = !show;
     if (!show) return;
     const rehearsal = state.mode === "rehearsal";
     text("result-context", rehearsal ? "Rehearsal result only — not submitted to the event leaderboard." : "Your verified order result.");
+    $("learning-summary").replaceChildren(...state.exercise.completion.split("\n\n").map(paragraph => element("p", paragraph)));
     text("result-handle", result.handle || "Not returned");
     text("result-score", result.score ?? "Not returned");
     text("result-rank", result.rankAtCompletion ?? "Not available");
@@ -243,6 +264,7 @@
         ? "Your menu update is saved. Use Retry result if the final result has not been recorded; retrying preserves your run and handle."
         : state.phase === "completed" ? "Your order is complete. Enjoy your drink."
           : "Approval needs all three review sections plus a passed order-details checkpoint. Opening a section alone is not enough.");
+    paintExercise();
     paintMenu();
     paintReview();
     paintResult();
@@ -250,7 +272,11 @@
 
   function accept(next) {
     if (!next || !["rehearsal", "live"].includes(next.mode) || !phases.includes(next.phase) ||
-        !Array.isArray(next.views) || !Array.isArray(next.menu) || !Array.isArray(next.blockers) || !next.runId) {
+        !Array.isArray(next.views) || !Array.isArray(next.menu) || !Array.isArray(next.blockers) || !next.runId ||
+        typeof next.exercise?.title !== "string" || !Array.isArray(next.exercise.sections) ||
+        !next.exercise.sections.every(section => typeof section?.heading === "string" &&
+          Array.isArray(section.paragraphs) && section.paragraphs.every(paragraph => typeof paragraph === "string")) ||
+        (next.phase === "completed" ? typeof next.exercise.completion !== "string" : next.exercise.completion !== null)) {
       throw new Error("The booth returned an unrecognized order state. Ask the booth host to check the connection.");
     }
     if (state && (state.runId !== next.runId || state.mode !== next.mode)) {
@@ -334,6 +360,7 @@
       const next = await request("/api/action", { action, input });
       if (action === "view") activeSurface = input.surface;
       accept(next?.runId ? next : await request("/api/state"));
+      if (["serve", "complete"].includes(action) && state.phase === "completed") $("result").focus();
       $("error-region").hidden = true;
       actionError = false;
     } catch (error) {

@@ -2,6 +2,7 @@ import {
   DomainError, requireValue, exactInput, validRunId, makeRun, publicRun,
   rehearsalIssue, rehearsalReview, generateHandle
 } from "./domain.mjs";
+import { checkpointFeedback } from "./content.mjs";
 
 export class RunEngine {
   constructor({ store, catalog, config = {}, github = null, completion = null, viewEvidence = null }) {
@@ -136,9 +137,9 @@ export class RunEngine {
             ["hot", "cold"].includes(input.serving) && ["one-drink", "unrelated-edits"].includes(input.scope),
           "invalid_answers", "Enter a price, serving style, and change scope.", 400);
           run.assessmentAttempts++;
-          run.assessmentPassed = input.price === run.order.price && input.serving === run.order.serving && input.scope === "one-drink";
-          run.statusMessage = run.assessmentPassed ? "Acceptance criteria checked. You can now make your approval decision." :
-            "Needs attention: compare the price, serving style, and change scope with the order issue. Try again.";
+          const feedback = checkpointFeedback(run.order, input);
+          run.assessmentPassed = feedback === null;
+          run.statusMessage = feedback ?? "Acceptance criteria checked. You can now make your approval decision.";
           break;
         }
         case "approve": {

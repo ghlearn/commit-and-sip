@@ -2,6 +2,20 @@
 
 **Order Up at the Level Up Lounge:** a five-minute, app-only exercise in reviewing a small pull request. Inspect the proposal, compare it with an order, check the automated results, and make an explicit approval decision before serving the drink.
 
+## One step, entirely in the App
+
+**Audience:** beginners and GitHub-curious booth attendees. **Goal:** compare a proposed menu change with its acceptance criteria before making a human approval decision. **Duration:** about five minutes, with no speed or hint penalties.
+
+You need only the booth's preconfigured Copilot App and an assigned rehearsal canvas. No coding, cloning, account setup, terminal, or external editor is required. Staff supply the device and handle setup and recovery.
+
+**Open:** click **Commit & Sip** with no input to reach **Choose your order**. Explicitly choose **New rehearsal**, a drink, and a never-used run ID, then select **Create new rehearsal**. To recover existing work, choose **Resume saved rehearsal** and enter its exact run ID instead. Nothing is created merely by opening the canvas.
+
+**Start:** in the assigned canvas, choose **Start rehearsal order**. Follow **Step 1: Review and serve your order**: read the order, inspect Summary / Changes / Checks, answer the checkpoint, explicitly approve, then choose **Apply rehearsal menu**. The built-in **Read the step guide** control contains the [canonical learner step](.github/steps/1-review-and-serve.md); you do not need to leave the canvas to read it.
+
+**Resume or retry:** choose **Refresh progress**, or reopen the same assigned run. If serving succeeded but the result is delayed, choose **Retry result**. Staff assign a fresh run for the next attendee; reloading is not a reset. See the [reset procedure](booth/RUNBOOK.md#reset-between-attendees).
+
+This is a canvas-led adaptation of a GitHub Skills exercise: one learner step with several activities, not a five-step course. Staff initialization is outside the learner step. Actions validate the repository; they do not drive learner transitions, create exercise issues, or gate rehearsal on workflow queue time. There is no Step 2 or automatic issue closure.
+
 ## Status: rehearsal, not production-ready
 
 Commit & Sip is a project-local Copilot App canvas extension, registered as `commit-and-sip`. Rehearsal is a working local simulation, visibly separate from live GitHub review. It uses no remote services and makes no GitHub writes; it **does persist local progress and results**. It is not a real Copilot review, approval, merge, issue update, or event leaderboard submission.
@@ -10,14 +24,14 @@ Live use is blocked pending trusted native App view evidence, an independently v
 
 The server-side `CompletionAuthority` module implements independent evidence checks, durable 1,000-point receipts, handle reservation, comment finalization, and an anonymous leaderboard projection. It is a deployment building block, not a hosted/authenticated service. Trusted native-view and factual-checkpoint readers, HTTP/auth integration, and a separate dedicated authority store are still required; see the [integration contract](docs/integration-contract.md).
 
-## Open a rehearsal
+## Staff: open a rehearsal
 
 Staff need Node.js 22 or newer and a Copilot App/CLI build supporting project canvas extensions. Open this repository in that host.
 
 1. Reload extensions after checking out or changing extension files.
 2. List extensions and confirm the project `commit-and-sip` extension is loaded. If it fails, inspect its entry and log before continuing.
 3. Inspect the registered `commit-and-sip` canvas capabilities.
-4. Open it with this input:
+4. Open it without input (or with `{}`) to show the setup screen. For a preassigned run that should open directly and automatically rehydrate after extension reload, use this input:
 
    ```json
    {"runId":"rehearsal-demo-001","mode":"rehearsal","orderId":"mona-latte"}
@@ -53,7 +67,8 @@ For live global collisions, the authority reserves the same curated three-word p
 
 | Document | Audience |
 | --- | --- |
-| [Learner guide](docs/learner-guide.md) | Attendees and facilitators |
+| [Step 1: Review and serve your order](.github/steps/1-review-and-serve.md) | Canonical learner instructions, also shown inside the canvas |
+| [Learner entry guide](docs/learner-guide.md) | Attendees and facilitators |
 | [Booth runbook](booth/RUNBOOK.md) | Setup, rehearsal, retries, reset, and event staff |
 | [Integration contract](docs/integration-contract.md) | Native host and service implementers |
 | [Architecture and validation](docs/architecture.md) | Maintainers |
@@ -68,6 +83,8 @@ The approved outline is preserved verbatim, including its original proposals and
 Copy `booth/config.example.json` to ignored `booth/local-config.json` and replace the example values before attempting live setup. Never put credentials in that file, the renderer, the repository, or a QR URL. See the runbook for the assignment and permission requirements.
 
 Live completion requests only `COMMIT_AND_SIP_COMPLETION_TOKEN` through an explicit SDK user grant after session connection, and only for live mode with a configured endpoint. GitHub authentication remains server-side through `gh`. Configure `approvedQrOrigins` explicitly; its default empty list permits no QR asset origin.
+
+An empty-input panel remembers its selected run while its provider is running. After an extension/App restart, it returns to setup: choose **Resume saved rehearsal** with the same run ID. The exercise data remains saved; do not create a new run as a recovery shortcut. Fully specified open inputs rehydrate directly.
 
 State persists in `$COPILOT_HOME/extensions/commit-and-sip/artifacts/ledger.json`; `COPILOT_HOME` defaults to `~/.copilot`. Staff may set `COMMIT_AND_SIP_DATA_DIR` to an absolute directory before the host launches. The store uses `ledger.lock` and atomic, fsynced writes. Closing or reloading a panel does not reset an exercise.
 
