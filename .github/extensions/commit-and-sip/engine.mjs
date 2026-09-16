@@ -5,6 +5,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { checkpointFeedback } from "./content.mjs";
+import { provisionRecords } from "./services/provision.mjs";
 
 export class RunEngine {
   constructor({ store, catalog, config = {}, github = null, completion = null, viewEvidence = null }) {
@@ -48,6 +49,16 @@ export class RunEngine {
           existing.assignment?.repo === this.config.repo &&
           (existing.assignment.issueNumber === assignment.issueNumber || existing.assignment.prNumber === assignment.prNumber)),
         "assignment_reused", "This issue or PR already belongs to another run. Staff must prepare a fresh issue and PR.");
+      }
+      for (const provision of provisionRecords(data)) {
+        if (provision.runId === input.runId) {
+          requireValue(input.mode === "live" && provision.stage === "installed" &&
+            isDeepStrictEqual(assignment, { ...provision.assignment, issueNumber: provision.issueNumber }),
+          "provision_conflict", "This run is reserved for provisioning. Staff must finish installing its original assignment before opening it.");
+        } else if (assignment?.repo.toLowerCase() === provision.assignment.repo.toLowerCase()) {
+          requireValue(assignment.prNumber !== provision.assignment.prNumber && assignment.issueNumber !== provision.issueNumber,
+            "assignment_reused", "This issue or PR is reserved by a provisioned run.");
+        }
       }
       if (input.mode === "rehearsal") requireValue(typeof input.orderId === "string", "order_required",
         "Choose a catalog drink explicitly when creating a new rehearsal. Omit it only when resuming a saved run.", 400);

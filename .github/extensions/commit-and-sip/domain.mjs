@@ -69,8 +69,14 @@ export function liveAssignment(config, catalog, runId) {
   validateStaffConfig(config);
   const assignment = config.runs && Object.hasOwn(config.runs, runId) ? config.runs[runId] : null;
   requireValue(config.mode === "live" && assignment, "live_unconfigured", "Staff must configure live mode and assign this run before a pilot.");
+  requireValue(Number.isSafeInteger(assignment.issueNumber) && assignment.issueNumber > 0,
+    "invalid_assignment", "The live assignment requires a valid issue number.");
+  return preparedAssignment(config, catalog, assignment);
+}
+
+export function preparedAssignment(config, catalog, assignment) {
+  validateStaffConfig(config);
   requireValue(typeof config.repo === "string" && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(config.repo) &&
-    Number.isSafeInteger(assignment.issueNumber) && assignment.issueNumber > 0 &&
     Number.isSafeInteger(assignment.prNumber) && assignment.prNumber > 0 &&
     typeof assignment.headSha === "string" && /^[a-f0-9]{40}$/.test(assignment.headSha) &&
     typeof assignment.reviewer === "string" && /^[a-zA-Z0-9-]{1,39}$/.test(assignment.reviewer),
@@ -81,6 +87,9 @@ export function liveAssignment(config, catalog, runId) {
     requiredChecks.every(name => typeof name === "string" && name.trim().length > 0) &&
     new Set(requiredChecks).size === requiredChecks.length,
   "invalid_checks", "Configure unique nonempty required check names for the live assignment.", 400);
+  requireValue(assignment.requiredChecks === undefined ||
+    (Array.isArray(assignment.requiredChecks) && JSON.stringify(assignment.requiredChecks) === JSON.stringify(requiredChecks)),
+  "assignment_changed", "The provisioned required checks differ from current staff policy. Restore the original policy.");
   requireValue(catalog.orders.some(order => order.id === assignment.orderId), "invalid_order", "The assigned order must exist in the booth catalog.", 400);
   return { ...assignment, repo: config.repo, requiredChecks: [...requiredChecks] };
 }

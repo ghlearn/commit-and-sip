@@ -42,6 +42,20 @@ npm run preflight:live -- --run ASSIGNED_RUN_ID
 
 The command uses ignored `booth/local-config.json` (or `--config STAFF_CONFIG_PATH`) and server-side `gh`. It checks an open issue, exact menu-only PR delta, trusted passing checks, and unused approval/merge state. Exit **1** means invalid configuration or failed verification; exit **2** means the GitHub assignment verified but the live integration remains blocked. It never returns a production-ready success status. See the [pilot checklist](booth/RUNBOOK.md#staff-only-live-pilot-preflight).
 
+### Staff-only exercise provisioning
+
+Staff can now claim **one existing prepared menu-only PR** and create its real exercise issue. Preview first:
+
+```sh
+npm run provision:live -- --run UNIQUE_RUN_ID --pr PREPARED_PR_NUMBER \
+  --head FULL_VERIFIED_HEAD_SHA --base main --reviewer ASSIGNED_REVIEWER \
+  --order mona-latte
+```
+
+This default preview uses GitHub GET requests only; it does not write the issue, config, or journal. Add **`--apply`** to the same command only after staff approve the preview and exact assignment. The initializer embeds the canonical live Step 1 guide and catalog criteria, then persists the issue/PR binding and pinned branch/check policy in the existing ignored staff config. It preserves other assignments, settings, and the configured mode. It does not create a PR, assert Copilot authorship, enable live mode, or create learner progress.
+
+**Provisioned is not reviewed, served, completed, or live-ready.** No real learner exercise has been provisioned by this implementation milestone: staff must supply the actual prepared PR, reviewer, and authenticated issue-creator context. Use one designated initializer and the same durable store as the canvas; never run independent provisioning stores against the same pool. Stable markers and a durable create-intent support restart/reconciliation, not atomic exactly-once GitHub issue creation. An uncertain POST is never blindly retried. See [provisioning and recovery](booth/RUNBOOK.md#staff-only-live-exercise-provisioning) before using `--apply`.
+
 ## Staff: open a rehearsal
 
 Staff need Node.js 22 or newer and a Copilot App/CLI build supporting project canvas extensions. Open this repository in that host.

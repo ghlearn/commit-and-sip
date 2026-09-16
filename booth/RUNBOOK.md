@@ -100,12 +100,58 @@ Use full commit SHAs and the assigned order ID. The command checks the exact com
 
 The successful rehearsal does not certify real GitHub review. Keep rehearsal available while completing the host-owned integration. Do not toggle live mode just to bypass this checklist.
 
-1. Prepare a separate real learner issue and one menu-only PR under a different author from the designated reviewer. Use a fresh run ID, exact head SHA, and intended application `baseRef` in ignored staff configuration; keep branch protection and required checks intact. The effective check list is pinned when the run is created and cannot be changed on resume. This release does not automatically provision issues or PRs.
+1. Prepare one real menu-only PR under a different author from the designated reviewer, then use the staff-only provisioning procedure below to create its exercise issue and assignment. Use a fresh run ID, exact head SHA, and intended application `baseRef`; keep branch protection and required checks intact. The effective check list is pinned during provisioning and cannot be changed on resume. The initializer claims an existing PR; it does not create one or claim Copilot authored it.
 2. Run `npm run preflight:live -- --run RUN_ID` (optionally `--config PATH`). It is read-only. Compare its catalog criteria with the issue copy and separately confirm reviewer authentication and merge permissions. Exit 1 indicates failure; exit 2 means the assignment verified but live readiness is still blocked. No run, approval, merge, comment, or result is created.
 3. Obtain a documented native App navigation/view-evidence integration from the host owner. The inspected SDK advertises canvas rendering and lifecycle, not authenticated native PR-view events. Inject the trusted reader server-side; never offer an HTTP or canvas action that accepts caller-authored view evidence. There is no production reader supplied in this repository.
 4. In the pilot canvas, use the assigned issue/PR references and live step guide. Staff open native PR views inside the App until a supported navigation API is wired. After inspecting those views, choose **Refresh verified review**. Partial observations show progress; only all three verified views allow the factual checkpoint. **Refresh progress** does not verify views. Verification failures revoke saved progress and relock the checkpoint.
 5. Have the learner answer the checkpoint and explicitly approve. Let the separate authorized operator merge, then choose **Verify merged menu**. Confirm **Your app result** and **House menu** show the verified drink and merge revision. If event services are missing, **Served — event result pending** is the expected boundary, not completed Skills or leaderboard success.
 6. Restore finalization and retry the same run to obtain an accepted receipt before claiming a final issue update, score, or rank. No pilot result can enter rehearsal rankings. Capture authentic App screenshots and record native integration/permission evidence before admitting live attendees.
+
+## Staff-only live exercise provisioning
+
+This is setup, not another learner step. It creates a real issue only with explicit `--apply`; it never starts a learner run, approves, merges, closes an issue, writes completion comments, submits scores, generates QR placeholders, or manufactures native/checkpoint/approval proofs. **Provisioned != reviewed != served != completed.** Live admission remains blocked by the existing integration checklist.
+
+Use one designated staff initializer for the repository/pool. Every initializer process and the canvas must use the same durable `COMMIT_AND_SIP_DATA_DIR` (the normal canvas data directory by default). The journal is `provisions[]` in that store's `ledger.json`, alongside but separate from learner runs/results. Do not use a disposable directory, copy the ledger to independent writers, or run multiple device-local coordinators against the same pool: GitHub's issue-create API has no atomic idempotency-key guarantee. Repository-wide marker scans help detect prior claims but do not serialize independent stores.
+
+Before provisioning: stop learner intake and config editors; configure the exact authorized `repo` and required checks in ignored `booth/local-config.json`, preserving existing assignments. Use an empty `runs` map on a genuinely fresh staff configuration rather than the example placeholder assignment. Never erase actual assignments to make a conflict pass. Staff must authenticate the issue-creator `gh` context, confirm its issue-write permissions, identify the separate authorized reviewer (not the PR author), and verify reviewer and merge-operator permissions. No credentials belong in the config or arguments.
+
+```sh
+npm run provision:live -- --run UNIQUE_RUN_ID --pr PREPARED_PR_NUMBER \
+  --head FULL_VERIFIED_HEAD_SHA --base main --reviewer ASSIGNED_REVIEWER \
+  --order mona-latte
+```
+
+All six assignment flags are required. Optional `--config STAFF_CONFIG_PATH` selects an existing regular JSON file. Default **preview** reads GitHub and local state only, verifies the exact same-repository, open, non-draft, mergeable, menu-only PR and trusted passing checks, rejects a designated-reviewer approval/merge, and displays the proposed issue and assignment without exposing the reviewer in CLI output. It does not prove the configured reviewer is currently authenticated or has approval permission. A preview is a point-in-time report, not a reservation.
+
+After reviewing the preview, repeat the identical command with `--apply`. The initializer:
+
+1. Reserves the run/PR in a short local transaction, recording the exact catalog order, repository, head SHA, base ref, reviewer, effective check list, creator, and rendered issue body.
+2. Scans all open/closed repository issues for stable run/PR markers. Before the only issue POST, it durably marks the record `creating`. No global ledger lock is held during any network request.
+3. Reconciles the exact owned issue, rechecks the prepared PR, durably binds its issue number, and atomically writes the assignment into the current staff config. Other settings and runs are preserved; `mode` is never changed. The command returns the matching canvas open input, not readiness approval.
+
+The issue includes all drink criteria and the canonical live **Step 1: Review and serve your order** guide. Its five learning activities stay in one step, including feedback, separate approval/serving, and final-result guidance. No attendee cloning, terminal, external editor, or GitHub.com action is introduced. The canvas styling and bundled Mona Sans are unchanged.
+
+Successful preview/provision commands exit **0**, meaning only that operation succeeded, with `liveReady: false`; errors exit **1**. Run `npm run preflight:live -- --run UNIQUE_RUN_ID` afterward (with the same config path if non-default); it still requires live configuration and exits **2** for a verified-but-blocked live assignment. Do not switch mode until the live deployment has been reviewed. For canvas use, put the installed assignment in the host's normal ignored config and reload the extension; a custom CLI config path does not change the host's config path.
+
+### Provisioning recovery
+
+Always retry the **exact original command, run, staff creator, PR/head/base/order/reviewer, config path, and store**. Do not create a replacement issue manually, change the saved SHA, repurpose the PR, or delete a reservation.
+
+**A process/host crash during a filesystem transaction can leave `ledger.lock` behind.** Restarting the initializer alone does not reclaim it: retries return `store_busy` even when the issue journal is intact. Complete [Lock and storage recovery](#lock-and-storage-recovery) first, then retry the original command. An old timestamp or missing local PID alone cannot establish that every writer is stopped, especially for a shared directory or after a host restart. Never remove a lock automatically, swap to a new store, or reset journal stages to unblock intake.
+
+| Condition | Safe response |
+| --- | --- |
+| `store_busy` persists after process/host restart | Stop intake and all writers using this store; inspect ownership and back up the ledger/lock. Remove only the exact proven-stale lock through the procedure below, then retry the same run. Leave the assignment, create intent, and issue untouched. |
+| Failure while `reserved`, before create intent | Restore the read/config service and retry the same run. No create intent was issued yet. |
+| Timeout/crash while `creating` | Retry to scan and verify the exact original creator/title/body/marker. If the issue exists, it is reused without POST. If none is visible, the command fails with `provision_reconciliation_required`; even a crash before the actual POST stays blocked. |
+| No issue found for an unresolved create | Stop this PR's intake. Inspect staff-only journal, original request/audit evidence, and all repository issues with the stable run marker; wait for any in-flight request. There is intentionally no automatic reset/recreate override. If ownership/outcome remains unknown, preserve the reservation and escalate; do not infer that an empty listing proves no remote write. |
+| Issue exists but body/title/owner/state/marker changed, or duplicate markers exist | No PATCH, deletion, closure, or automatic adoption occurs. Preserve the issue and journal; an authorized staff owner must reconcile the discrepancy. Retry only once the exact original owned issue is established. |
+| Config write failed or response lost after rename | The journal retains the bound issue; restore writable storage and retry. An already matching assignment is reused, not overwritten or duplicated. |
+| Config changed during provisioning | Other settings/runs are reread under the shared lock and preserved. A changed target assignment/repository/check policy fails closed. Pause external config editors before retrying: filesystem rename is atomic but is not a compare-and-swap against arbitrary editors. |
+| PR head/base/checks changed or it was approved/merged | Stop the run and preserve its reservation/issue. Do not repin it to salvage old evidence. Staff must prepare a distinct clean PR/issue/run for a new exercise. |
+| Run was already opened in the canvas | Provisioning stops. Continue existing learner recovery instead; initialization cannot modify active or completed progress. |
+
+Keep journal/config/backups private and out of Git. The issue body excludes reviewer identity; CLI output excludes reviewer but still contains private operational run/issue mappings and belongs only in staff tools. Permissions, retention, hosted authority, authentic screenshots, approved artwork/mascots, public leaderboard/QR, and genuine Copilot judging remain future pilot requirements.
 
 ## Facilitate a run
 
@@ -174,7 +220,7 @@ The store uses `ledger.json` and `ledger.lock`, with atomic fsynced ledger write
 3. If the owner/provider is active, **do not remove the lock**. Allow the operation to finish or shut down the specific extension/provider through the host. Check for other active providers sharing the directory.
 4. Only after confirming no active provider/writer owns or uses this store, make a backup of the ledger and lock in an approved staff-only recovery location. Keep backups out of Git and public attachments.
 5. If the lock is proven stale, remove only that exact `ledger.lock`. Do not use wildcard deletion, erase the ledger, or kill processes by name.
-6. Restart/reload one provider, inspect its health, reopen the same run, and verify the ledger and completed results. Reconcile any uncertain remote completion before retrying.
+6. Restart/reload one provider, inspect its health, reopen the same run, and verify the ledger and completed results. For provisioning, rerun the exact original initializer command so it reconciles the existing issue/create intent; do not create a replacement assignment. Reconcile any uncertain remote completion before retrying.
 
 If ownership is uncertain, leave the lock in place and escalate. If JSON is corrupt or storage is full/unwritable, preserve evidence and restore only through a reviewed backup/reconciliation procedure. Do not replace it with an empty ledger to make the error disappear.
 

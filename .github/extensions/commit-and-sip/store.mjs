@@ -36,7 +36,7 @@ export class RunStore {
         await new Promise(resolve => setTimeout(resolve, 50));
       }
     }
-    if (!lock) throw new DomainError("store_busy", "Another operation owns this run store. Retry; if it persists, ask staff to inspect ledger.lock.");
+    if (!lock) throw new DomainError("store_busy", "Run storage is locked by an active operation or a lock left after a crash. If retry stays blocked, staff must follow Lock and storage recovery in booth/RUNBOOK.md. Never remove ledger.lock until all writers are confirmed stopped; preserve the ledger and retry the same run.");
     const temp = join(this.directory, `.ledger-${randomUUID()}.tmp`);
     try {
       await lock.writeFile(JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }));
