@@ -12,7 +12,7 @@
 | `store.mjs` | Persistent run/result ledger, exclusive file lock, atomic fsynced persistence |
 | `engine.mjs` | State transitions, factual checkpoint, live evidence gates, approval/serve separation, completion retries |
 | `server.mjs` | Per-panel loopback HTTP boundary and renderer assets; dispatch only validated actions for the bound run |
-| `renderer/` | Attendee presentation and controls; not an authority for live review evidence |
+| `renderer/` | Attendee presentation and controls; cannot certify native views or create pilot assignments |
 | Service adapters | Server-side GitHub and completion integration; see the integration contract for unresolved native evidence |
 | `services/authority.mjs` | `CompletionAuthority`: independent server-owned evidence validation, durable receipt/handle reservation, comment finalization, anonymous leaderboard projection; not a hosted/authenticated service |
 | `services/pilot.mjs` | Read-only assigned issue/PR preflight using shared assignment validation and the independent GitHub adapter; never certifies host or event readiness |
@@ -26,7 +26,7 @@ The state/engine/server/renderer/services boundaries matter: the browser renders
 
 `.github/steps/1-review-and-serve.md` is the canonical learner guide, presented inside the rehearsal canvas as text-only sections. Keep its format to one Step 1 title, level-two headings, and plain paragraphs; the small content parser rejects unsupported structure instead of guessing how to render it. `.github/markdown-templates/` contains rehearsal-order, order-feedback, and step-completion copy. Template inputs must be present and unresolved placeholders fail explicitly. No runtime package or external Markdown service is needed.
 
-The public `exercise` projection is computed from current content, not persisted as another source of truth. Existing runs keep their assigned issue bodies and saved state. Fresh rehearsal issues use the current template and catalog. Completion copy is available only after finalization; it never substitutes for the authority's live receipt or comment. The UI moves keyboard focus to the result after a successful serve/retry and offers an in-panel link back to Changes for incorrect checkpoint answers.
+The public `exercise` projection is computed from current content, not persisted as another source of truth. Existing runs keep their assigned issue bodies and saved state. Fresh rehearsal issues use the current template and catalog. Scored-mode completion copy is available only after finalization; the unranked pilot instead shows a learning summary at `pilot-served`. Neither substitutes for the authority's native-live receipt or comment. The UI moves keyboard focus to the result after a successful serve/retry and offers an in-panel link back to Changes for incorrect checkpoint answers.
 
 The existing state phases are activities within one Skills step. Actions validate code and menu data only; they do not initialize learner issues, advance steps, close issues, or compete with `CompletionAuthority.finalize`. Staff preparation is outside the learner step. Future native PR panels may open elsewhere inside the App, but trusted live evidence remains unresolved.
 
@@ -44,13 +44,29 @@ The two unmodified variable WOFF2 files come from [GitHub's Mona Sans v2.0.27 we
 
 Both pages preload the normal face from the loopback server; italic loads on demand. `font-display: swap` keeps text visible during loading, and system sans-serif remains the fallback. CSP allows only same-origin fonts, served through explicit asset routes with `font/woff2` MIME types. No external font service, device font installation, or attendee dependency download is needed. Mona Sans is an explicit user choice, not an asset-generator output.
 
-## Live pilot foundation
+## Native-live foundation — still gated
 
 `RunEngine.syncReview` reads only an injected trusted provider and independently rechecks the PR head, menu and checks. The shared `runTransaction` boundary applies durable revocation to live verification in start, synchronization, checkpoint, approval (including post-write verification), serving, and completion. When a verification gate fails, it restores the pre-action run, clears views, evidence head, assessment success, copied review data, and synchronization time, commits under the same store lock, and then rethrows the original error. Previously saved phases, events, issue, served menu/revision, handle, and result identity remain intact. Invalid input and completion-service transport errors retain normal transaction rollback and do not revoke valid evidence. Normal refresh remains read-only. Capability and assignment projections let the canvas explain why native verification is blocked without exposing reviewer identities. The shipped extension still lacks a real provider.
 
-`preflight-live.mjs` calls `inspectLivePilot` with the real GitHub adapter, never a write method. It verifies the prepared issue/PR and reports `liveReady: false`, exiting 2 even when those GitHub checks pass. It is not a readiness bypass or a deployment. `tests/pilot.test.mjs` covers GET-only behavior, failed/used assignments, invalid evidence, progress revocation, read-only refresh, and durable served state without event success.
+`preflight-live.mjs` calls `inspectLivePilot` with the real GitHub adapter, never a write method. A verified native-live assignment exits 2; a verified explicit canvas-pilot assignment exits 0; invalid input or failed verification exits 1. Reports expose `mode`, `reviewSource` (default `native`), and false `liveReady`, `eventEligible`, and `permissionsCertified` flags. Exit 0 certifies only assignment verification, not permissions, native integration, event eligibility, or deployment. `tests/pilot.test.mjs` covers GET-only behavior, failed/used assignments, invalid evidence, progress revocation, read-only refresh, and durable served state without event success.
 
 Live serving records the actual merge SHA with the menu. The **Your app result** panel is separate from accepted event results: it can show a served drink and pending finalization without a score, issue comment claim, or completion summary. The live step guide explains this distinction and keeps all learner work inside the App. Native navigation remains a host integration dependency, not a guessed URL scheme.
+
+## Unranked real GitHub canvas pilot
+
+`live-canvas-pilot` is a separate mode, not a fallback or replacement for native `live`. Staff must opt in with assignment `reviewSource: "canvas-pilot"`; omitted source retains native semantics. The provisioner pins source in the durable journal/config through `--review-source canvas-pilot` without changing configuration mode. Staff separately enable the matching mode in ignored config, reload, and directly open the assigned run/order. Setup and renderer selection remain rehearsal-only.
+
+The engine uses the existing `GithubAdapter` to load actual issue/PR data and independently validate pinned head, base, menu, and required checks. Sequential pilot Summary → Changes → Checks actions recheck GitHub before recording exact-assignment/head canvas observations. These are not native events and cannot satisfy the trusted native reader or authority. The learner supplies actual checkpoint answers and explicitly approves after inspecting checks/menu. Existing reviewer/author guards and the exact durable approval-attempt marker remain mandatory.
+
+Pilot `view` requests read a saved run snapshot and fetch GitHub outside `ledger.lock`. A short commit transaction rechecks the current assignment, phase, expected view prefix, and complete saved run before applying the snapshot or revoking failed verification. Every successful pilot transaction and verification revocation rotates a private `pilotRevision` token, so even an identical-state retry or repeated revocation invalidates older in-flight work. A stale response returns `review_changed` without overwriting or revoking newer progress; refresh and retry the same run. Normal read-only refresh does not rotate the token. The token never enters the renderer or native evidence. Other engine actions retain their existing transaction boundaries.
+
+A separate authorized operator/workflow merges. Pilot serving rechecks the pinned GitHub facts and exact effective attempt, verifies the merge-SHA menu, and uses ancestry comparison to require that the current assigned base tip contains the merge with the exact inspected menu. A second base-ref read detects movement during verification; native-live behavior is unchanged. Successful pilot serving persists the menu/merge SHA and ends at `pilot-served` with a learning summary. No `completed` phase/event, handle, score, rank, QR, judge, event submission, or completion comment is created. `complete` returns `pilot_not_ranked`; no authority call occurs, and `CompletionAuthority` independently rejects pilot assignments.
+
+All operations, including saved-state reads, guard mode/source and the saved assignment/check policy. Configuration/source/mode mismatches reject without ledger mutation; old unbound state fails closed. Actual verification errors durably revoke current views, checkpoint, and copied review data while retaining lifecycle and the saved exact approval decision/attempt. That private pilot decision preserves actual submitted answers and source/assignment binding, not synthetic native timestamps. An already-approved run can later verify the separate merge without re-approval, including after pending-merge revocation; recovery must not manufacture current observations to replace the saved decision.
+
+`content.mjs` loads the source-specific `.github/markdown-templates/canvas-pilot-guide.md` for pilot instructions. Browser fixtures under `tests/fixtures` exercise the real `GithubAdapter` through mocked transport, without actual GitHub writes.
+
+This milestone changes implementation only: no actual provisioning, approval, merge, or staff config change is performed. Permissions, authentic App captures, brand/privacy approval, and trusted native hosting remain unresolved. Those fixtures validate wiring, not actual GitHub operation, native screenshots, or production Skills/event readiness.
 
 ## Canvas opening and setup
 
@@ -63,16 +79,17 @@ The server serves the launcher until selection, then the existing exercise page 
 ## State and retry behavior
 
 ```text
-order → reviewing → approved → served → completed
+rehearsal / native live: order → reviewing → approved → served → completed
+canvas pilot:            order → reviewing → approved → pilot-served
            ↑
       inspect + checkpoint
 ```
 
-Rehearsal progresses through local fixtures. Live progression adds independent GitHub and trusted native evidence gates. Live `view` actions cannot certify native views. `approve` checks prerequisites and records/verifies approval; it never merges. `serve` requires the actual authorized merge and validates the resulting menu.
+Rehearsal progresses through local fixtures. Native-live progression adds independent GitHub and trusted native evidence gates; pilot progression uses independently rechecked GitHub data and explicitly labeled canvas observations. No `view` action certifies native views. `approve` checks prerequisites and records/verifies approval; it never merges. Both GitHub-connected modes require the actual authorized merge and resulting menu verification for `serve`.
 
 Approval reserves a private assignment-bound attempt before any GitHub write. Its exact marker is placed in the SHA-bound review body. Matching effective approvals can be reconciled after a lost response or post-write verification failure without accepting pre-existing or unrelated approvals. The attempt survives revocation and restart, but never enters the renderer projection.
 
-Serving is durable before finalization. Completion reserves the generated handle in storage before remote submission. If the completion endpoint or issue update is unavailable, retry `complete` for the same run. Completed results must not be recreated, renamed, or posted as duplicate issue comments on refresh/reopen/retry.
+In scored modes, serving is durable before finalization. Completion reserves the generated handle in storage before remote submission. If the completion endpoint or issue update is unavailable, retry `complete` for the same run. Completed results must not be recreated, renamed, or posted as duplicate issue comments on refresh/reopen/retry. Pilot serving has no finalization or result retry.
 
 The ledger lives outside the checkout by default, under `$COPILOT_HOME/extensions/commit-and-sip/artifacts/`, with `COPILOT_HOME` defaulting to `~/.copilot`. `COMMIT_AND_SIP_DATA_DIR` is a staff-only absolute-directory override. This keeps results across panel closure, extension reload, and worktree changes. Do not commit ledger data or browser connection URLs.
 
@@ -98,7 +115,7 @@ The loopback server is an implementation detail, not public hosting. It uses a p
 
 Hints are limited in the engine to order/reviewing/approved phases, not just disabled in the UI; post-serving calls cannot alter saved completion copy or hint counts.
 
-Rehearsal has no remote GitHub writes or event submissions. Its persistent local results must remain segregated from live results. All correct completions score 1,000; hints and timing are not penalty inputs.
+Rehearsal has no remote GitHub writes or event submissions. Its persistent local results must remain segregated from native-live results. Correct rehearsal and accepted native-live completions score 1,000; hints and timing are not penalty inputs. Canvas pilots create no scored result in either collection.
 
 The live adapter must validate the exact changed menu and head, required checks, reviewer identity and approval, and merged menu. No secrets belong in renderer code or committed configuration. Public anonymity does not eliminate the need to protect private run/issue/reviewer mappings.
 
@@ -131,6 +148,8 @@ Keep regression coverage for:
 - Full loopback rehearsal lifecycle, persistence across new engine/panel instances, and zero remote calls even when adapters are supplied.
 - View order and factual checkpoint gating; invalid inputs and mismatched order IDs.
 - Live refusal without native evidence; exact run/repository/PR/head identity matching.
+- Explicit canvas-pilot opt-in and durable source binding, sequential reverified observations, learner-answer checkpoint, exact approval attempt, independent merge verification, approved-state recovery, and rejection of source/mode drift or unbound state.
+- Pilot termination at `pilot-served` with menu/SHA/learning summary, no scored result/completed event or remote completion call, and authority rejection of pilot assignments.
 - Head changes, missing or failed required checks, unrelated menu changes, wrong reviewer, and premature merge.
 - Approval not serving; serving not succeeding until merge/menu verification.
 - Retry after remote failure, durable candidate/canonical handle identity and deterministic global collision suffixes, rejection of changed phrases, one result/comment per run, and tie ranking.
@@ -145,9 +164,23 @@ The Node suite includes catalog-wide guide/template and loopback lifecycle cover
 
 The rebuilt launch layer was additionally checked with strict AJV schema compilation and a headless browser: omitted/empty inputs, new rehearsal creation, missing/duplicate-ID rejection, same-panel reload, provider-restart simulation followed by explicit resume, SDK selection reflected in the setup UI, and full exercise completion. Setup fit 320px, 390px, and 1280px widths and opened no external pages. The automated Node suite includes seven canvas lifecycle/selection regressions alongside the existing exercise checks.
 
-A later pilot UI walkthrough used explicitly labeled local GitHub/view/completion test fixtures, not real native evidence, at 320px, 390px, and 1280px widths. It covered a missing reader, partial progress, checkpoint unlock, stale-head revocation, separate approval/merge, visible served menu with pending event results across reload, and final result rendering. All original rehearsal journeys also passed. These checks validate state wiring and typography, not a live pilot. No GitHub learner issue/PR was provisioned, approved, or merged in this walkthrough.
+A later native-live foundation UI walkthrough used explicitly labeled local GitHub/view/completion fixtures with mocked transport, not actual GitHub or real native evidence, at 320px, 390px, and 1280px widths. It covered a missing reader, partial progress, checkpoint unlock, stale-head revocation, separate approval/merge, visible served menu with pending event results across reload, and final result rendering. All original rehearsal journeys also passed. These historical checks validate state wiring and typography, not execution of the new real-GitHub canvas pilot. They are not native App screenshots. No GitHub learner issue/PR was provisioned, approved, or merged in this walkthrough.
 
 This verifies the local renderer and engine, not the Copilot App extension lifecycle. Host tools were unavailable for extension reload and in-App navigation verification. Staff must still perform the runbook warm-up in the actual booth build; native live review, real GitHub writes, public QR scanning, and pilot targets are not certified by this rehearsal walkthrough.
+
+## Repeatable mocked-transport browser validation
+
+A subsequent Playwright MCP walkthrough exercised the real pilot renderer through review, a separately toggled mocked authorized merge, serving, and reload persistence. At 390px it showed no horizontal overflow and loaded Mona Sans. The native-live fixture kept checkpoint, approval, and synchronization locked without a trusted provider; rehearsal still returned 1,000 local points. These outcomes concern renderer/engine wiring only: the fixture uses the actual `GithubAdapter` with mocked transport, not actual GitHub reads/writes or native host evidence. Any screenshots must be clearly labeled **mocked-transport renderer validation**, not native App captures or real pilot execution.
+
+Maintainers can repeat the flow without provisioning or changing staff configuration:
+
+1. Launch `node tests/fixtures/browser-pilot.mjs`. It prints three mode-specific URLs and an isolated test controls-file path. Keep those loopback URLs private and use only this fixture's printed controls path.
+2. Navigate the browser to its pilot URL. Invoke Playwright MCP `browser_run_code_unsafe` with `filename: "tests/browser/pilot-review.mjs"`.
+3. Separately write `{"authorizedMockMerge":true}` to the printed controls file. This toggles mocked transport only; it does not authorize or perform a real GitHub merge.
+4. Invoke `browser_run_code_unsafe` with `filename: "tests/browser/pilot-serve.mjs"` to verify serving/reload behavior. Use the other printed URLs to inspect native-live blocking and rehearsal isolation.
+5. Stop this fixture process with `SIGTERM`; it cleans its isolated test storage. Do not leave a test fixture running as a booth deployment.
+
+The two files in `tests/browser/` are Playwright MCP filename scripts, **not Node test-runner tests**. Passing `npm test` alone does not execute this browser walkthrough, and browser success does not certify permissions, the Copilot App lifecycle, native observation, production completion, or public hosting.
 
 ## Release evidence still needed
 

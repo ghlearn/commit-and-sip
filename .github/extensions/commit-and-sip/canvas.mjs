@@ -35,7 +35,7 @@ const descriptions = {
   start: "Load the assigned issue and PR (explicit rehearsal fixtures or configured live GitHub data).",
   refresh: "Read saved run progress without changing review evidence.",
   hint: "Show acceptance-criteria guidance; hints have no score penalty.",
-  view: "Open a simulated review surface in rehearsal only; cannot certify live App views.",
+  view: "Open rehearsal details or a real GitHub section in a staff-opted-in unranked canvas pilot; never certifies native App views.",
   check_order: "Check price, serving style, and diff scope against the order.",
   approve: "Explicit approval decision, gated by review evidence and acceptance criteria; does not merge.",
   serve: "Apply the rehearsal menu or independently verify an already-authorized live merge.",
@@ -52,7 +52,7 @@ export function canvasDefinition({ engine, guarded = fn => fn(), reportError = (
       {
         properties: {
           runId: { type: "string", pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$" },
-          mode: { enum: ["rehearsal", "live"] },
+          mode: { enum: ["rehearsal", "live", "live-canvas-pilot"] },
           orderId: {
             enum: engine.catalog.orders.map(order => order.id),
             description: "Required for a new rehearsal; omit only to resume a saved run or use a live staff assignment."
@@ -80,7 +80,7 @@ export function canvasDefinition({ engine, guarded = fn => fn(), reportError = (
       exactInput(input, ["runId", "mode", "orderId"]);
       const assigned = Object.keys(input).length > 0;
       if (assigned) {
-        requireValue(validRunId(input.runId) && ["rehearsal", "live"].includes(input.mode),
+        requireValue(validRunId(input.runId) && ["rehearsal", "live", "live-canvas-pilot"].includes(input.mode),
           "invalid_assignment", "Supply both runId and mode, or open with no input to choose a rehearsal.", 400);
         requireValue(!Object.hasOwn(input, "orderId") || engine.catalog.orders.some(order => order.id === input.orderId),
           "invalid_order", "Use an order from the booth catalog.", 400);
@@ -99,7 +99,7 @@ export function canvasDefinition({ engine, guarded = fn => fn(), reportError = (
           panels.set(ctx.instanceId, panel);
         }
         const state = await panel.get();
-        return { title: `Commit & Sip · ${state.mode === "live" ? "Live" : state.mode === "rehearsal" ? "Rehearsal" : "Choose an order"}`, url: panel.url };
+        return { title: `Commit & Sip · ${state.mode === "live-canvas-pilot" ? "Unranked GitHub pilot" : state.mode === "live" ? "Live" : state.mode === "rehearsal" ? "Rehearsal" : "Choose an order"}`, url: panel.url };
       } finally {
         opening.delete(ctx.instanceId);
       }

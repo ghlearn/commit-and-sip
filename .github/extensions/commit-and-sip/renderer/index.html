@@ -24,7 +24,7 @@
       <span id="mode-description">Waiting for the booth connection. No actions are available yet.</span>
     </div>
     <div class="intro">
-      <div><p class="eyebrow">A five-minute GitHub Skills exercise</p><h1>One good change.<br>One great cup.</h1></div>
+      <div><p id="experience-label" class="eyebrow">A one-step review activity</p><h1>One good change.<br>One great cup.</h1></div>
       <p class="intro-note">Read the order. Review the change.<br>Approve it, then serve it up.</p>
     </div>
     <section class="notice" aria-labelledby="exercise-title">
@@ -116,14 +116,15 @@
           </div>
           <p id="action-help" class="muted">Approval needs all three review sections plus a passed order-details checkpoint.</p>
           <p id="hint-count" class="mono-caption">Hints used: 0</p>
-          <p class="scoring-note">Hints are free. Complete the activity to earn 1,000 points. Equal scores share a rank.</p>
+          <p id="scoring-note" class="scoring-note">Hints are free. Result eligibility depends on the verified assignment.</p>
         </section>
 
-        <section id="app-result" class="result" aria-labelledby="app-result-heading" hidden>
+        <section id="app-result" class="result" aria-labelledby="app-result-heading" hidden tabindex="-1">
           <h2 id="app-result-heading">Your app result</h2>
           <p id="app-result-status" role="status" aria-live="polite"></p>
           <p id="app-result-detail"></p>
           <p id="served-revision" class="mono-caption"></p>
+          <p id="pilot-learning-summary" hidden></p>
         </section>
 
         <section id="result" class="result" aria-labelledby="result-heading" hidden tabindex="-1">
@@ -179,8 +180,8 @@
             <figcaption>Original UI walkthrough schematic — illustrative, not an authentic Copilot App screenshot.</figcaption>
           </figure>
           <details><summary>Where do I do the review?</summary>
-            <p>In rehearsal, open Summary, Changes, and Checks above, then confirm the order details. Opening a section alone does not verify its contents. In live mode, review the assigned issue and PR in the native Copilot App.</p>
-            <p>Ask booth host to open assigned issue/PR in Copilot App</p>
+            <p id="review-location">The assigned review mode determines where to inspect the PR.</p>
+            <p id="native-location">Ask booth host to open assigned issue/PR in Copilot App</p>
           </details>
           <div class="screenshot-pending"><strong>Authentic App screenshots pending capture.</strong><p>The screenshot guide is not ready. This schematic is not a substitute for verified App navigation.</p></div>
         </section>

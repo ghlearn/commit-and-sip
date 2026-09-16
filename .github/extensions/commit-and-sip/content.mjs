@@ -32,18 +32,20 @@ export function renderTemplate(template, values) {
   return rendered.trim();
 }
 
-const [step, orderTemplate, feedbackTemplate, completionTemplate, liveStep, criteriaTemplate] = await Promise.all([
+const [step, orderTemplate, feedbackTemplate, completionTemplate, liveStep, criteriaTemplate, pilotStep] = await Promise.all([
   "../../steps/1-review-and-serve.md",
   "../../markdown-templates/rehearsal-order.md",
   "../../markdown-templates/order-feedback.md",
   "../../markdown-templates/step-completion.md",
   "../../markdown-templates/live-review-guide.md",
-  "../../markdown-templates/order-criteria.md"
+  "../../markdown-templates/order-criteria.md",
+  "../../markdown-templates/canvas-pilot-guide.md"
 ].map(path => readFile(new URL(path, import.meta.url), "utf8")));
 const guide = parseStep(step);
 const liveGuide = parseStep(liveStep);
+const pilotGuide = parseStep(pilotStep);
 
-export function renderLiveOrder(order, { repo, prNumber, headSha, baseRef, runId }) {
+export function renderLiveOrder(order, { repo, prNumber, headSha, baseRef, runId, reviewSource }) {
   const criteria = renderOrderCriteria(order);
   return [
     `<!-- commit-and-sip-order:${runId} -->`,
@@ -51,7 +53,7 @@ export function renderLiveOrder(order, { repo, prNumber, headSha, baseRef, runId
     `Prepared order for ${repo}#${prNumber}. Revision: ${headSha}. Intended base: ${baseRef}.`,
     "Provisioned only: not reviewed, served, or completed. Staff prepared this PR; no Copilot authorship is asserted.",
     criteria,
-    liveStep.trim()
+    (reviewSource === "canvas-pilot" ? pilotStep : liveStep).trim()
   ].join("\n\n");
 }
 
@@ -81,8 +83,10 @@ export function checkpointFeedback(order, answers) {
 
 export function exerciseContent(run) {
   return {
-    ...(run.mode === "live" ? liveGuide : guide),
-    completion: run.phase === "completed"
+    ...(run.mode === "live-canvas-pilot" ? pilotGuide : run.mode === "live" ? liveGuide : guide),
+    completion: run.mode === "live-canvas-pilot" && run.phase === "pilot-served"
+      ? "Pilot learning finished. Inspect, check, approve: you compared the proposed change with the order before making a human review decision. The authorized merge and menu were verified. This is unranked, not native Skills completion or event finalization."
+      : run.phase === "completed"
       ? renderTemplate(completionTemplate, { name: run.order.name }) : null
   };
 }

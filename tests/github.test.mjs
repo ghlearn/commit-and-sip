@@ -51,6 +51,33 @@ test('validates exact appended menu and pinned effective approval', async () => 
     assert.equal(result.checks[0].conclusion, 'success');
 });
 
+test('canvas pilot serving verifies stable current base ancestry and exact menu without changing native inspection', async () => {
+    const tip = 'd'.repeat(40);
+    const refPath = `${root}/git/ref/heads/main`;
+    const target = { ref: 'refs/heads/main', object: { type: 'commit', sha: tip } };
+    const responses = {
+        [`${root}/pulls/2`]: { ...pr(), merged: true, merge_commit_sha: MERGE },
+        [refPath]: target,
+        [`${root}/compare/${MERGE}...${tip}`]: { status: 'ahead', base_commit: { sha: MERGE }, merge_base_commit: { sha: MERGE } },
+        [`${root}/contents/${menuPath}?ref=${tip}`]: encode([...base, order]),
+    };
+    const valid = fixture(responses);
+    assert.equal((await inspect(valid.adapter, { verifyCurrentBase: true })).merged, true);
+    assert.equal(valid.calls.filter(call => call.path === refPath).length, 2);
+    for (const changes of [
+        { [refPath]: { ...target, ref: 'refs/heads/other' } },
+        { [`${root}/compare/${MERGE}...${tip}`]: { status: 'diverged', base_commit: { sha: MERGE }, merge_base_commit: { sha: BASE } } },
+        { [`${root}/contents/${menuPath}?ref=${tip}`]: encode(base) },
+    ]) await assert.rejects(inspect(fixture({ ...responses, ...changes }).adapter, { verifyCurrentBase: true }));
+    let reads = 0;
+    await assert.rejects(inspect(fixture({ ...responses,
+        [refPath]: () => ++reads === 1 ? target : { ...target, object: { type: 'commit', sha: BASE } },
+    }).adapter, { verifyCurrentBase: true }), /base branch changed/);
+    const native = fixture(responses);
+    await inspect(native.adapter);
+    assert.equal(native.calls.some(call => call.path === refPath), false, 'native contract remains unchanged');
+});
+
 test('paginates reviews, checks, statuses, and changed files', async () => {
     const reviews = Array.from({ length: 100 }, (_, id) => ({ ...approval(id), state: 'COMMENTED' }));
     const statuses = Array.from({ length: 100 }, (_, id) => ({ id, context: `extra-${id}`, state: 'success' }));

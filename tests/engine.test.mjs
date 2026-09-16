@@ -173,12 +173,14 @@ test("live integration requires distinct verified approval and merged menu; pend
 test("hints are limited to pre-serving phases through the engine, including SDK callers", async t => {
   const { engine, store } = await fixture(t);
   await engine.open({ runId: "hint-run", mode: "rehearsal", orderId: "mona-latte" });
-  engine.config = { mode: "live" };
+  const assignment = { repo: "cafe/menu", issueNumber: 1, prNumber: 2, headSha: "a".repeat(40),
+    baseRef: "main", reviewer: "reviewer", orderId: "mona-latte", requiredChecks: ["menu-validation"] };
+  engine.config = { mode: "live", repo: assignment.repo, runs: { "hint-run": assignment } };
   engine.github = {};
   for (const mode of ["rehearsal", "live"]) {
     for (const phase of ["order", "reviewing", "approved", "served", "completed"]) {
       await store.transaction(data => {
-        Object.assign(data.runs["hint-run"], { mode, phase, hintCount: 2,
+        Object.assign(data.runs["hint-run"], { mode, phase, assignment: mode === "live" ? assignment : null, hintCount: 2,
           statusMessage: "Saved phase status", menu: phase === "served" || phase === "completed" ? [engine.catalog.orders[0]] : [],
           result: phase === "completed" ? { handle: "brisk-brews-coffee", score: 1000 } : null });
       });

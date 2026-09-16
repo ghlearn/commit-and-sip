@@ -4,9 +4,12 @@ import { isDeepStrictEqual } from "node:util";
 
 function assignmentIdentity(assignment) {
   if (!assignment) return null;
+  requireValue(assignment.reviewSource === undefined || assignment.reviewSource === "native",
+    "review_source_ineligible", "Canvas pilot assignments are unranked and cannot enter native completion authority.");
   const { repo, issueNumber, prNumber, headSha, reviewer, orderId, baseRef, approvalAttempt,
     requiredChecks = ["menu-validation"] } = assignment;
-  return structuredClone({ repo, issueNumber, prNumber, headSha, reviewer, orderId, baseRef, approvalAttempt, requiredChecks });
+  return structuredClone({ repo, issueNumber, prNumber, headSha, reviewer, orderId, baseRef, approvalAttempt, requiredChecks,
+    ...(assignment.reviewSource === undefined ? {} : { reviewSource: assignment.reviewSource }) });
 }
 
 function utcTime(value) {

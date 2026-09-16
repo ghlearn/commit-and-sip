@@ -95,6 +95,27 @@ async function reservationFixture(t) {
   return { options, comments, assignment, input: { runId: "reserved", handle: "sneaky-flying-pancake" }, authority: new CompletionAuthority(options) };
 }
 
+test("registered pilot source cannot use otherwise-valid native proofs or finalize an existing native reservation", async t => {
+  const f = await reservationFixture(t);
+  // The normal fixture has valid ordered native views/checkpoint, exact marked GitHub approval and merge.
+  f.assignment.reviewSource = "canvas-pilot";
+  for (const method of ["accept", "finalize"]) {
+    await assert.rejects(f.authority[method](f.input), { code: "review_source_ineligible" });
+  }
+  assert.equal((await f.options.store.read()).results.length, 0);
+  assert.equal(f.comments.length, 0);
+
+  const native = await reservationFixture(t);
+  await native.authority.accept(native.input);
+  native.assignment.reviewSource = "canvas-pilot";
+  const restarted = new CompletionAuthority(native.options);
+  for (const method of ["accept", "finalize"]) {
+    await assert.rejects(restarted[method](native.input), { code: "review_source_ineligible" });
+  }
+  assert.equal(native.comments.length, 0);
+  assert.equal((await native.options.store.read()).results[0].commentId, undefined);
+});
+
 test("invalid issue numbers fail before transactions, evidence, GitHub, or reservations", async t => {
   const f = await reservationFixture(t);
   let transactions = 0;

@@ -41,7 +41,7 @@ session = await joinSession({
   }))]
 });
 
-if (config.mode === "live") {
+if (["live", "live-canvas-pilot"].includes(config.mode)) {
   const adapters = liveAdapters(config, process.env.COMMIT_AND_SIP_COMPLETION_TOKEN);
   engine.github = adapters.github;
   engine.completion = adapters.completion;

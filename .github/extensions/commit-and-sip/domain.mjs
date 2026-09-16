@@ -68,7 +68,9 @@ export function validateStaffConfig(config) {
 export function liveAssignment(config, catalog, runId) {
   validateStaffConfig(config);
   const assignment = config.runs && Object.hasOwn(config.runs, runId) ? config.runs[runId] : null;
-  requireValue(config.mode === "live" && assignment, "live_unconfigured", "Staff must configure live mode and assign this run before a pilot.");
+  requireValue(["live", "live-canvas-pilot"].includes(config.mode) && assignment, "live_unconfigured", "Staff must configure the explicit real-review mode and assign this run.");
+  requireValue(config.mode === (assignment.reviewSource === "canvas-pilot" ? "live-canvas-pilot" : "live"),
+    "review_source_conflict", "The staff mode and assigned review source disagree. Native assignments never fall back to canvas review.");
   requireValue(Number.isSafeInteger(assignment.issueNumber) && assignment.issueNumber > 0,
     "invalid_assignment", "The live assignment requires a valid issue number.");
   return preparedAssignment(config, catalog, assignment);
@@ -76,6 +78,8 @@ export function liveAssignment(config, catalog, runId) {
 
 export function preparedAssignment(config, catalog, assignment) {
   validateStaffConfig(config);
+  requireValue(assignment.reviewSource === undefined || ["native", "canvas-pilot"].includes(assignment.reviewSource),
+    "invalid_review_source", "Staff must choose native or canvas-pilot review explicitly; omitted source remains native.", 400);
   requireValue(typeof config.repo === "string" && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(config.repo) &&
     Number.isSafeInteger(assignment.prNumber) && assignment.prNumber > 0 &&
     typeof assignment.headSha === "string" && /^[a-f0-9]{40}$/.test(assignment.headSha) &&
@@ -100,7 +104,9 @@ export function makeRun({ runId, mode, order, assignment = null, now = new Date(
     views: [], evidenceHeadSha: null, hintCount: 0, assessmentPassed: false,
     assessmentAttempts: 0, menu: [], result: null, issue: null, review: null,
     events: [], completionPending: false, commentId: null, handle: null,
-    statusMessage: mode === "rehearsal" ? "Rehearsal only. No GitHub writes or event scores." : "Live run awaits verified evidence."
+    statusMessage: mode === "rehearsal" ? "Rehearsal only. No GitHub writes or event scores."
+      : mode === "live-canvas-pilot" ? "Real GitHub-connected pilot. In-canvas observation only; unranked, not native App tracking."
+        : "Live run awaits verified evidence."
   };
 }
 
@@ -124,15 +130,17 @@ export function rehearsalReview(run) {
 }
 
 export function publicRun(run, { nativeReviewAvailable = false } = {}) {
-  const { assignment, approvalAttempt, events, handle, commentId, ...publicState } = run;
+  const { assignment, approvalAttempt, canvasReview, pilotDecision, pilotRevision, checkpointAnswers, events, handle, commentId, ...publicState } = run;
   // Only explicitly selected, non-credential state crosses the renderer boundary.
   return {
     ...publicState,
     exercise: exerciseContent(run),
-    reviewTarget: run.mode === "live" && assignment ? {
+    reviewTarget: run.mode !== "rehearsal" && assignment ? {
       repo: assignment.repo, issueNumber: assignment.issueNumber, prNumber: assignment.prNumber, headSha: assignment.headSha
     } : null,
-    verification: { nativeReviewAvailable: run.mode === "live" && nativeReviewAvailable, syncedAt: run.reviewSyncedAt ?? null },
+    verification: { nativeReviewAvailable: run.mode === "live" && nativeReviewAvailable,
+      reviewSource: run.mode === "live-canvas-pilot" ? "canvas-pilot" : run.mode === "live" ? "native" : "rehearsal",
+      syncedAt: run.mode === "live" ? run.reviewSyncedAt ?? null : null },
     blockers: run.mode === "live" ? liveBlockers.filter((_, index) => index !== 0 || !nativeReviewAvailable) : [],
     completionPending: run.phase === "served" || run.completionPending
   };
