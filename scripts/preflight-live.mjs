@@ -11,7 +11,8 @@ try {
   const config = validateStaffConfig(JSON.parse(await readFile(args[3] ?? "booth/local-config.json", "utf8")));
   const report = await inspectLivePilot({ config, catalog: await loadCatalog(), runId: args[1], github: new GithubAdapter({ repo: config.repo }) });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-  process.exitCode = 2;
+  // Pilot success only verifies the assignment; it never certifies production readiness.
+  process.exitCode = report.mode === "live-canvas-pilot" ? 0 : 2;
 } catch (error) {
   if (error instanceof DomainError || error instanceof GithubError) {
     process.stderr.write(`Live preflight failed (${error.code}): ${error.message}\n`);

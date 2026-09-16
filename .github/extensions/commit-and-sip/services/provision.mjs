@@ -28,7 +28,7 @@ function checkConflicts(data, config, runId, assignment, issueNumber) {
   }
   for (const [id, run] of Object.entries(data.runs)) {
     if (id === runId) conflict("This run has already been opened. Provision only before learner intake.");
-    if (run.mode === "live" && run.assignment?.repo.toLowerCase() === assignment.repo.toLowerCase() &&
+    if (run.mode !== "rehearsal" && run.assignment?.repo.toLowerCase() === assignment.repo.toLowerCase() &&
       (run.assignment.prNumber === assignment.prNumber || (issueNumber && run.assignment.issueNumber === issueNumber))) {
       conflict("This issue or PR belongs to an existing learner run.");
     }
@@ -54,11 +54,18 @@ export class LiveProvisioner {
 
   async provision(input, { apply = false } = {}) {
     requireValue(typeof apply === "boolean", "invalid_input", "Provisioning requires an explicit boolean apply decision.", 400);
-    exactInput(input, ["runId", "prNumber", "headSha", "baseRef", "reviewer", "orderId"]);
+    exactInput(input, ["runId", "prNumber", "headSha", "baseRef", "reviewer", "orderId", "reviewSource"]);
     const { runId, ...requested } = input;
     requireValue(validRunId(runId), "invalid_run", "Supply a fresh stable run ID.", 400);
     const initialConfig = validateStaffConfig(await this.configFile.read());
     const assignment = preparedAssignment(initialConfig, this.catalog, requested);
+    const reviewSource = assignment.reviewSource ?? "native";
+    const pilot = reviewSource === "canvas-pilot";
+    const mode = pilot ? "live-canvas-pilot" : "live";
+    const report = { liveReady: false, reviewSource, mode, eventEligible: false, permissionsCertified: false };
+    const message = pilot
+      ? "Unranked canvas pilot only: no native PR-view certification, event score, leaderboard, QR, or completion comment. Staff must separately confirm reviewer and merge permissions. Provisioned, not reviewed, served, or completed. Configuration mode was not changed; staff must explicitly enable live-canvas-pilot."
+      : "Provisioned, not reviewed, served, or completed. Live integrations and staff permission checks remain required. Configuration mode was not changed.";
     const order = this.catalog.orders.find(item => item.id === assignment.orderId);
     const checkConfig = config => {
       validateStaffConfig(config);
@@ -122,8 +129,9 @@ export class LiveProvisioner {
     }
 
     if (!apply) {
-      return { status: "preview", liveReady: false, runId, assignment: { ...assignment, issueNumber: issue?.number ?? null },
-        issue: { title, body }, writes: false };
+      return { status: "preview", ...report, runId, assignment: { ...assignment, issueNumber: issue?.number ?? null },
+        issue: { title, body }, writes: false,
+        message: pilot ? "Read-only preview. Unranked canvas pilot only: no native PR-view certification, event score, leaderboard, QR, or completion comment. Reviewer and merge permissions are not certified. Configuration mode will not be changed." : "Read-only preview. Live integrations and staff permission checks remain required. Configuration mode will not be changed." };
     }
 
     if (!issue) {
@@ -168,8 +176,7 @@ export class LiveProvisioner {
       }
       saved.stage = "installed";
     });
-    return { status: "provisioned", liveReady: false, runId, assignment: complete,
-      canvasInput: { runId, mode: "live", orderId: assignment.orderId },
-      message: "Provisioned, not reviewed, served, or completed. Live integrations and staff permission checks remain required. Configuration mode was not changed." };
+    return { status: "provisioned", ...report, runId, assignment: complete,
+      canvasInput: { runId, mode, orderId: assignment.orderId }, message };
   }
 }

@@ -115,7 +115,7 @@ export class GithubAdapter {
         if (!pr.merged && (pr.state !== 'open' || pr.mergeable !== true || ['dirty', 'unknown'].includes(pr.mergeable_state))) fail('The pull request is not confirmed mergeable. Try again after GitHub finishes checking it.');
     }
 
-    async inspectPullRequest(prNumber, { expectedHeadSha, expectedBaseRef, reviewer, order, baseMenuPath = 'src/data/specials.json', requiredChecks = ['menu-validation'], approvalAttemptId }) {
+    async inspectPullRequest(prNumber, { expectedHeadSha, expectedBaseRef, reviewer, order, baseMenuPath = 'src/data/specials.json', requiredChecks = ['menu-validation'], approvalAttemptId, verifyCurrentBase = false }) {
         number(prNumber);
         if (!validBaseRef(expectedBaseRef)) fail('An explicit application base branch is required.', 'invalid_base_ref');
         const marker = approvalAttemptId === undefined ? null : approvalMarker(approvalAttemptId);
@@ -170,6 +170,20 @@ export class GithubAdapter {
         const merged = pr.merged === true;
         const mergeCommitSha = merged ? sha(pr.merge_commit_sha) : null;
         if (merged && !isDeepStrictEqual(await this.menuAt(baseMenuPath, mergeCommitSha), menu)) fail('The merged commit does not contain the exact inspected menu.');
+        if (merged && verifyCurrentBase) {
+            const refPath = `${this.root}/git/ref/heads/${expectedBaseRef.split('/').map(encodeURIComponent).join('/')}`;
+            const target = await this.request('GET', refPath);
+            if (target?.ref !== `refs/heads/${expectedBaseRef}` || target.object?.type !== 'commit') fail('The assigned base branch is unavailable.');
+            const tip = sha(target.object.sha);
+            if (tip !== mergeCommitSha) {
+                const comparison = await this.request('GET', `${this.root}/compare/${mergeCommitSha}...${tip}`);
+                if (!['ahead', 'identical'].includes(comparison?.status) || comparison.base_commit?.sha !== mergeCommitSha ||
+                    comparison.merge_base_commit?.sha !== mergeCommitSha) fail('The assigned base branch no longer contains the verified merge.');
+            }
+            if (!isDeepStrictEqual(await this.menuAt(baseMenuPath, tip), menu)) fail('The current assigned base menu differs from the reviewed menu.');
+            const currentTarget = await this.request('GET', refPath);
+            if (currentTarget?.ref !== target.ref || currentTarget.object?.type !== 'commit' || currentTarget.object.sha !== tip) fail('The assigned base branch changed during menu verification.');
+        }
         const current = await this.request('GET', path);
         this.validatePr(current, headSha, reviewer, expectedBaseRef);
         if (current.base.sha !== baseSha || current.merged !== pr.merged || current.merge_commit_sha !== pr.merge_commit_sha) fail('The pull request changed during verification. Inspect it again.', 'pr_changed');

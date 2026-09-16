@@ -16,8 +16,8 @@ import { resultLinks } from "./result-links.mjs";
   if (!storageUnavailable) window.history.replaceState(null, "", "/");
   const $ = (id) => document.getElementById(id);
   const surfaces = ["summary", "changes", "checks"];
-  const phases = ["order", "reviewing", "approved", "served", "completed"];
-  const labels = { order: "Order received", reviewing: "In review", approved: "Approved", served: "Served", completed: "Completed" };
+  const phases = ["order", "reviewing", "approved", "served", "completed", "pilot-served"];
+  const labels = { order: "Order received", reviewing: "In review", approved: "Approved", served: "Served", completed: "Completed", "pilot-served": "Pilot served · unranked" };
   const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
   let state = null;
   let busy = false;
@@ -58,10 +58,11 @@ import { resultLinks } from "./result-links.mjs";
     if (!state) return { label: ticket ? "Awaiting connection…" : "Reopen canvas to connect", enabled: false };
     const reviewed = surfaces.every((surface) => state.views.includes(surface));
     switch (state.phase) {
-      case "order": return { action: "start", label: state.mode === "rehearsal" ? "Start rehearsal order" : "Start live order", enabled: true };
-      case "reviewing": return { action: "approve", label: state.mode === "rehearsal" ? "Approve rehearsal change" : "Approve reviewed change", enabled: reviewed && state.assessmentPassed === true };
+      case "order": return { action: "start", label: state.mode === "rehearsal" ? "Start rehearsal order" : state.mode === "live-canvas-pilot" ? "Start real GitHub pilot" : "Start live order", enabled: true };
+      case "reviewing": return { action: "approve", label: state.mode === "rehearsal" ? "Approve rehearsal change" : state.mode === "live-canvas-pilot" ? "Approve pull request on GitHub" : "Approve reviewed change", enabled: reviewed && state.assessmentPassed === true };
       case "approved": return { action: "serve", label: state.mode === "rehearsal" ? "Apply rehearsal menu" : "Verify merged menu", enabled: true };
       case "served": return { action: "complete", label: "Retry result", enabled: true };
+      case "pilot-served": return { label: "Pilot served · unranked", enabled: false };
       default: return { label: "Order completed", enabled: false };
     }
   }
@@ -77,7 +78,7 @@ import { resultLinks } from "./result-links.mjs";
       button.disabled = busy || !ticket || !state ||
         (stale && action !== "refresh") ||
         (action === "sync_review" && (state.mode !== "live" || state.phase !== "reviewing" || !state.verification?.nativeReviewAvailable)) ||
-        (action === "view" && (state.mode !== "rehearsal" || state.phase !== "reviewing")) ||
+        (action === "view" && (!["rehearsal", "live-canvas-pilot"].includes(state.mode) || state.phase !== "reviewing")) ||
         (action === "hint" && !["order", "reviewing", "approved"].includes(state.phase));
     });
     const canCheck = state?.phase === "reviewing" && state.assessmentPassed !== true &&
@@ -92,6 +93,7 @@ import { resultLinks } from "./result-links.mjs";
     text("exercise-title", state.exercise.title);
     text("exercise-progress", state.phase === "completed"
       ? "Step 1 of 1 complete. Your result is below; there is no next learner step."
+      : state.phase === "pilot-served" ? "Pilot learning finished. Not native Skills completion or event finalization."
       : `Step 1 of 1: ${labels[state.phase]}. Read, review, approve, and serve are activities within this step.`);
     $("exercise-guide").hidden = false;
     const signature = JSON.stringify(state.exercise.sections);
@@ -133,8 +135,11 @@ import { resultLinks } from "./result-links.mjs";
 
   function paintReview() {
     const rehearsal = state.mode === "rehearsal";
+    const pilot = state.mode === "live-canvas-pilot";
+    const canvasReview = rehearsal || pilot;
+    const pilotDecided = pilot && ["approved", "pilot-served"].includes(state.phase);
     const review = state.review;
-    $("review-surfaces").hidden = state.phase === "order";
+    $("review-surfaces").hidden = state.phase === "order" || pilotDecided;
     text("review-summary", review?.summary || "No review summary has been received.");
     text("head-sha", review?.headSha ? `Review revision: ${review.headSha}` : "");
     const files = document.createDocumentFragment();
@@ -151,32 +156,36 @@ import { resultLinks } from "./result-links.mjs";
     const checks = element("ul", null, "check-list");
     (review?.checks || []).forEach((check) => {
       const item = element("li");
-      item.append(element("span", check.name), element("strong", check.conclusion || "Pending"));
+      item.append(element("span", pilot ? `${check.name} · ${check.appSlug || check.kind || "publisher unavailable"}` : check.name), element("strong", check.conclusion || "Pending"));
       checks.append(item);
     });
     $("checks-content").replaceChildren(review?.checks?.length ? checks : element("p", "No check results have been received."));
     surfaces.forEach((surface) => {
       const visited = state.views.includes(surface);
       const button = document.querySelector(`[data-surface="${surface}"]`);
-      button.hidden = !rehearsal;
+      button.hidden = !canvasReview;
       button.setAttribute("aria-controls", `${surface}-content`);
       button.setAttribute("aria-expanded", String(visited || surface === activeSurface));
       button.textContent = `${visited ? "✓ Opened" : "Open"} ${surface}`;
-      $("" + surface + "-content").hidden = rehearsal && !visited && surface !== activeSurface;
+      $("" + surface + "-content").hidden = canvasReview && !visited && surface !== activeSurface;
     });
     text("view-count", `${surfaces.filter((surface) => state.views.includes(surface)).length} / 3`);
+    $("view-count").hidden = pilotDecided;
     $("view-count").setAttribute("aria-label", `${surfaces.filter((surface) => state.views.includes(surface)).length} of 3 review sections opened`);
-    $("sync-review-action").hidden = rehearsal;
-    $("verified-review-status").hidden = rehearsal;
+    $("sync-review-action").hidden = canvasReview;
+    $("verified-review-status").hidden = canvasReview;
     text("verified-review-status", state.verification?.nativeReviewAvailable
       ? state.verification.syncedAt
         ? `Trusted review evidence checked at ${state.verification.syncedAt}. Refresh again after visiting another native section.`
         : "Native review reader connected. Open the assigned PR sections in the App, then refresh verified review."
       : "Native review integration is unavailable. Staff must connect the trusted reader; approval remains locked.");
-    text("review-help", rehearsal
+    text("review-help", pilotDecided
+      ? "Your explicit review decision is saved. Approval is separate from serving; see Your app result and House menu for verified serving status."
+      : rehearsal
       ? "Review all three sections, then check the order details before approving. These are simulated PR details, not native App screenshots."
+      : pilot ? "Open each real GitHub section here, then submit your checkpoint answers. Progress records in-canvas observation only, not native App tracking or proof of comprehension. Unranked and not leaderboard eligible."
       : "Review in the native Copilot App, then use Refresh verified review. Opening these copied details or refreshing saved progress does not certify a live review.");
-    $("order-check").hidden = state.phase === "order";
+    $("order-check").hidden = state.phase === "order" || pilotDecided;
     const reviewed = surfaces.every((surface) => state.views.includes(surface));
     if (state.assessmentPassed === true) {
       $("check-price").value = state.order.price;
@@ -192,23 +201,29 @@ import { resultLinks } from "./result-links.mjs";
   }
 
   function paintAppResult() {
-    $("app-result").hidden = state.mode !== "live";
-    const served = ["served", "completed"].includes(state.phase);
-    text("app-result-status", state.phase === "completed" ? "Served — event result recorded"
+    const pilot = state.mode === "live-canvas-pilot";
+    $("app-result").hidden = state.mode === "rehearsal";
+    const served = ["served", "completed", "pilot-served"].includes(state.phase);
+    text("app-result-status", state.phase === "pilot-served" ? "Served — unranked pilot menu verified"
+      : state.phase === "completed" ? "Served — event result recorded"
       : served ? "Served — event result pending"
         : state.phase === "approved" ? "Approved — waiting for an authorized merge"
           : "Not served — review and approval required");
-    text("app-result-detail", served
+    text("app-result-detail", pilot && served
+      ? `${state.order.name} is on the verified House menu. No event finalization is pending: this pilot is ineligible for handles, scores, rankings, QR, AI judging, and final issue updates.`
+      : served
       ? `${state.order.name} is on the verified menu below. ${state.phase === "completed"
         ? "The accepted exercise result is recorded."
         : "No event score or issue update is confirmed yet. Your menu is saved; use Retry result after staff restore finalization."}`
       : "Approval alone does not change the menu. Verify the merged menu after the separate authorized merge.");
     text("served-revision", served && state.servedCommitSha ? `Verified merge revision: ${state.servedCommitSha}` : "");
+    text("pilot-learning-summary", pilot && served ? state.exercise.completion : "");
+    $("pilot-learning-summary").hidden = !(pilot && served);
   }
 
   function paintResult() {
     const result = state.result;
-    const show = state.phase === "completed" && !!result;
+    const show = state.mode !== "live-canvas-pilot" && state.phase === "completed" && !!result;
     $("result").hidden = !show;
     if (!show) return;
     const rehearsal = state.mode === "rehearsal";
@@ -243,8 +258,13 @@ import { resultLinks } from "./result-links.mjs";
     if (lastPaint === signature) return;
     lastPaint = signature;
     const rehearsal = state.mode === "rehearsal";
-    text("mode-label", rehearsal ? "REHEARSAL — simulated PR" : "LIVE — GitHub-connected order");
-    text("mode-description", rehearsal ? "No GitHub writes or event leaderboard." : "No rehearsal fallback. Native App review and a verified merge are required.");
+    const pilot = state.mode === "live-canvas-pilot";
+    text("mode-label", rehearsal ? "REHEARSAL — simulated PR" : pilot ? "UNRANKED PILOT — real GitHub-connected review" : "LIVE — GitHub-connected order");
+    text("mode-description", rehearsal ? "No GitHub writes or event leaderboard." : pilot ? "In-canvas observation only. Not native App tracking; not leaderboard eligible." : "No rehearsal fallback. Native App review and a verified merge are required.");
+    text("experience-label", pilot ? "A one-step GitHub Skills-style pilot · unranked" : "A five-minute GitHub Skills exercise");
+    text("scoring-note", pilot ? "Hints are free. This pilot has no points, rank, handle, QR, or AI judge." : "Hints are free. Complete the activity to earn 1,000 points. Equal scores share a rank.");
+    text("review-location", pilot ? "Open the real Summary, Changes, and Checks in this canvas. These observations never count as native App evidence." : "In rehearsal, open Summary, Changes, and Checks above, then confirm the order details. Opening a section alone does not verify its contents. In live mode, review the assigned issue and PR in the native Copilot App.");
+    $("native-location").hidden = pilot;
     text("phase-stamp", labels[state.phase]);
     text("run-id", `Run ${state.runId}`);
     text("status", state.statusMessage || labels[state.phase]);
@@ -256,7 +276,7 @@ import { resultLinks } from "./result-links.mjs";
     text("issue-heading", rehearsal ? "Rehearsal exercise issue" : `Assigned exercise issue${state.issue?.number ? ` #${state.issue.number}` : ""}`);
     text("issue-title", state.issue?.title || (rehearsal ? `Order: ${state.order?.name || "pending"}` : "Assigned issue not available yet."));
     text("issue-body", state.issue?.body || (rehearsal ? `Prepare the assigned ${state.order?.name || "drink"}. Read the order requirements, inspect the summary, changes, and checks, then approve and apply the rehearsal menu.` : "Ask booth host to open assigned issue/PR in Copilot App"));
-    $("native-guidance").hidden = rehearsal;
+    $("native-guidance").hidden = rehearsal || pilot;
     $("review-target").hidden = rehearsal;
     const target = state.reviewTarget;
     text("review-target", target
@@ -276,7 +296,8 @@ import { resultLinks } from "./result-links.mjs";
       ? "Approved is not served. Use the menu action to finish applying or verifying your change."
       : state.phase === "served"
         ? "Your menu update is saved. Use Retry result if the final result has not been recorded; retrying preserves your run and handle."
-        : state.phase === "completed" ? "Your order is complete. Enjoy your drink."
+        : state.phase === "pilot-served" ? "Your real menu was verified. Pilot learning finished; no ranked event or native completion was recorded."
+          : state.phase === "completed" ? "Your order is complete. Enjoy your drink."
           : "Approval needs all three review sections plus a passed order-details checkpoint. Opening a section alone is not enough.");
     paintExercise();
     paintMenu();
@@ -286,18 +307,22 @@ import { resultLinks } from "./result-links.mjs";
   }
 
   function accept(next) {
-    if (!next || !["rehearsal", "live"].includes(next.mode) || !phases.includes(next.phase) ||
+    if (!next || !["rehearsal", "live", "live-canvas-pilot"].includes(next.mode) || !phases.includes(next.phase) ||
+        (next.mode === "live-canvas-pilot" && (["served", "completed"].includes(next.phase) || next.result !== null || next.completionPending ||
+          next.verification?.reviewSource !== "canvas-pilot" || next.verification?.nativeReviewAvailable)) ||
+        (next.phase === "pilot-served" && next.mode !== "live-canvas-pilot") ||
         !Array.isArray(next.views) || !Array.isArray(next.menu) || !Array.isArray(next.blockers) || !next.runId ||
         typeof next.exercise?.title !== "string" || !Array.isArray(next.exercise.sections) ||
         !next.exercise.sections.every(section => typeof section?.heading === "string" &&
           Array.isArray(section.paragraphs) && section.paragraphs.every(paragraph => typeof paragraph === "string")) ||
-        (next.phase === "completed" ? typeof next.exercise.completion !== "string" : next.exercise.completion !== null)) {
+        (["completed", "pilot-served"].includes(next.phase) ? typeof next.exercise.completion !== "string" : next.exercise.completion !== null)) {
       throw new Error("The booth returned an unrecognized order state. Ask the booth host to check the connection.");
     }
     if (state && (state.runId !== next.runId || state.mode !== next.mode)) {
       throw new Error("The booth returned a different run or mode. This order has not been switched. Ask the booth host to reopen the assigned canvas.");
     }
     state = next;
+    if (!state.review) activeSurface = null;
     stale = false;
     paint();
   }
@@ -376,6 +401,7 @@ import { resultLinks } from "./result-links.mjs";
       if (action === "view") activeSurface = input.surface;
       accept(next?.runId ? next : await request("/api/state"));
       if (["serve", "complete"].includes(action) && state.phase === "completed") $("result").focus();
+      if (action === "serve" && state.phase === "pilot-served") $("app-result").focus();
       $("error-region").hidden = true;
       actionError = false;
     } catch (error) {

@@ -178,7 +178,7 @@ function githubFixture() {
   const responses = {
     [`${root}/issues/1`]: { number: 1, state: "open", title: "Review your order", body: "Assigned learner criteria", user: { login: "staff" } },
     [`${root}/pulls/2`]: pr,
-    [`${root}/pulls/2/files?per_page=100&page=1`]: [{ filename: "src/data/specials.json", status: "modified" }],
+    [`${root}/pulls/2/files?per_page=100&page=1`]: [{ filename: "src/data/specials.json", status: "modified", patch: "Verified fixture patch" }],
     [`${root}/pulls/2/reviews?per_page=100&page=1`]: [],
     [`${root}/commits/${headSha}/check-runs?filter=all&per_page=100&page=1`]: { check_runs: [{ id: 1, name: "menu-validation", head_sha: headSha, status: "completed", conclusion: "success", app: { slug: "github-actions", id: 1 } }] },
     [`${root}/commits/${headSha}/statuses?per_page=100&page=1`]: [],
@@ -200,6 +200,10 @@ test("pilot preflight verifies the actual GitHub adapter using GET only and neve
   const report = await inspectLivePilot({ config, catalog, runId: identity.runId, github: f.github });
   assert.equal(report.status, "assignment-verified");
   assert.equal(report.liveReady, false);
+  assert.equal(report.reviewSource, "native");
+  assert.equal(report.mode, "live");
+  assert.equal(report.eventEligible, false);
+  assert.equal(report.permissionsCertified, false);
   assert.deepEqual(report.order, order);
   assert.equal(report.headSha, headSha);
   assert.equal(report.baseRef, "main");
@@ -208,6 +212,51 @@ test("pilot preflight verifies the actual GitHub adapter using GET only and neve
   assert.ok(f.calls.length > 5);
   assert.equal(f.calls.every(method => method === "GET"), true);
   assert.equal(Object.hasOwn(report, "reviewer"), false);
+});
+
+test("explicit canvas-pilot preflight verifies assignments without native, permission, or event certification", async () => {
+  const f = githubFixture();
+  const pilotConfig = { ...config, mode: "live-canvas-pilot",
+    runs: { [identity.runId]: { ...config.runs[identity.runId], reviewSource: "canvas-pilot" } } };
+  const report = await inspectLivePilot({ config: pilotConfig, catalog, runId: identity.runId, github: f.github });
+  assert.equal(report.status, "assignment-verified");
+  assert.equal(report.reviewSource, "canvas-pilot");
+  assert.equal(report.mode, "live-canvas-pilot");
+  assert.equal(report.liveReady, false);
+  assert.equal(report.eventEligible, false);
+  assert.equal(report.permissionsCertified, false);
+  assert.match(report.blockers.join(" "), /Unranked canvas pilot/);
+  assert.match(report.blockers.join(" "), /not native/);
+  assert.match(report.blockers.join(" "), /No event eligibility, score, leaderboard, QR, or completion comment/);
+  assert.match(report.blockers.join(" "), /does not certify permissions/);
+  assert.ok(f.calls.length > 5);
+  assert.ok(f.calls.every(method => method === "GET"));
+  assert.equal(Object.hasOwn(report, "reviewer"), false);
+});
+
+test("preflight refuses cross-source configuration modes before GitHub reads", async () => {
+  for (const [mode, source] of [["live", "canvas-pilot"], ["live-canvas-pilot", "native"], ["live-canvas-pilot", undefined]]) {
+    const f = githubFixture();
+    const mismatched = { ...config, mode,
+      runs: { [identity.runId]: { ...config.runs[identity.runId], ...(source === undefined ? {} : { reviewSource: source }) } } };
+    await assert.rejects(inspectLivePilot({ config: mismatched, catalog, runId: identity.runId, github: f.github }));
+    assert.equal(f.calls.length, 0);
+  }
+});
+
+test("canvas pilot preflight rejects unavailable summary, patch or check surfaces", async () => {
+  const configured = { ...config, mode: "live-canvas-pilot",
+    runs: { [identity.runId]: { ...config.runs[identity.runId], reviewSource: "canvas-pilot" } } };
+  const evidence = { headSha, baseRef: "main", checksPassed: true, approved: false, merged: false,
+    summary: "Verified proposal", files: [{ patch: "Verified patch" }], checks: [{ name: "menu-validation" }] };
+  for (const missing of [{ summary: "" }, { summary: null }, { files: [] }, { files: [{}] },
+    { files: [{ patch: " " }] }, { checks: [] }, { checks: null }]) {
+    const github = { repo: config.repo,
+      readIssue: async () => ({ number: 1, state: "open", body: "Assigned criteria" }),
+      inspectPullRequest: async () => ({ ...evidence, ...missing }) };
+    await assert.rejects(inspectLivePilot({ config: configured, catalog, runId: identity.runId, github }),
+      { code: "review_unavailable" });
+  }
 });
 
 test("preflight rejects invalid configuration, used assignments, wrong issues and failed checks", async () => {
@@ -238,6 +287,37 @@ test("preflight CLI reports missing or malformed staff configuration without lea
     assert.match(result.stderr, /Live preflight failed/);
     assert.doesNotMatch(result.stderr, /do-not-echo/);
     assert.equal(result.stdout, "");
+  }
+});
+
+test("preflight CLI preserves native exit 2 and reports explicit unranked pilot assignment success only", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "sip-preflight-source-cli-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "staff.json");
+  const script = new URL("../scripts/preflight-live.mjs", import.meta.url).href;
+  const githubModule = new URL("../.github/extensions/commit-and-sip/services/github.mjs", import.meta.url).href;
+  for (const source of [undefined, "native", "canvas-pilot"]) {
+    const pilot = source === "canvas-pilot";
+    const configured = { ...config, mode: pilot ? "live-canvas-pilot" : "live",
+      runs: { [identity.runId]: { ...config.runs[identity.runId], ...(source === undefined ? {} : { reviewSource: source }) } } };
+    await writeFile(file, JSON.stringify(configured));
+    const result = spawnSync(process.execPath, ["--input-type=module", "--eval", `
+      import { GithubAdapter } from ${JSON.stringify(githubModule)};
+      GithubAdapter.prototype.readIssue = async () => ({ number: 1, state: "open", body: "Assigned criteria" });
+      GithubAdapter.prototype.inspectPullRequest = async () => ({
+        headSha: ${JSON.stringify(headSha)}, baseRef: "main", checksPassed: true, approved: false, merged: false,
+        summary: "Verified proposal", files: [{ patch: "Verified patch" }], checks: [{ name: "menu-validation" }]
+      });
+      process.argv = [process.execPath, "preflight-live.mjs", "--run", ${JSON.stringify(identity.runId)}, "--config", ${JSON.stringify(file)}];
+      await import(${JSON.stringify(script)});
+    `], { encoding: "utf8" });
+    assert.equal(result.status, pilot ? 0 : 2, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.status, "assignment-verified");
+    assert.equal(report.reviewSource, source ?? "native");
+    assert.equal(report.liveReady, false);
+    assert.equal(report.eventEligible, false);
+    assert.equal(report.permissionsCertified, false);
   }
 });
 
@@ -475,6 +555,10 @@ test("live runs pin independent copies of required checks and target branch acro
   f.github.inspectPullRequest = async (number, options) => { pinnedCalls.push(options); return { ...f.facts }; };
   f.engine.config = { ...config, requiredChecks: ["changed-without-restart"] };
   f.views({ ...identity, surfaces: ["summary", "changes", "checks"] });
+  await assert.rejects(f.sync(), { code: "assignment_changed" });
+  assert.equal(pinnedCalls.length, 0);
+  assert.deepEqual((await f.engine.store.read()).runs[identity.runId].assignment, assigned);
+  f.engine.config = config;
   await f.sync();
   assert.deepEqual(pinnedCalls[0].requiredChecks, ["menu-validation"]);
   assert.equal(pinnedCalls[0].expectedBaseRef, "main");

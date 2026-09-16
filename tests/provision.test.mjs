@@ -38,7 +38,7 @@ async function fixture(t) {
     state: "open", draft: false, merged: false, mergeable: true, mergeable_state: "clean", merge_commit_sha: null };
   const facts = { actor: "staff", post: null, get: null, reviews: [], checks: [
     { id: 1, name: "menu-validation", app: { slug: "github-actions", id: 15368 }, head_sha: headSha, status: "completed", conclusion: "success" }
-  ], menu: [order], files: [{ filename: "src/data/specials.json", status: "modified" }] };
+  ], menu: [order], files: [{ filename: "src/data/specials.json", status: "modified", patch: "Verified fixture patch" }] };
   const github = new GithubAdapter({ repo, request: async (method, path, body) => {
     calls.push({ method, path, body });
     if (method !== "GET") {
@@ -156,6 +156,123 @@ test("successful provision persists full assignment, preserves config, resumes i
   assert.equal(started.issue.body, f.issues[0].body);
   await assert.rejects(engine.dispatch(input.runId, "sync_review"), { code: "native_views_unavailable" });
   await assert.rejects(f.provision(), { code: "provision_conflict" });
+});
+
+test("canvas pilot provisioning explicitly pins provenance without enabling its configuration mode", async t => {
+  for (const mode of ["rehearsal", "live", "live-canvas-pilot"]) {
+    const f = await fixture(t);
+    await writeFile(f.path, JSON.stringify({ ...f.config, mode }));
+    const request = { ...input, reviewSource: "canvas-pilot" };
+    const preview = await f.provision({ apply: false }, request);
+    assert.equal(preview.reviewSource, "canvas-pilot");
+    assert.equal(preview.assignment.reviewSource, "canvas-pilot");
+    assert.equal(preview.mode, "live-canvas-pilot");
+    assert.equal(preview.liveReady, false);
+    assert.equal(preview.eventEligible, false);
+    assert.equal(preview.permissionsCertified, false);
+    assert.equal(preview.writes, false);
+    assert.match(preview.message, /Unranked canvas pilot/);
+    assert.match(preview.message, /no native PR-view certification/);
+    assert.ok(f.calls.every(call => call.method === "GET"));
+    const result = await f.provision({ apply: true }, request);
+    assert.deepEqual(result.canvasInput, { runId: input.runId, mode: "live-canvas-pilot", orderId: order.id });
+    assert.equal(result.liveReady, false);
+    assert.equal(result.eventEligible, false);
+    assert.equal(result.permissionsCertified, false);
+    assert.match(result.message, /not reviewed, served, or completed/);
+    const installed = await f.configFile.read();
+    assert.equal(installed.mode, mode);
+    assert.deepEqual(installed.runs[input.runId], result.assignment);
+    const saved = (await f.store.read()).provisions[0];
+    assert.equal(saved.assignment.reviewSource, "canvas-pilot");
+    assert.equal(saved.stage, "installed");
+    assert.deepEqual(await f.provision({ apply: true }, request), result);
+    assert.equal(f.calls.filter(call => call.method === "POST").length, 1);
+  }
+});
+
+test("native source stays native whether omitted or explicitly pinned", async t => {
+  for (const source of [{}, { reviewSource: "native" }]) {
+    const f = await fixture(t);
+    const result = await f.provision({ apply: true }, { ...input, ...source });
+    assert.equal(result.reviewSource, "native");
+    assert.equal(result.mode, "live");
+    assert.equal(result.canvasInput.mode, "live");
+    assert.equal(Object.hasOwn(result.assignment, "reviewSource"), Object.hasOwn(source, "reviewSource"));
+    assert.equal((await f.configFile.read()).mode, "rehearsal");
+    assert.deepEqual((await f.store.read()).provisions[0].assignment.reviewSource, source.reviewSource);
+  }
+});
+
+test("invalid review sources cannot reserve assignments or reach GitHub", async t => {
+  const f = await fixture(t);
+  for (const reviewSource of ["", "live-canvas-pilot", "other", null, false]) {
+    await assert.rejects(f.provision({ apply: true }, { ...input, reviewSource }));
+  }
+  assert.equal(f.calls.length, 0);
+  assert.deepEqual(await readdir(f.directory), ["staff.json"]);
+});
+
+test("canvas pilot provisioning rejects an unavailable text patch before reserving or creating an issue", async t => {
+  const f = await fixture(t);
+  delete f.facts.files[0].patch;
+  await assert.rejects(f.provision({ apply: true }, { ...input, reviewSource: "canvas-pilot" }),
+    { code: "review_unavailable" });
+  assert.ok(f.calls.every(call => call.method === "GET"));
+  assert.deepEqual(await readdir(f.directory), ["staff.json"]);
+});
+
+test("cross-source retries and reuse cannot adopt an installed or uncertain issue reservation", async t => {
+  for (const source of [{}, { reviewSource: "native" }, { reviewSource: "canvas-pilot" }]) {
+    for (const uncertain of [false, true]) {
+      const f = await fixture(t);
+      const request = { ...input, ...source };
+      if (uncertain) f.facts.post = body => {
+        f.issues.push({ ...body, number: 10, state: "open", user: { login: "staff" } });
+        throw new Error("Response lost");
+      };
+      if (uncertain) await assert.rejects(f.provision({ apply: true }, request), { code: "provision_reconciliation_required" });
+      else await f.provision({ apply: true }, request);
+      const before = await f.store.read();
+      const configured = await f.configFile.read();
+      const calls = f.calls.length;
+      const other = { ...input, reviewSource: source.reviewSource === "canvas-pilot" ? "native" : "canvas-pilot" };
+      for (const apply of [false, true]) {
+        await assert.rejects(f.provision({ apply }, other), { code: "provision_conflict" });
+        await assert.rejects(f.provision({ apply }, { ...other, runId: "other-source" }), { code: "provision_conflict" });
+      }
+      assert.equal(f.calls.length, calls);
+      assert.deepEqual(await f.store.read(), before);
+      assert.deepEqual(await f.configFile.read(), configured);
+      assert.equal((await f.provision({ apply: true }, request)).assignment.issueNumber, 10);
+      assert.equal(f.calls.filter(call => call.method === "POST").length, 1);
+    }
+  }
+});
+
+test("source edits in installed config cannot bypass the exact provisioning journal", async t => {
+  const f = await fixture(t);
+  await f.provision({ apply: true }, { ...input, reviewSource: "canvas-pilot" });
+  const configured = await f.configFile.read();
+  configured.runs[input.runId].reviewSource = "native";
+  await writeFile(f.path, JSON.stringify(configured));
+  for (const source of ["native", "canvas-pilot"]) {
+    await assert.rejects(f.provision({ apply: true }, { ...input, reviewSource: source }), { code: "provision_conflict" });
+  }
+  assert.equal(f.calls.filter(call => call.method === "POST").length, 1);
+});
+
+test("existing native and canvas pilot learner runs both reserve their real PRs", async t => {
+  for (const mode of ["live", "live-canvas-pilot"]) {
+    const f = await fixture(t);
+    await f.store.transaction(data => {
+      data.runs.previous = { mode, assignment: { repo, prNumber: input.prNumber, issueNumber: 10 } };
+    });
+    for (const source of [{}, { reviewSource: "canvas-pilot" }]) {
+      await assert.rejects(f.provision({ apply: true }, { ...input, ...source }), { code: "provision_conflict" });
+    }
+    assert.equal(f.calls.length, 0);
+  }
 });
 
 test("timeout after issue creation and process restart reconcile without a second POST", async t => {
@@ -387,12 +504,44 @@ test("file config rejects concurrent external edits and keeps unrelated values",
 });
 
 test("CLI invalid arguments stop before credentials, store or network access", () => {
-  for (const args of [[], ["--apply"], ["--run", "x", "--run", "y"], ["--unknown"]]) {
+  const required = ["--run", input.runId, "--pr", "2", "--head", headSha, "--base", "main", "--reviewer", "reviewer", "--order", order.id];
+  for (const args of [[], ["--apply"], ["--run", "x", "--run", "y"], ["--unknown"],
+    [...required, "--review-source", "live-canvas-pilot"], [...required, "--review-source", "invalid"],
+    [...required, "--review-source"], [...required, "--review-source", "canvas-pilot", "--review-source", "native"]]) {
     const result = spawnSync(process.execPath, ["scripts/provision-live.mjs", ...args], { encoding: "utf8" });
     assert.equal(result.status, 1);
     assert.match(result.stderr, /Usage:/);
     assert.equal(result.stdout, "");
   }
+});
+
+test("CLI accepts explicit native and canvas-pilot sources but preserves default omission", async t => {
+  const f = await fixture(t);
+  const script = new URL("../scripts/provision-live.mjs", import.meta.url).href;
+  const provisionModule = new URL("../.github/extensions/commit-and-sip/services/provision.mjs", import.meta.url).href;
+  for (const source of [undefined, "native", "canvas-pilot"]) {
+    const args = ["--run", input.runId, "--pr", "2", "--head", headSha, "--base", "main",
+      "--reviewer", "reviewer", "--order", order.id, "--config", f.path,
+      ...(source === undefined ? [] : ["--review-source", source])];
+    const result = spawnSync(process.execPath, ["--input-type=module", "--eval", `
+      import assert from "node:assert/strict";
+      import { LiveProvisioner } from ${JSON.stringify(provisionModule)};
+      LiveProvisioner.prototype.provision = async function(input, options) {
+        assert.deepEqual(input, ${JSON.stringify({ ...input, ...(source === undefined ? {} : { reviewSource: source }) })});
+        assert.deepEqual(options, { apply: false });
+        return { status: "preview", assignment: input, writes: false };
+      };
+      process.argv = [process.execPath, "provision-live.mjs", ...${JSON.stringify(args)}];
+      await import(${JSON.stringify(script)});
+    `], { encoding: "utf8", env: { ...process.env, COMMIT_AND_SIP_DATA_DIR: join(f.directory, "cli-data") } });
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.assignment.reviewSource, source);
+    assert.equal(Object.hasOwn(report.assignment, "reviewSource"), source !== undefined);
+    assert.equal(Object.hasOwn(report.assignment, "reviewer"), false);
+    assert.equal(report.writes, false);
+  }
+  assert.deepEqual(await readdir(f.directory), ["staff.json"]);
 });
 
 test("reserved-stage restart is safe after a read outage before create intent", async t => {

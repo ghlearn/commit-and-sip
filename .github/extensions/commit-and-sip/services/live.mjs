@@ -19,8 +19,11 @@ export function liveAdapters(config, credential) {
   );
   return {
     github,
-    completion: {
+    completion: config.mode === "live-canvas-pilot" ? null : {
       finish: run => serviceCall(async () => {
+        requireValue(config.mode === "live" && run.mode === "live" &&
+          (run.assignment?.reviewSource === undefined || run.assignment.reviewSource === "native"),
+          "review_source_ineligible", "Only native-live runs can submit to the event completion service.");
         requireValue(config.completionEndpoint && config.leaderboardUrl && config.qrImageUrl &&
           Array.isArray(config.approvedQrOrigins) && config.approvedQrOrigins.length,
         "completion_unconfigured", "Staff must configure the authenticated completion endpoint, public leaderboard, QR URL and approved QR origin.");

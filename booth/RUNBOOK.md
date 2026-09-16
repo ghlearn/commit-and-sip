@@ -1,6 +1,6 @@
 # Commit & Sip booth runbook
 
-**Current operational mode: rehearsal. Live launch is not approved or production-ready.** Missing native App evidence, remote verification/deployment, public leaderboard/QR, authentic screenshots, and approval decisions are launch blockers, not optional polish.
+**Default operational mode: rehearsal. Production live launch is not approved.** The separately opt-in `live-canvas-pilot` supports an unranked real-GitHub exercise only for future authorized staff-prepared work; it does not remove missing native App evidence, remote completion deployment, public leaderboard/QR, authentic screenshots, or approval requirements.
 
 Attendees stay in the App. Commands below are staff-only and run from the repository root unless stated otherwise.
 
@@ -8,7 +8,7 @@ Attendees stay in the App. Commands below are staff-only and run from the reposi
 
 There is one learner step: **Review and serve your order**. The canvas's **Read the step guide** displays the [canonical instructions](../.github/steps/1-review-and-serve.md). Order, review, checkpoint, approval, serving, and result are activities within it. Staff initialization is not another learner step. Actions validate the repository, not learner progress; no real issue, PR, workflow transition, or issue closure is needed for rehearsal.
 
-Keep rehearsal inside the panel. Native PR views elsewhere in the Copilot App are permitted for future live mode, but its missing integrations remain blockers. Do not send attendees to GitHub.com to work around them.
+Keep rehearsal inside the panel. The unranked pilot also stays in the panel, presenting real GitHub data with canvas observations, not native evidence. Native PR views elsewhere in the Copilot App are permitted for future ranked `live`, but its missing integrations remain blockers. Do not send attendees to GitHub.com to work around them.
 
 Reload extensions after changing the step or Markdown templates as well as extension code. Existing saved issue bodies are preserved; use a fresh rehearsal run to preview a changed order template.
 
@@ -36,7 +36,7 @@ If the provider/App restarts after an empty-input launch, the panel returns to s
 
 The old error `runId is a required property; mode is a required property` indicates the runtime still has the old declaration. Staff with host tooling must reload extensions and inspect the provider before retrying an empty open. Reload tools are host capabilities, not shell commands; repository changes alone do not restart a loaded provider.
 
-## Live configuration checklist — blocked until integrations exist
+## Native-live configuration checklist — blocked until integrations exist
 
 Create the staff configuration:
 
@@ -48,14 +48,14 @@ The destination is ignored. Do not place secrets in it. Configure:
 
 | Field | Staff responsibility |
 | --- | --- |
-| `mode` | Set `live` only for a reviewed live deployment |
+| `mode` | Set `live` only for a reviewed native-live deployment; the separate unranked procedure below uses `live-canvas-pilot` |
 | `repo` | Exact authorized `owner/repository` |
 | `requiredChecks` | Exact required check names; never empty them to bypass failures |
 | `leaderboardUrl` | Approved publicly reachable HTTPS leaderboard |
 | `completionEndpoint` | Authenticated server-only verifier endpoint |
 | `qrImageUrl` | Approved publicly readable HTTPS QR image, renderable in an issue |
 | `approvedQrOrigins` | Explicit approved HTTPS QR asset origins; the default empty list does not authorize an image host |
-| `runs` | Fresh run-ID assignments; each includes `issueNumber`, `prNumber`, exact `headSha`, intended application `baseRef`, `reviewer`, and `orderId` |
+| `runs` | Fresh run-ID assignments; each includes `issueNumber`, `prNumber`, exact `headSha`, intended application `baseRef`, `reviewer`, and `orderId`; pilot requires explicit `reviewSource: "canvas-pilot"` |
 
 Example IDs and the example SHA are not usable assignments. Validate the catalog order against the prepared issue and PR. Reload after staff configuration changes.
 
@@ -72,7 +72,7 @@ gh pr view <pr-number> --repo <owner/repository> \
 
 Do not approve your own PR, bypass protection, weaken checks, or grant blanket permissions just to unblock a demo. The canvas does not auto-merge. An authorized operator or approved external workflow performs the separate merge; serving verifies it.
 
-Before admitting live attendees, require all of:
+Before admitting ranked native-live attendees, require all of:
 
 - Trusted native evidence bound to authenticated host/session/device and exact run/repository/PR/head, with event IDs, timestamps, and head invalidation.
 - Completion service independently verifying signed/authorized native and GitHub facts, computing score/rank, reserving global handles, and reconciling retries by run ID.
@@ -98,18 +98,47 @@ Use full commit SHAs and the assigned order ID. The command checks the exact com
 
 ## Staff-only live pilot preflight
 
-The successful rehearsal does not certify real GitHub review. Keep rehearsal available while completing the host-owned integration. Do not toggle live mode just to bypass this checklist.
+This is the native-live preflight and future native-host procedure, not the unranked canvas-pilot flow below. The successful rehearsal does not certify real GitHub review. Keep rehearsal available while completing the host-owned integration. Do not toggle live mode just to bypass this checklist.
 
 1. Prepare one real menu-only PR under a different author from the designated reviewer, then use the staff-only provisioning procedure below to create its exercise issue and assignment. Use a fresh run ID, exact head SHA, and intended application `baseRef`; keep branch protection and required checks intact. The effective check list is pinned during provisioning and cannot be changed on resume. The initializer claims an existing PR; it does not create one or claim Copilot authored it.
 2. Run `npm run preflight:live -- --run RUN_ID` (optionally `--config PATH`). It is read-only. Compare its catalog criteria with the issue copy and separately confirm reviewer authentication and merge permissions. Exit 1 indicates failure; exit 2 means the assignment verified but live readiness is still blocked. No run, approval, merge, comment, or result is created.
 3. Obtain a documented native App navigation/view-evidence integration from the host owner. The inspected SDK advertises canvas rendering and lifecycle, not authenticated native PR-view events. Inject the trusted reader server-side; never offer an HTTP or canvas action that accepts caller-authored view evidence. There is no production reader supplied in this repository.
-4. In the pilot canvas, use the assigned issue/PR references and live step guide. Staff open native PR views inside the App until a supported navigation API is wired. After inspecting those views, choose **Refresh verified review**. Partial observations show progress; only all three verified views allow the factual checkpoint. **Refresh progress** does not verify views. Verification failures revoke saved progress and relock the checkpoint.
+4. In the native-live canvas, use the assigned issue/PR references and live step guide. Staff open native PR views inside the App until a supported navigation API is wired. After inspecting those views, choose **Refresh verified review**. Partial observations show progress; only all three verified views allow the factual checkpoint. **Refresh progress** does not verify views. Verification failures revoke saved progress and relock the checkpoint.
 5. Have the learner answer the checkpoint and explicitly approve. Let the separate authorized operator merge, then choose **Verify merged menu**. Confirm **Your app result** and **House menu** show the verified drink and merge revision. If event services are missing, **Served — event result pending** is the expected boundary, not completed Skills or leaderboard success.
-6. Restore finalization and retry the same run to obtain an accepted receipt before claiming a final issue update, score, or rank. No pilot result can enter rehearsal rankings. Capture authentic App screenshots and record native integration/permission evidence before admitting live attendees.
+6. Restore finalization and retry the same native-live run to obtain an accepted receipt before claiming a final issue update, score, or rank. No live result can enter rehearsal rankings. Capture authentic App screenshots and record native integration/permission evidence before admitting live attendees.
+
+## Staff-only unranked canvas pilot
+
+**Future authorized execution only. This milestone performs no real provisioning, approval, merge, or staff configuration change.** Permission verification, authentic App screenshots, branding/privacy decisions, and trusted native hosting remain unresolved. The pilot is not production Skills/event completion and cannot be promoted into a ranked run.
+
+1. Obtain explicit staff authorization for one prepared real, menu-only PR and its fresh issue/run assignment. Verify the separate author, designated reviewer, issue creator, and merge operator permissions; preserve branch protection and trusted required checks. Use the same durable store/config as the canvas. Never repurpose a native-live or rehearsal run.
+2. Preview provisioning with the normal required assignment flags plus **`--review-source canvas-pilot`**:
+
+   ```sh
+   npm run provision:live -- --run UNIQUE_RUN_ID --pr PREPARED_PR_NUMBER \
+     --head FULL_VERIFIED_HEAD_SHA --base main --reviewer ASSIGNED_REVIEWER \
+     --order mona-latte --review-source canvas-pilot
+   ```
+
+   Only after authorized staff approve the exact preview, repeat with `--apply`. This creates the real issue and pins `reviewSource: "canvas-pilot"` in the durable journal/config. It **does not change config mode**. Preserve this flag on retries; omitted source is native-live, not pilot.
+3. Separately, authorized staff enable `mode: "live-canvas-pilot"` in the host's ignored `booth/local-config.json`, preserving the installed assignment and all other settings. Reload extensions, inspect provider health/capabilities, and directly open the supplied assignment, for example:
+
+   ```json
+   {"runId":"ASSIGNED_RUN_ID","mode":"live-canvas-pilot","orderId":"mona-latte"}
+   ```
+
+   Before opening, run `npm run preflight:live -- --run ASSIGNED_RUN_ID` against that config (use `--config` if needed). For an explicit pilot pairing, exit **0** means only assignment-verified; exit **1** is failure. The report still has `liveReady: false`, `eventEligible: false`, and `permissionsCertified: false`. Independently verify staff permissions; this is not native-host or event certification. Substitute the actual assigned order/run in the open input. Setup and `select_run` remain rehearsal-only; no renderer control provisions or creates pilots. After restart, reopen the same direct assignment.
+4. Start the order. Have the learner inspect **Summary → Changes → Checks** sequentially. Each pilot view rechecks actual GitHub data before saving an observation for this exact assignment/head. Disclose that these are **canvas observations, not native App view events**. Have the learner compare the actual menu with the order and submit their own checkpoint answers; do not prefill correct answers for them.
+5. After inspecting checks/menu and passing the checkpoint, obtain an explicit human approval decision. The real approval is bound to the exact head and durable attempt marker, with reviewer/author guards. Never merge automatically, substitute another reviewer, or copy a marker into a manual review.
+6. A separately authorized operator/workflow merges. Then invoke `serve` to independently verify the pinned head/base/menu/checks and exact effective approval attempt. Pilot verification also requires the current assigned base tip to contain the merge and have the exact inspected menu; a second base-ref read rejects movement during verification. Successful serving shows the menu, merge SHA, and learning summary at **`pilot-served`**. There is no `completed` phase/event, handle, score, rank, QR, judge, event submission, or completion comment. `complete` is deliberately blocked with `pilot_not_ranked`; the authority is never called and independently rejects pilot assignments.
+
+Actual verification errors durably clear current views, checkpoint, and copied review data. Preserve the same run and exact decision/attempt, which retains the actual submitted answers and source/assignment binding. While reviewing, restore GitHub access and reinspect/reanswer; once approved, retry `serve` after the separate merge without re-approving, even after a pending-merge failure. Do not create synthetic native timestamps. Mode/source or assignment/check-policy changes block every operation, including refresh; configuration/source/mode mismatches do not mutate the ledger. Old unbound state fails closed; do not edit it to invent an original binding. A changed head needs a fresh reviewed assignment. No fallback, conversion, endpoint setting, or manual result submission can make a pilot ranked.
+
+The in-canvas pilot guide comes from `.github/markdown-templates/canvas-pilot-guide.md`. Browser test fixtures under `tests/fixtures` use the real `GithubAdapter` with mocked transport and no actual GitHub writes—not actual GitHub execution or native App screenshots. Do not use them as proof that staff performed this procedure. See [repeatable browser validation](../docs/architecture.md#repeatable-mocked-transport-browser-validation) for the isolated fixture and Playwright MCP scripts; clearly label any resulting screenshots as mocked-transport renderer evidence only.
 
 ## Staff-only live exercise provisioning
 
-This is setup, not another learner step. It creates a real issue only with explicit `--apply`; it never starts a learner run, approves, merges, closes an issue, writes completion comments, submits scores, generates QR placeholders, or manufactures native/checkpoint/approval proofs. **Provisioned != reviewed != served != completed.** Live admission remains blocked by the existing integration checklist.
+This is setup, not another learner step. It creates a real issue only with explicit `--apply`; it never starts a learner run, approves, merges, closes an issue, writes completion comments, submits scores, generates QR placeholders, or manufactures native/checkpoint/approval proofs. **Provisioned != reviewed != served != completed.** Ranked native-live admission remains blocked by the existing integration checklist; the unranked pilot has the separate authorization procedure above.
 
 Use one designated staff initializer for the repository/pool. Every initializer process and the canvas must use the same durable `COMMIT_AND_SIP_DATA_DIR` (the normal canvas data directory by default). The journal is `provisions[]` in that store's `ledger.json`, alongside but separate from learner runs/results. Do not use a disposable directory, copy the ledger to independent writers, or run multiple device-local coordinators against the same pool: GitHub's issue-create API has no atomic idempotency-key guarantee. Repository-wide marker scans help detect prior claims but do not serialize independent stores.
 
@@ -121,21 +150,23 @@ npm run provision:live -- --run UNIQUE_RUN_ID --pr PREPARED_PR_NUMBER \
   --order mona-latte
 ```
 
-All six assignment flags are required. Optional `--config STAFF_CONFIG_PATH` selects an existing regular JSON file. Default **preview** reads GitHub and local state only, verifies the exact same-repository, open, non-draft, mergeable, menu-only PR and trusted passing checks, rejects a designated-reviewer approval/merge, and displays the proposed issue and assignment without exposing the reviewer in CLI output. It does not prove the configured reviewer is currently authenticated or has approval permission. A preview is a point-in-time report, not a reservation.
+All six assignment flags are required. Optional `--config STAFF_CONFIG_PATH` selects an existing regular JSON file. Optional `--review-source canvas-pilot` explicitly opts into the unranked path; omission retains native-live behavior. Default **preview** reads GitHub and local state only, verifies the exact same-repository, open, non-draft, mergeable, menu-only PR and trusted passing checks, rejects a designated-reviewer approval/merge, and displays the proposed issue and assignment without exposing the reviewer in CLI output. It does not prove the configured reviewer is currently authenticated or has approval permission. A preview is a point-in-time report, not a reservation.
+
+Pilot provisioning/preflight also require an inspectable summary, a nonempty single-file patch, and checks presentation. `review_unavailable` blocks reservation/issue creation if that material is missing; do not replace it with fabricated review text or waive the gate because checks passed.
 
 After reviewing the preview, repeat the identical command with `--apply`. The initializer:
 
-1. Reserves the run/PR in a short local transaction, recording the exact catalog order, repository, head SHA, base ref, reviewer, effective check list, creator, and rendered issue body.
+1. Reserves the run/PR in a short local transaction, recording the exact catalog order, repository, head SHA, base ref, reviewer, review source, effective check list, creator, and rendered issue body.
 2. Scans all open/closed repository issues for stable run/PR markers. Before the only issue POST, it durably marks the record `creating`. No global ledger lock is held during any network request.
 3. Reconciles the exact owned issue, rechecks the prepared PR, durably binds its issue number, and atomically writes the assignment into the current staff config. Other settings and runs are preserved; `mode` is never changed. The command returns the matching canvas open input, not readiness approval.
 
-The issue includes all drink criteria and the canonical live **Step 1: Review and serve your order** guide. Its five learning activities stay in one step, including feedback, separate approval/serving, and final-result guidance. No attendee cloning, terminal, external editor, or GitHub.com action is introduced. The canvas styling and bundled Mona Sans are unchanged.
+The issue includes all drink criteria and the source-appropriate **Step 1: Review and serve your order** guide. Its learning activities stay in one step, including feedback, separate approval/serving, and native event-result or unranked pilot guidance as appropriate. No attendee cloning, terminal, external editor, or GitHub.com action is introduced. The canvas styling and bundled Mona Sans are unchanged.
 
-Successful preview/provision commands exit **0**, meaning only that operation succeeded, with `liveReady: false`; errors exit **1**. Run `npm run preflight:live -- --run UNIQUE_RUN_ID` afterward (with the same config path if non-default); it still requires live configuration and exits **2** for a verified-but-blocked live assignment. Do not switch mode until the live deployment has been reviewed. For canvas use, put the installed assignment in the host's normal ignored config and reload the extension; a custom CLI config path does not change the host's config path.
+Successful preview/provision commands exit **0**, meaning only that operation succeeded; errors exit **1**. Reports expose `mode`, `reviewSource` (default `native`), and false `liveReady`, `eventEligible`, and `permissionsCertified` flags. For native-live assignments, run `npm run preflight:live -- --run UNIQUE_RUN_ID` afterward (with the same config path if non-default); it requires matching configuration and exits **2** for a verified-but-blocked assignment. Explicit canvas-pilot assignments instead exit **0** after preflight verification under matching pilot configuration, still without permission certification or event readiness. Follow the separate opt-in procedure above. For canvas use, put the installed assignment in the host's normal ignored config and reload the extension; a custom CLI config path does not change the host's config path.
 
 ### Provisioning recovery
 
-Always retry the **exact original command, run, staff creator, PR/head/base/order/reviewer, config path, and store**. Do not create a replacement issue manually, change the saved SHA, repurpose the PR, or delete a reservation.
+Always retry the **exact original command, review source, run, staff creator, PR/head/base/order/reviewer, config path, and store**. Do not create a replacement issue manually, change the saved SHA/source, repurpose the PR, or delete a reservation.
 
 **A process/host crash during a filesystem transaction can leave `ledger.lock` behind.** Restarting the initializer alone does not reclaim it: retries return `store_busy` even when the issue journal is intact. Complete [Lock and storage recovery](#lock-and-storage-recovery) first, then retry the original command. An old timestamp or missing local PID alone cannot establish that every writer is stopped, especially for a shared directory or after a host restart. Never remove a lock automatically, swap to a new store, or reset journal stages to unblock intake.
 
@@ -159,14 +190,14 @@ Keep journal/config/backups private and out of Git. The issue body excludes revi
 2. Let the attendee inspect summary, changes, and checks, using hints freely.
 3. Ask them to compare the full order and answer the factual checkpoint.
 4. Let them explicitly choose approval. If live, wait for the separate authorized merge.
-5. Serve only after merge/menu verification. A generated handle should not exist before serving succeeds.
-6. Confirm **Step 1 complete**, the learning summary, and one local result in rehearsal. In live mode, require one independently confirmed final issue update. Completion retries retain the saved handle and run; there is no next learner step.
+5. Serve only after merge/menu verification (simulated in rehearsal). A generated handle should not exist before serving in scored modes, or at all in the pilot.
+6. Confirm **Step 1 complete**, the learning summary, and one local result in rehearsal. In native `live`, require one independently confirmed final issue update. In the pilot, confirm only **`pilot-served`**, menu/merge SHA, and its learning summary—not Skills/event completion. Scored-mode completion retries retain the saved handle and run; there is no next learner step.
 
-Every correct completion earns 1,000 points. Tied scores share rank. Do not introduce speed, hint, retry, or accessibility penalties. Optional Copilot judging remains unavailable unless a real attributed and moderated trusted service is configured; never read fictional model feedback as authentic.
+Every correct rehearsal or accepted native-live completion earns 1,000 points. Tied scores share rank. The pilot has no points, rank, or judging. Do not introduce speed, hint, retry, or accessibility penalties. Optional native-live Copilot judging remains unavailable unless a real attributed and moderated trusted service is configured; never read fictional model feedback as authentic.
 
 ## Approval and reservation retry recovery
 
-If a live approval write may have succeeded but verification failed, keep the original run. Its private attempt marker was saved before the write. Restore native/GitHub evidence, choose **Refresh verified review**, repeat the factual checkpoint, and explicitly retry approval. Only the exact effective reviewer/head/attempt match is reconciled; an unrelated pre-existing approval still requires a fresh assignment. Do not erase or replace the attempt to recover, and do not manually copy its marker into another review.
+If a native-live approval write may have succeeded but verification failed while still reviewing, keep the original run. Its private attempt marker was saved before the write. Restore native/GitHub evidence, choose **Refresh verified review**, repeat the factual checkpoint, and explicitly retry approval. Only the exact effective reviewer/head/attempt match is reconciled; an unrelated pre-existing approval still requires a fresh assignment. Do not erase or replace the attempt to recover, and do not manually copy its marker into another review. For the pilot, use sequential reverified canvas views instead of native synchronization. If already in `approved`, preserve that exact decision and retry serving after the separate merge without another approval.
 
 Authority reservations are bound to the original repository, issue/PR, head, target branch, reviewer, order, required checks, and trusted approval attempt/timing proof. Restore that registration before retrying finalization. Changing the registration cannot move the receipt to a new issue. A legacy reservation with no saved assignment or proof is blocked; staff must recover its original independently verified binding, not infer it from current configuration or reset the run to conceal an uncertain result.
 
@@ -199,11 +230,12 @@ For a fresh **live** attendee, staff must provision a new clean issue/PR and uni
 | No network | Stop live intake. Offer a clearly labeled fresh rehearsal if the local host works; disclose that it produces no real review or event result. Never silently relabel an existing live run. |
 | Slow issue/PR/check loading | Wait for the in-flight request; avoid repeated clicks. Inspect host logs and GitHub/service status. Preserve the run and rotate the device if needed. |
 | Required checks pending or failing | Wait or repair the prepared exercise through staff procedure. Do not mark checks successful locally. |
-| Native evidence unavailable/incomplete | Verify native App surfaces and trusted integration. If absent, live is blocked; canvas clicks cannot repair it. |
+| Native evidence unavailable/incomplete | Verify native App surfaces and trusted integration. If absent, native `live` is blocked; canvas clicks cannot repair it. Do not convert the run to a pilot. |
 | Assigned head changed | Stop that run. Record staff diagnostics, preserve it, and provision a fresh issue/PR/run. |
 | Approval unauthorized or own PR | Check author/reviewer identity and permissions. Do not retry under a more privileged account without a fresh reviewed assignment. |
 | Approval verified, merge pending | Wait for a separately authorized merge, then retry `serve`. Approval alone is not successful serving. |
-| Menu served, completion fails | Preserve the run. Restore the service, then invoke `complete` on the same panel/run. Do not reset, regenerate the handle, or manually post another result. |
+| Menu served, completion fails in native `live` | Preserve the run. Restore the service, then invoke `complete` on the same panel/run. Do not reset, regenerate the handle, or manually post another result. |
+| Pilot `complete` reports `pilot_not_ranked` | Expected boundary, not a service outage. Keep `pilot-served` and its menu/summary; do not submit it to the authority or relabel it as completed. |
 | Timeout after remote acceptance | Query/reconcile the completion service by the same `runId`. Retry idempotently; confirm the existing result/comment is reused. |
 | Handle phrase conflict or invalid receipt | Preserve the run/candidate and inspect the server reservation. Legitimate global collisions use the authority's deterministic suffix automatically; an unknown/different phrase must not be accepted. Retry the same candidate/run after diagnosis, without manually renaming or duplicating results. |
 | Panel connection lost | Reopen the same run with a new panel instance if needed, then `refresh`. Do not share loopback URLs or tickets. |
@@ -240,7 +272,7 @@ The generator verifies public URL reachability before producing the PNG and `.gi
 
 ## Daily operations and pilot evidence
 
-Before opening: validate host/extension health, accounts and assignments, genuine native evidence, service health, public QR reachability, and a complete pilot run. After an incident, repeat the affected gate before resuming live intake.
+Before ranked native-live opening: validate host/extension health, accounts and assignments, genuine native evidence, service health, public QR reachability, and a complete authorized native-live trial. The unranked canvas pilot follows its separate staff procedure and makes no event-readiness claim. After an incident, repeat the affected gate before resuming intake.
 
 Keep staff-only daily observations of completion time, intervention, actual changed-files/checks views, final-result latency, reset success, and retry/duplicate outcomes. The preserved outline's targets are:
 
@@ -250,6 +282,6 @@ Keep staff-only daily observations of completion time, intervention, actual chan
 - At least 95% of completed runs get the issue update and leaderboard result within five seconds.
 - Consistent reset between attendees.
 
-These are proposed acceptance targets, not results already achieved. Pilot measurements and daily capture tooling are unresolved. Do not invent evidence.
+These are historical proposed event acceptance targets, not results already achieved. The unranked canvas pilot has no event issue update or leaderboard result and must not be counted as meeting those completion targets. Pilot measurements and daily capture tooling are unresolved. Do not invent evidence.
 
 End of day: reconcile pending completions, preserve approved backups, close panels, and stop intake. Event-data retention period, deletion schedule, responsible owner, and access policy still need approval; do not invent a duration or delete records while retries remain unresolved. Publish only approved anonymous outputs.

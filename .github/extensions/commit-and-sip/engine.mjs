@@ -16,43 +16,50 @@ export class RunEngine {
     return publicRun(run, { nativeReviewAvailable: run.mode === "live" && typeof this.viewEvidence?.read === "function" });
   }
 
-  requireLiveAdapters() {
-    requireValue(this.config?.mode === "live" && this.github, "live_unconfigured",
+  requireLiveAdapters(mode = "live") {
+    requireValue(this.config?.mode === mode && this.github, "live_unconfigured",
       "Live mode and its GitHub adapter must be configured before opening or using a live run.");
+  }
+
+  assertRunBinding(run) {
+    requireValue(["rehearsal", "live", "live-canvas-pilot"].includes(run.mode), "invalid_mode", "The saved run mode is invalid.");
+    if (run.mode === "rehearsal") return;
+    this.requireLiveAdapters(run.mode);
+    const assigned = liveAssignment(this.config, this.catalog, run.runId);
+    requireValue(isDeepStrictEqual(assigned, run.assignment) &&
+      isDeepStrictEqual(this.catalog.orders.find(order => order.id === assigned.orderId), run.order),
+    "assignment_changed", "This saved run has a different or unbound assignment, source, order, or check policy. Restore its original configuration.");
+    if (run.mode === "live-canvas-pilot") requireValue(
+      ["order", "reviewing", "approved", "pilot-served"].includes(run.phase) &&
+      run.result === null && run.handle === null && run.commentId === null && run.completionPending === false,
+    "pilot_state_invalid", "This pilot has incompatible event-result state. Preserve the run for staff recovery; it cannot be converted to a ranked result.");
   }
 
   async open(input, { requireNew = false } = {}) {
     exactInput(input, ["runId", "mode", "orderId"]);
     requireValue(validRunId(input.runId), "invalid_run", "Use a stable run ID of 1-80 letters, digits, hyphens or underscores.", 400);
-    requireValue(["rehearsal", "live"].includes(input.mode), "invalid_mode", "Choose rehearsal or live explicitly.", 400);
+    requireValue(["rehearsal", "live", "live-canvas-pilot"].includes(input.mode), "invalid_mode", "Choose rehearsal, live, or live-canvas-pilot explicitly.", 400);
     return this.store.transaction(data => {
       let run = Object.hasOwn(data.runs, input.runId) ? data.runs[input.runId] : null;
       if (run) {
         requireValue(!requireNew, "run_exists", "That run ID already exists. Choose a fresh ID for the next attendee.");
         requireValue(run.mode === input.mode && (!input.orderId || input.orderId === run.order.id),
           "run_conflict", "This run ID belongs to a different mode or order. Use a new run ID.");
-        if (run.mode === "live") {
-          this.requireLiveAdapters();
-          const assigned = liveAssignment(this.config, this.catalog, input.runId);
-          requireValue(assigned && run.assignment.repo === this.config.repo &&
-            ["issueNumber", "prNumber", "headSha", "baseRef", "reviewer", "orderId"].every(key => assigned[key] === run.assignment[key]) &&
-            isDeepStrictEqual(assigned.requiredChecks, run.assignment.requiredChecks),
-          "assignment_changed", "This saved live run has a different or unbound assignment/check policy. Restore its original configuration or create a new run.");
-        }
+        this.assertRunBinding(run);
         return this.present(run);
       }
-      const assignment = input.mode === "live" ? liveAssignment(this.config, this.catalog, input.runId) : null;
-      if (input.mode === "live") {
-        this.requireLiveAdapters();
+      const assignment = input.mode !== "rehearsal" ? liveAssignment(this.config, this.catalog, input.runId) : null;
+      if (input.mode !== "rehearsal") {
+        this.requireLiveAdapters(input.mode);
         requireValue(!input.orderId || input.orderId === assignment.orderId, "order_conflict", "The order must match the staff assignment.");
-        requireValue(!Object.values(data.runs).some(existing => existing.mode === "live" &&
-          existing.assignment?.repo === this.config.repo &&
+        requireValue(!Object.values(data.runs).some(existing => existing.mode !== "rehearsal" &&
+          existing.assignment?.repo.toLowerCase() === this.config.repo.toLowerCase() &&
           (existing.assignment.issueNumber === assignment.issueNumber || existing.assignment.prNumber === assignment.prNumber)),
         "assignment_reused", "This issue or PR already belongs to another run. Staff must prepare a fresh issue and PR.");
       }
       for (const provision of provisionRecords(data)) {
         if (provision.runId === input.runId) {
-          requireValue(input.mode === "live" && provision.stage === "installed" &&
+          requireValue(input.mode !== "rehearsal" && provision.stage === "installed" &&
             isDeepStrictEqual(assignment, { ...provision.assignment, issueNumber: provision.issueNumber }),
           "provision_conflict", "This run is reserved for provisioning. Staff must finish installing its original assignment before opening it.");
         } else if (assignment?.repo.toLowerCase() === provision.assignment.repo.toLowerCase()) {
@@ -77,7 +84,7 @@ export class RunEngine {
     const data = await this.store.read();
     const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
     requireValue(run, "run_missing", "Open this run before continuing.", 404);
-    if (run.mode === "live") this.requireLiveAdapters();
+    this.assertRunBinding(run);
     return this.present(run);
   }
 
@@ -94,11 +101,20 @@ export class RunEngine {
     const evidence = await this.github.inspectPullRequest(run.assignment.prNumber, {
       expectedHeadSha: run.assignment.headSha, reviewer: run.assignment.reviewer,
       order: run.order, requiredChecks: [...run.assignment.requiredChecks], expectedBaseRef: run.assignment.baseRef,
+      ...(run.mode === "live-canvas-pilot" ? { verifyCurrentBase: true } : {}),
       ...(run.approvalAttempt ? { approvalAttemptId: run.approvalAttempt.id } : {})
     });
     requireValue(evidence.headSha === run.assignment.headSha && evidence.baseRef === run.assignment.baseRef && evidence.checksPassed,
       "evidence_invalid", "The assigned PR head, base branch, and passing checks must be verified.");
+    if (run.mode === "live-canvas-pilot") requireValue(typeof evidence.summary === "string" && evidence.summary.trim() &&
+      evidence.files?.length === 1 && typeof evidence.files[0].patch === "string" && evidence.files[0].patch.trim() &&
+      Array.isArray(evidence.checks) && evidence.checks.length > 0,
+    "review_unavailable", "The real PR summary, text patch, and checks must be available for in-canvas inspection.");
     return evidence;
+  }
+
+  reviewIdentity(run) {
+    return { ...run.assignment, runId: run.runId };
   }
 
   async readViews(run) {
@@ -118,6 +134,14 @@ export class RunEngine {
   }
 
   async verifyViews(run) {
+    if (run.mode === "live-canvas-pilot") {
+      requireValue(isDeepStrictEqual(run.canvasReview?.identity, this.reviewIdentity(run)) &&
+        isDeepStrictEqual(run.canvasReview?.surfaces, ["summary", "changes", "checks"]) &&
+        isDeepStrictEqual(run.views, run.canvasReview.surfaces),
+      "canvas_review_incomplete", "Inspect all three real PR sections in this pilot canvas for the assigned revision.");
+      run.evidenceHeadSha = run.assignment.headSha;
+      return;
+    }
     const views = await this.readViews(run);
     requireValue(views.length === 3, "native_views_incomplete", "Open the assigned PR summary, changed files and checks in the App before approving.");
     run.views = views;
@@ -129,7 +153,7 @@ export class RunEngine {
     const state = await this.store.transaction(async data => {
       const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
       requireValue(run, "run_missing", "Open this run before continuing.", 404);
-      if (run.mode === "live") this.requireLiveAdapters();
+      this.assertRunBinding(run);
       const saved = structuredClone(run);
       let verificationFailed = false;
       const verify = async check => {
@@ -142,15 +166,19 @@ export class RunEngine {
       try {
         return await operation(run, data, verify);
       } catch (error) {
-        if (run.mode !== "live" || !verificationFailed) throw error;
+        if (run.mode === "rehearsal" || !verificationFailed) throw error;
         // Roll back tentative work, but commit revocation under the same lock before rethrowing.
         saved.views = [];
         saved.evidenceHeadSha = null;
         saved.assessmentPassed = false;
         saved.reviewSyncedAt = null;
         saved.review = null;
+        if (run.mode === "live-canvas-pilot") {
+          saved.canvasReview = null;
+          saved.checkpointAnswers = null;
+        }
         saved.statusMessage = saved.phase === "reviewing"
-          ? "Review verification failed. Approval is locked; restore the trusted evidence and refresh verified review."
+          ? "Review verification failed. Approval is locked; restore verification and inspect the assigned review again."
           : "Live verification failed. Saved progress is preserved; restore the trusted evidence and retry the current step.";
         data.runs[runId] = saved;
         failure = { error };
@@ -183,10 +211,13 @@ export class RunEngine {
 
   async prepareApproval(runId) {
     return this.runTransaction(runId, async (run, data, verify) => {
-      if (run.mode !== "live" || ["approved", "served", "completed"].includes(run.phase)) return;
+      if (run.mode === "rehearsal" || ["approved", "served", "completed", "pilot-served"].includes(run.phase)) return;
       requireValue(run.phase === "reviewing" && run.assessmentPassed, "assessment_required", "Complete the acceptance-criteria checkpoint before approving.");
       await verify(async () => {
         await this.verifyViews(run);
+        if (run.mode === "live-canvas-pilot") requireValue(isDeepStrictEqual(run.checkpointAnswers,
+          { price: run.order.price, serving: run.order.serving, scope: "one-drink" }),
+        "checkpoint_required", "Submit your actual checkpoint answers before approving this pilot.");
         const evidence = await this.inspect(run);
         requireValue(!evidence.merged && (!evidence.approved || (run.approvalAttempt && evidence.approvedForAttempt === true)),
           "assignment_used", "This PR has an approval from outside this run's learner decision. Ask staff for a fresh assignment.");
@@ -225,13 +256,23 @@ export class RunEngine {
         }
         case "view": {
           exactInput(input, ["surface"]);
-          requireValue(rehearsal, "native_views_unavailable", "Use native App review surfaces. Local clicks do not count as live view evidence.");
+          requireValue(rehearsal || run.mode === "live-canvas-pilot", "native_views_unavailable", "Use native App review surfaces. Local clicks do not count as live view evidence.");
           requireValue(run.phase === "reviewing", "wrong_phase", "Start the order before opening review surfaces.");
           const surfaces = ["summary", "changes", "checks"];
           requireValue(surfaces.includes(input.surface), "invalid_surface", "Choose summary, changes or checks.", 400);
           requireValue(surfaces.indexOf(input.surface) <= run.views.length, "view_sequence", "Review the summary, then changes, then checks.");
+          if (!rehearsal) await verify(async () => {
+            const evidence = await this.inspect(run);
+            requireValue(!evidence.merged, "already_merged", "This PR was merged before this run's approval. Ask staff for a fresh assignment.");
+            run.review = { summary: evidence.summary, files: evidence.files, checks: evidence.checks, headSha: evidence.headSha };
+            if (run.canvasReview) requireValue(isDeepStrictEqual(run.canvasReview.identity, this.reviewIdentity(run)),
+              "canvas_review_invalid", "Canvas observations belong to another assignment. Inspect this assigned revision again.");
+            run.canvasReview ??= { identity: structuredClone(this.reviewIdentity(run)), surfaces: [] };
+            if (!run.canvasReview.surfaces.includes(input.surface)) run.canvasReview.surfaces.push(input.surface);
+          });
           if (!run.views.includes(input.surface)) run.views.push(input.surface);
-          run.statusMessage = `${input.surface} opened in the rehearsal. Compare the change with your order.`;
+          run.statusMessage = rehearsal ? `${input.surface} opened in the rehearsal. Compare the change with your order.`
+            : `${input.surface} opened in the real GitHub-connected pilot canvas. In-canvas observation only, not native App tracking or comprehension evidence.`;
           break;
         }
         case "hint":
@@ -239,7 +280,7 @@ export class RunEngine {
           requireValue(["order", "reviewing", "approved"].includes(run.phase), "wrong_phase",
             "Hints are available before serving. Your saved menu and completion result are unchanged.");
           run.hintCount++;
-          run.statusMessage = `Compare the added item with the issue: $${run.order.price.toFixed(2)}, ${run.order.serving}, and only one new drink. Hints never reduce your score.`;
+          run.statusMessage = `Compare the added item with the issue: $${run.order.price.toFixed(2)}, ${run.order.serving}, and only one new drink. ${run.mode === "live-canvas-pilot" ? "Hints are free; this pilot is unranked." : "Hints never reduce your score."}`;
           break;
         case "check_order": {
           exactInput(input, ["price", "serving", "scope"]);
@@ -256,12 +297,13 @@ export class RunEngine {
           run.assessmentAttempts++;
           const feedback = checkpointFeedback(run.order, input);
           run.assessmentPassed = feedback === null;
+          if (run.mode === "live-canvas-pilot") run.checkpointAnswers = structuredClone(input);
           run.statusMessage = feedback ?? "Acceptance criteria checked. You can now make your approval decision.";
           break;
         }
         case "approve": {
           exactInput(input);
-          if (["approved", "served", "completed"].includes(run.phase)) break;
+          if (["approved", "served", "completed", "pilot-served"].includes(run.phase)) break;
           requireValue(run.phase === "reviewing" && run.assessmentPassed, "assessment_required", "Complete the acceptance-criteria checkpoint before approving.");
           if (!rehearsal) await verify(async () => {
             await this.verifyViews(run);
@@ -275,6 +317,10 @@ export class RunEngine {
             requireValue(evidence.approved && evidence.approvedForAttempt === true, "approval_unverified", "Approval has not been verified on GitHub. Retry verification.");
           });
           requireValue(run.views.length === 3, "review_incomplete", "Inspect summary, changes, and checks before approving.");
+          if (run.mode === "live-canvas-pilot") run.pilotDecision = {
+            identity: structuredClone(this.reviewIdentity(run)), surfaces: [...run.views],
+            answers: structuredClone(run.checkpointAnswers), approvalAttemptId: run.approvalAttempt.id
+          };
           run.phase = "approved";
           run.events.push({ type: rehearsal ? "rehearsal_approved" : "github_approval_verified", at: new Date().toISOString() });
           run.statusMessage = rehearsal ? "Rehearsal approval recorded. Apply the menu separately." : "GitHub approval verified. A separate merge must succeed before the drink is served.";
@@ -282,21 +328,31 @@ export class RunEngine {
         }
         case "serve": {
           exactInput(input);
-          if (["served", "completed"].includes(run.phase)) break;
+          if (["served", "completed", "pilot-served"].includes(run.phase)) break;
           requireValue(run.phase === "approved", "approval_required", "Approve the correct PR before applying the menu.");
           if (!rehearsal) await verify(async () => {
-            await this.verifyViews(run);
+            if (run.mode === "live-canvas-pilot") {
+              requireValue(isDeepStrictEqual(run.pilotDecision?.identity, this.reviewIdentity(run)) &&
+                isDeepStrictEqual(run.pilotDecision?.surfaces, ["summary", "changes", "checks"]) &&
+                isDeepStrictEqual(run.pilotDecision?.answers, { price: run.order.price, serving: run.order.serving, scope: "one-drink" }) &&
+                run.approvalAttempt?.id && run.pilotDecision.approvalAttemptId === run.approvalAttempt.id,
+              "pilot_decision_invalid", "Serving requires this pilot's saved explicit review decision and submitted checkpoint.");
+            } else await this.verifyViews(run);
             const evidence = await this.inspect(run);
+            if (run.mode === "live-canvas-pilot") requireValue(evidence.approvedForAttempt === true,
+              "approval_unverified", "The current GitHub approval must match this pilot's exact decision marker.");
             requireValue(evidence.approved && evidence.merged && evidence.mergeCommitSha,
               "merge_pending", "Approval is not a merge. Wait for the authorized merge, then verify the merged menu again.");
             run.menu = evidence.menu;
             run.servedCommitSha = evidence.mergeCommitSha;
           });
           else run.menu = [run.order];
-          run.phase = "served";
-          run.completionPending = true;
+          run.phase = run.mode === "live-canvas-pilot" ? "pilot-served" : "served";
+          run.completionPending = run.mode !== "live-canvas-pilot";
           run.events.push({ type: rehearsal ? "rehearsal_menu_applied" : "merged_menu_verified", at: new Date().toISOString() });
-          run.statusMessage = "Drink added to the menu. Preparing the final result.";
+          run.statusMessage = run.mode === "live-canvas-pilot"
+            ? "Pilot learning activity finished: authorized merge and menu verified. Unranked; no native Skills/event completion, score, or issue update."
+            : "Drink added to the menu. Preparing the final result.";
           break;
         }
         default: throw new DomainError("unknown_action", "This canvas action is not supported.", 400);
@@ -311,8 +367,9 @@ export class RunEngine {
     // Reserve the handle durably before any remote request: retries cannot regenerate it.
     await this.store.transaction(data => {
       const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
+      requireValue(run?.mode !== "live-canvas-pilot", "pilot_not_ranked", "This pilot cannot submit an event result or generate a score, rank, handle, or QR.");
       requireValue(run && ["served", "completed"].includes(run.phase), "menu_required", "Verify the menu update before requesting a result.");
-      if (run.mode === "live") this.requireLiveAdapters();
+      this.assertRunBinding(run);
       if (!run.handle) {
         run.handle = generateHandle(this.catalog.words, new Set(Object.values(data.runs).map(item => item.handle).filter(Boolean)));
       }

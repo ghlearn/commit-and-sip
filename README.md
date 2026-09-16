@@ -18,15 +18,25 @@ Fresh direct rehearsal opens require the drink's `orderId`; only resuming a save
 
 This is a canvas-led adaptation of a GitHub Skills exercise: one learner step with several activities, not a five-step course. Staff initialization is outside the learner step. Actions validate the repository; they do not drive learner transitions, create exercise issues, or gate rehearsal on workflow queue time. There is no Step 2 or automatic issue closure.
 
-## Status: rehearsal, not production-ready
+## Status: rehearsal and an unranked canvas pilot, not production-ready
 
 Commit & Sip is a project-local Copilot App canvas extension, registered as `commit-and-sip`. Rehearsal is a working local simulation, visibly separate from live GitHub review. It uses no remote services and makes no GitHub writes; it **does persist local progress and results**. It is not a real Copilot review, approval, merge, issue update, or event leaderboard submission.
 
-Live use is blocked pending trusted native App view evidence, an independently verifying completion service, approved public HTTPS hosting and QR assets, authentic App screenshots, and booth/brand/privacy approval. There is **no deployed public leaderboard URL**. Configuration alone does not close these gaps.
+Ranked native `live` use is blocked pending trusted native App view evidence, an independently verifying completion service, approved public HTTPS hosting and QR assets, authentic App screenshots, and booth/brand/privacy approval. There is **no deployed public leaderboard URL**. Configuration alone does not close these gaps.
 
 The server-side `CompletionAuthority` module implements independent evidence checks, durable 1,000-point receipts, handle reservation, comment finalization, and an anonymous leaderboard projection. It is a deployment building block, not a hosted/authenticated service. Trusted native-view and factual-checkpoint readers, HTTP/auth integration, and a separate dedicated authority store are still required; see the [integration contract](docs/integration-contract.md).
 
-## What the live Skills experience will look like
+### Real GitHub-connected canvas pilot — explicitly unranked
+
+`live-canvas-pilot` is a separate staff-opt-in mode for a future authorized, prepared real PR. It uses the existing server-side `GithubAdapter` to load and recheck the actual issue, Summary → Changes → Checks, pinned head/base, menu, and required checks. Its sequential canvas observations are bound to the exact assignment/head; **they are not native App view events**. The learner must supply the factual checkpoint answers and explicitly approve after inspecting the menu and checks. Reviewer/author guards and the durable exact approval-attempt marker still apply.
+
+Approval does not merge. A separately authorized operator merges; serving independently verifies that merge, menu, checks, and the exact approval attempt. The pilot ends at **`pilot-served`**, showing the menu, merge SHA, and learning summary—not Skills/event completion. It creates no handle, score, rank, QR, judge output, result submission, or completion comment; `complete` is blocked with `pilot_not_ranked`, and `CompletionAuthority` rejects pilot assignments.
+
+Staff provision with `--review-source canvas-pilot`, which pins `reviewSource: "canvas-pilot"` in the durable journal and assignment without changing configuration mode. Staff separately enable `live-canvas-pilot` in ignored config, reload, and directly open `{"runId":"ASSIGNED_RUN_ID","mode":"live-canvas-pilot","orderId":"mona-latte"}` with the actual assigned drink. Setup remains rehearsal-only. Omitted review source retains native `live` behavior; there is no conversion or fallback between modes. See the [authorized staff procedure](booth/RUNBOOK.md#staff-only-unranked-canvas-pilot).
+
+This milestone performs **no real provisioning, approval, merge, or staff configuration change**. Permissions, authentic screenshots, branding/privacy approval, and trusted native hosting remain unresolved. Browser fixtures use mocked transport; they are not actual GitHub execution or native App screenshots.
+
+## What the ranked native live Skills experience will look like
 
 The canvas remains the learner's home for **Step 1: Review and serve your order**. It displays the assigned GitHub issue, order criteria, PR number and revision, and the step guide. The learner inspects the real PR's Summary, Changes, and Checks in native Copilot App views, then returns to the canvas to refresh verified review, answer the factual checkpoint, and explicitly approve.
 
@@ -40,7 +50,7 @@ Staff can inspect a prepared assignment without approving, merging, commenting, 
 npm run preflight:live -- --run ASSIGNED_RUN_ID
 ```
 
-The command uses ignored `booth/local-config.json` (or `--config STAFF_CONFIG_PATH`) and server-side `gh`. It checks an open issue, exact menu-only PR delta, trusted passing checks, and unused approval/merge state. Exit **1** means invalid configuration or failed verification; exit **2** means the GitHub assignment verified but the live integration remains blocked. It never returns a production-ready success status. See the [pilot checklist](booth/RUNBOOK.md#staff-only-live-pilot-preflight).
+The command uses ignored `booth/local-config.json` (or `--config STAFF_CONFIG_PATH`) and server-side `gh`. It checks an open issue, exact menu-only PR delta, trusted passing checks, and unused approval/merge state. Exit **1** means invalid configuration or failed verification; exit **2** means a native-live assignment verified but its integration remains blocked. An explicitly configured canvas-pilot assignment exits **0** after verification, meaning assignment-verified only—not production readiness, permission certification, or event eligibility. Reports expose the mode and review source with `liveReady: false`, `eventEligible: false`, and `permissionsCertified: false`. See the [native checklist](booth/RUNBOOK.md#staff-only-live-pilot-preflight) and [unranked pilot procedure](booth/RUNBOOK.md#staff-only-unranked-canvas-pilot).
 
 ### Staff-only exercise provisioning
 
@@ -52,7 +62,7 @@ npm run provision:live -- --run UNIQUE_RUN_ID --pr PREPARED_PR_NUMBER \
   --order mona-latte
 ```
 
-This default preview uses GitHub GET requests only; it does not write the issue, config, or journal. Add **`--apply`** to the same command only after staff approve the preview and exact assignment. The initializer embeds the canonical live Step 1 guide and catalog criteria, then persists the issue/PR binding and pinned branch/check policy in the existing ignored staff config. It preserves other assignments, settings, and the configured mode. It does not create a PR, assert Copilot authorship, enable live mode, or create learner progress.
+This default preview uses GitHub GET requests only; it does not write the issue, config, or journal. Omitted `--review-source` preserves native `live` assignment behavior; explicitly add `--review-source canvas-pilot` for the unranked pilot. Add **`--apply`** to the same command only after staff approve the preview and exact assignment. The initializer embeds the mode-appropriate Step 1 guide and catalog criteria, then persists the issue/PR binding, review source, and pinned branch/check policy in the existing ignored staff config. It preserves other assignments, settings, and the configured mode. It does not create a PR, assert Copilot authorship, enable either GitHub-connected mode, or create learner progress.
 
 **Provisioned is not reviewed, served, completed, or live-ready.** No real learner exercise has been provisioned by this implementation milestone: staff must supply the actual prepared PR, reviewer, and authenticated issue-creator context. Use one designated initializer and the same durable store as the canvas; never run independent provisioning stores against the same pool. Stable markers and a durable create-intent support restart/reconciliation, not atomic exactly-once GitHub issue creation. An uncertain POST is never blindly retried. See [provisioning and recovery](booth/RUNBOOK.md#staff-only-live-exercise-provisioning) before using `--apply`.
 
@@ -91,7 +101,7 @@ npm run check
 - Verify the exact item and scope, not merely a green check.
 - Distinguish **approval** from **merge**. Live serving verifies an actual authorized merge; the canvas never automatically merges live work.
 
-Every correctly completed run earns **1,000 points**. Competition ties share a rank: `1 + number of accepted results with a strictly higher score`. Speed, retries, hints, and accessibility assistance do not reduce the score. Handles are generated only after successful serving and saved before any remote submission.
+Every correctly completed rehearsal or accepted native-live event run earns **1,000 points**; the canvas pilot has no points or rank. Competition ties share a rank: `1 + number of accepted results with a strictly higher score`. Speed, retries, hints, and accessibility assistance do not reduce the score. For scored modes, handles are generated only after successful serving and saved before any remote submission.
 
 For live global collisions, the authority reserves the same curated three-word phrase with a deterministic eight-hex suffix before commenting. The client persists the canonical handle from the authenticated receipt; retries with the original candidate retain the same reservation.
 
@@ -108,7 +118,7 @@ For live global collisions, the authority reserves the same curated three-word p
 | [Order Up skill](.github/skills/order-up/SKILL.md) | In-app guided facilitation |
 | [Approved exercise outline](docs/exercise-outline.md) | Preserved design source |
 
-The approved outline is preserved verbatim, including its original proposals and open questions. Current implementation decisions above and in the integration contract deliberately clarify those proposals: approval is not merge, all correct completions score 1,000, no simulated native-view evidence certifies live review, and optional Copilot commentary is unavailable without a real trusted judge.
+The approved outline is preserved verbatim, including its original proposals and open questions. Current implementation decisions above and in the integration contract deliberately clarify those proposals: approval is not merge, scored completions earn 1,000, the canvas pilot is unranked, no simulated native-view evidence certifies native-live review, and optional Copilot commentary is unavailable without a real trusted judge.
 
 ## Staff configuration and data
 
