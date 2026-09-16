@@ -24,6 +24,157 @@ async function assessed(f) {
   return f.act("check_order", f.answers);
 }
 
+function pauseNextInspection(f, error) {
+  const entered = Promise.withResolvers();
+  const released = Promise.withResolvers();
+  const inspect = f.engine.github.inspectPullRequest;
+  let first = true;
+  f.engine.github.inspectPullRequest = async (...args) => {
+    if (!first) return inspect(...args);
+    first = false;
+    const evidence = await inspect(...args);
+    entered.resolve();
+    await released.promise;
+    if (error) throw error;
+    return evidence;
+  };
+  return { entered: entered.promise, release: released.resolve };
+}
+
+test("slow pilot view reads do not block unrelated rehearsal or pilot transactions in the same store", async t => {
+  const f = await fixture(t);
+  await f.open();
+  await f.act("start");
+  const pause = pauseNextInspection(f);
+  const pending = f.act("view", { surface: "summary" }).then(state => ({ state }), error => ({ error }));
+  await pause.entered;
+  try {
+    assert.deepEqual((await f.act("refresh")).views, []);
+    const other = new RunEngine({ ...f.options, store: new RunStore(f.options.store.directory) });
+    await other.open({ runId: "other-rehearsal", mode: "rehearsal", orderId: "mona-latte" });
+    assert.equal((await other.dispatch("other-rehearsal", "start")).phase, "reviewing");
+    f.config.runs["other-pilot"] = { ...f.assignment, prNumber: 4, issueNumber: 3 };
+    await other.open({ runId: "other-pilot", mode: "live-canvas-pilot" });
+    assert.equal((await other.dispatch("other-pilot", "hint")).hintCount, 1);
+  } finally {
+    pause.release();
+    await pending;
+  }
+  assert.deepEqual((await pending).state.views, ["summary"]);
+});
+
+test("overlapping pilot views reject late snapshots and late errors without overwriting newer progress", async t => {
+  for (const lateFailure of [false, true]) {
+    await t.test(lateFailure ? "late error" : "late success", async t => {
+      const f = await fixture(t);
+      await f.open();
+      await f.act("start");
+      const pause = pauseNextInspection(f, lateFailure ? new Error("Delayed transport failure") : null);
+      const pending = f.act("view", { surface: "summary" }).then(state => ({ state }), error => ({ error }));
+      await pause.entered;
+      let newer;
+      try {
+        const panel = new RunEngine({ ...f.options, store: new RunStore(f.options.store.directory) });
+        await panel.dispatch(f.input.runId, "view", { surface: "summary" });
+        newer = await panel.dispatch(f.input.runId, "view", { surface: "changes" });
+      } finally {
+        pause.release();
+        await pending;
+      }
+      assert.equal((await pending).error.code, "review_changed");
+      assert.deepEqual(await f.act("refresh"), newer);
+      const retry = await f.act("view", { surface: "changes" });
+      assert.deepEqual(retry.views, ["summary", "changes"]);
+      assert.equal("pilotRevision" in retry, false);
+    });
+  }
+});
+
+test("a delayed view cannot revoke an approval or overwrite a newer checkpoint", async t => {
+  const f = await fixture(t);
+  await assessed(f);
+  const pause = pauseNextInspection(f, new Error("Delayed transport failure"));
+  const pending = f.act("view", { surface: "summary" }).then(state => ({ state }), error => ({ error }));
+  await pause.entered;
+  let approved;
+  try {
+    await f.act("check_order", f.answers);
+    approved = await f.act("approve");
+  } finally {
+    pause.release();
+    await pending;
+  }
+  assert.equal((await pending).error.code, "review_changed");
+  assert.equal(approved.phase, "approved");
+  assert.deepEqual(await f.act("refresh"), approved);
+});
+
+test("pilot view commit rechecks configuration binding after the unlocked GitHub read", async t => {
+  for (const change of ["source", "mode", "checks"]) {
+    await t.test(change, async t => {
+      const f = await fixture(t);
+      await f.open();
+      await f.act("start");
+      const before = await f.options.store.read();
+      const pause = pauseNextInspection(f);
+      const pending = f.act("view", { surface: "summary" }).then(state => ({ state }), error => ({ error }));
+      await pause.entered;
+      if (change === "source") f.assignment.reviewSource = "native";
+      if (change === "mode") f.config.mode = "live";
+      if (change === "checks") f.config.requiredChecks = ["different-check"];
+      pause.release();
+      const result = await pending;
+      assert.ok(["review_source_conflict", "live_unconfigured", "assignment_changed"].includes(result.error.code));
+      assert.deepEqual(await f.options.store.read(), before);
+    });
+  }
+});
+
+test("identical-state pilot view retries and revocations still invalidate older in-flight snapshots", async t => {
+  for (const revoke of [false, true]) {
+    await t.test(revoke ? "repeated revocation" : "identical view retry", async t => {
+      const f = await fixture(t);
+      await f.open();
+      await f.act("start");
+      if (revoke) {
+        f.remote.checksPassed = false;
+        await assert.rejects(f.act("view", { surface: "summary" }), { code: "github_verification" });
+        f.remote.checksPassed = true;
+      } else await f.act("view", { surface: "summary" });
+      const before = await f.act("refresh");
+      const revision = (await f.options.store.read()).runs[f.input.runId].pilotRevision;
+      const pause = pauseNextInspection(f);
+      const pending = f.act("view", { surface: "summary" }).then(state => ({ state }), error => ({ error }));
+      await pause.entered;
+      try {
+        if (revoke) {
+          f.remote.checksPassed = false;
+          await assert.rejects(f.act("view", { surface: "summary" }), { code: "github_verification" });
+        } else await f.act("view", { surface: "summary" });
+        assert.deepEqual(await f.act("refresh"), before);
+        assert.notEqual((await f.options.store.read()).runs[f.input.runId].pilotRevision, revision);
+      } finally {
+        pause.release();
+        await pending;
+      }
+      assert.equal((await pending).error.code, "review_changed");
+      assert.deepEqual(await f.act("refresh"), before);
+    });
+  }
+});
+
+test("a current failed pilot view still durably revokes observations and checkpoint success", async t => {
+  const f = await fixture(t);
+  await assessed(f);
+  f.remote.checksPassed = false;
+  await assert.rejects(f.act("view", { surface: "summary" }), { code: "github_verification" });
+  const state = await new RunEngine({ ...f.options, store: new RunStore(f.options.store.directory) }).open(f.input);
+  assert.deepEqual(state.views, []);
+  assert.equal(state.assessmentPassed, false);
+  assert.equal(state.review, null);
+  assert.equal(state.evidenceHeadSha, null);
+});
+
 test("real adapter through mocked transport: pilot inspection, submitted checkpoint, explicit approval and separate serving", async t => {
   const f = await fixture(t);
   const open = await f.open();

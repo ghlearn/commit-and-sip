@@ -51,6 +51,8 @@ Selection binds the running panel, not the persisted exercise. Iframe reloads an
 | `refresh` | `{}` | Read persisted state; does not create review evidence |
 | `sync_review` | `{}` | In live reviewing only, read an injected trusted native-view provider and independently recheck the assigned PR revision |
 
+Pilot `view` performs its GitHub reads outside the global ledger lock. Its short commit transaction revalidates the assignment, phase, view prefix, and saved run snapshot. A private pilot mutation token also changes on identical-state retries and verification revocations, preventing stale successes from restoring revoked evidence and stale failures from clearing newer progress. A superseded response returns `review_changed` without modifying the run; refresh and retry the same section. A current verification failure still durably revokes progress before returning its original error. This change does not move other engine actions outside their existing transactions or change native/rehearsal gates.
+
 Hints are accepted only in `order`, `reviewing`, and `approved`, matching the renderer controls. HTTP and SDK callers receive `wrong_phase` after serving or completion, with no change to status, hint count, menu, or result.
 
 Checkpoint enums: `serving` is `hot` or `cold`; `scope` is `one-drink` or `unrelated-edits`. Unexpected input properties are rejected. Serving initiates completion only in scored modes, so a completion-service failure can follow a successful, durable menu update there.

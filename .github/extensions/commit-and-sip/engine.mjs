@@ -164,7 +164,9 @@ export class RunEngine {
         }
       };
       try {
-        return await operation(run, data, verify);
+        const result = await operation(run, data, verify);
+        if (run.mode === "live-canvas-pilot") run.pilotRevision = randomUUID();
+        return result;
       } catch (error) {
         if (run.mode === "rehearsal" || !verificationFailed) throw error;
         // Roll back tentative work, but commit revocation under the same lock before rethrowing.
@@ -176,6 +178,7 @@ export class RunEngine {
         if (run.mode === "live-canvas-pilot") {
           saved.canvasReview = null;
           saved.checkpointAnswers = null;
+          saved.pilotRevision = randomUUID();
         }
         saved.statusMessage = saved.phase === "reviewing"
           ? "Review verification failed. Approval is locked; restore verification and inspect the assigned review again."
@@ -187,6 +190,43 @@ export class RunEngine {
     });
     if (failure) throw failure.error;
     return state;
+  }
+
+  validateView(run, input) {
+    exactInput(input, ["surface"]);
+    requireValue(["rehearsal", "live-canvas-pilot"].includes(run.mode), "native_views_unavailable", "Use native App review surfaces. Local clicks do not count as live view evidence.");
+    requireValue(run.phase === "reviewing", "wrong_phase", "Start the order before opening review surfaces.");
+    const surfaces = ["summary", "changes", "checks"];
+    requireValue(surfaces.includes(input.surface), "invalid_surface", "Choose summary, changes or checks.", 400);
+    requireValue(surfaces.indexOf(input.surface) <= run.views.length, "view_sequence", "Review the summary, then changes, then checks.");
+  }
+
+  async viewPilot(runId, input, snapshot) {
+    this.assertRunBinding(snapshot);
+    this.validateView(snapshot, input);
+    const { surface } = input;
+    let evidence;
+    let failure;
+    try { evidence = await this.inspect(snapshot); }
+    catch (error) { failure = { error }; }
+    return this.runTransaction(runId, async (run, data, verify) => {
+      // The private revision also fences identical-state retries and revocations.
+      requireValue(isDeepStrictEqual(run, snapshot), "review_changed",
+        "This run changed while GitHub was being checked. Refresh saved progress and retry; no stale review was applied.");
+      this.validateView(run, { surface });
+      await verify(() => {
+        if (failure) throw failure.error;
+        requireValue(!evidence.merged, "already_merged", "This PR was merged before this run's approval. Ask staff for a fresh assignment.");
+        if (run.canvasReview) requireValue(isDeepStrictEqual(run.canvasReview.identity, this.reviewIdentity(run)),
+          "canvas_review_invalid", "Canvas observations belong to another assignment. Inspect this assigned revision again.");
+        run.review = { summary: evidence.summary, files: evidence.files, checks: evidence.checks, headSha: evidence.headSha };
+        run.canvasReview ??= { identity: structuredClone(this.reviewIdentity(run)), surfaces: [] };
+        if (!run.canvasReview.surfaces.includes(surface)) run.canvasReview.surfaces.push(surface);
+        if (!run.views.includes(surface)) run.views.push(surface);
+        run.statusMessage = `${surface} opened in the real GitHub-connected pilot canvas. In-canvas observation only, not native App tracking or comprehension evidence.`;
+      });
+      return this.present(run);
+    });
   }
 
   async syncReview(runId) {
@@ -229,6 +269,11 @@ export class RunEngine {
   async dispatch(runId, action, input = {}) {
     requireValue(validRunId(runId), "invalid_run", "Invalid run ID.", 400);
     if (action === "refresh") { exactInput(input); return this.get(runId); }
+    if (action === "view") {
+      const data = await this.store.read();
+      const snapshot = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
+      if (snapshot?.mode === "live-canvas-pilot") return this.viewPilot(runId, input, snapshot);
+    }
     if (action === "sync_review") { exactInput(input); return this.syncReview(runId); }
     if (action === "complete") { exactInput(input); return this.complete(runId); }
     if (action === "approve") { exactInput(input); await this.prepareApproval(runId); }
@@ -255,24 +300,10 @@ export class RunEngine {
           break;
         }
         case "view": {
-          exactInput(input, ["surface"]);
-          requireValue(rehearsal || run.mode === "live-canvas-pilot", "native_views_unavailable", "Use native App review surfaces. Local clicks do not count as live view evidence.");
-          requireValue(run.phase === "reviewing", "wrong_phase", "Start the order before opening review surfaces.");
-          const surfaces = ["summary", "changes", "checks"];
-          requireValue(surfaces.includes(input.surface), "invalid_surface", "Choose summary, changes or checks.", 400);
-          requireValue(surfaces.indexOf(input.surface) <= run.views.length, "view_sequence", "Review the summary, then changes, then checks.");
-          if (!rehearsal) await verify(async () => {
-            const evidence = await this.inspect(run);
-            requireValue(!evidence.merged, "already_merged", "This PR was merged before this run's approval. Ask staff for a fresh assignment.");
-            run.review = { summary: evidence.summary, files: evidence.files, checks: evidence.checks, headSha: evidence.headSha };
-            if (run.canvasReview) requireValue(isDeepStrictEqual(run.canvasReview.identity, this.reviewIdentity(run)),
-              "canvas_review_invalid", "Canvas observations belong to another assignment. Inspect this assigned revision again.");
-            run.canvasReview ??= { identity: structuredClone(this.reviewIdentity(run)), surfaces: [] };
-            if (!run.canvasReview.surfaces.includes(input.surface)) run.canvasReview.surfaces.push(input.surface);
-          });
+          this.validateView(run, input);
+          requireValue(rehearsal, "review_changed", "The run mode changed. Reopen its original assignment before reviewing.");
           if (!run.views.includes(input.surface)) run.views.push(input.surface);
-          run.statusMessage = rehearsal ? `${input.surface} opened in the rehearsal. Compare the change with your order.`
-            : `${input.surface} opened in the real GitHub-connected pilot canvas. In-canvas observation only, not native App tracking or comprehension evidence.`;
+          run.statusMessage = `${input.surface} opened in the rehearsal. Compare the change with your order.`;
           break;
         }
         case "hint":
