@@ -126,12 +126,15 @@ Only live mode with a configured completion endpoint requests `COMMIT_AND_SIP_CO
 Run from the repository root:
 
 ```sh
+nvm use
 npm ci
 npm test
 npm run check
 ```
 
 The QR development dependency is installed by `npm ci`; the host supplies its extension SDK separately. Tests and syntax checks do not require a live GitHub approval or merge.
+
+`scripts/require-node.mjs` runs as `pretest`/`precheck` and from both live staff CLIs. It compares `process.version` with the `engines.node` floor and exits non-zero with switch instructions instead of letting an unsupported runtime proceed. This matters because the loopback `fetch` suites (`server`, `fonts`, `result-links`) never release Node 18's experimental undici handles, which previously made `npm test` hang with no output rather than fail. `npm test` additionally passes `--test-timeout` and `--test-force-exit` so a stuck or leaked handle aborts instead of stalling, `.nvmrc` pins the major version for both `nvm use` and CI's `setup-node`, and `.npmrc` sets `engine-strict` so installs fail the same way.
 
 For staff validation of a prepared committed order delta, use full commit SHAs:
 

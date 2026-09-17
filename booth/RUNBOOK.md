@@ -14,7 +14,7 @@ Reload extensions after changing the step or Markdown templates as well as exten
 
 ## Before a session
 
-1. Use Node.js 22+ and a Copilot host supporting project canvas extensions.
+1. Use Node.js 22+ (`nvm use` reads the pinned `.nvmrc`) and a Copilot host supporting project canvas extensions. Staff CLIs such as `npm run preflight:live` and `npm run provision:live` refuse to run on an older runtime rather than behaving unpredictably against GitHub.
 2. For development validation and QR tooling, run `npm ci`, `npm test`, and `npm run check`. Rehearsal runtime itself needs no dependency install after its modules are present. The extension SDK is host-resolved; do not install it.
 3. Keep the data directory writable by the booth operator and inaccessible to unrelated users. Default: `$COPILOT_HOME/extensions/commit-and-sip/artifacts/`, where `COPILOT_HOME` defaults to `~/.copilot`. To isolate a staff device, set `COMMIT_AND_SIP_DATA_DIR` to an approved absolute directory before launching the host. Do not point it into the repository.
 4. Reload extensions in the host. List loaded extensions, then inspect the project `commit-and-sip` entry and its log if it is failed. Reinspect after reload; file existence alone is not evidence the provider is running.

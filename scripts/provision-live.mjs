@@ -1,10 +1,13 @@
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { guardNodeVersion } from "./require-node.mjs";
 import { DomainError, loadCatalog } from "../.github/extensions/commit-and-sip/domain.mjs";
 import { RunStore } from "../.github/extensions/commit-and-sip/store.mjs";
 import { GithubAdapter, GithubError } from "../.github/extensions/commit-and-sip/services/github.mjs";
 import { LiveProvisioner } from "../.github/extensions/commit-and-sip/services/provision.mjs";
 import { StaffConfigFile } from "../.github/extensions/commit-and-sip/services/staff-config.mjs";
+
+guardNodeVersion();
 
 const usage = "Usage: npm run provision:live -- --run RUN_ID --pr NUMBER --head FULL_SHA --base BRANCH --reviewer LOGIN --order ORDER_ID [--review-source native|canvas-pilot] [--config STAFF_CONFIG_PATH] [--apply]. Default: native read-only preview. canvas-pilot explicitly provisions an unranked assignment; configuration mode is never changed.";
 try {

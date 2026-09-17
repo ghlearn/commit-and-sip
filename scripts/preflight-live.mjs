@@ -1,7 +1,10 @@
 import { readFile } from "node:fs/promises";
+import { guardNodeVersion } from "./require-node.mjs";
 import { DomainError, loadCatalog, validateStaffConfig } from "../.github/extensions/commit-and-sip/domain.mjs";
 import { GithubAdapter, GithubError } from "../.github/extensions/commit-and-sip/services/github.mjs";
 import { inspectLivePilot } from "../.github/extensions/commit-and-sip/services/pilot.mjs";
+
+guardNodeVersion();
 
 const args = process.argv.slice(2);
 try {

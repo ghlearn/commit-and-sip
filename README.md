@@ -68,7 +68,7 @@ This default preview uses GitHub GET requests only; it does not write the issue,
 
 ## Staff: open a rehearsal
 
-Staff need Node.js 22 or newer and a Copilot App/CLI build supporting project canvas extensions. Open this repository in that host.
+Staff need Node.js 22 or newer and a Copilot App/CLI build supporting project canvas extensions. The pinned version lives in `.nvmrc`; run `nvm use` before npm scripts. Open this repository in that host.
 
 1. Reload extensions after checking out or changing extension files.
 2. List extensions and confirm the project `commit-and-sip` extension is loaded. If it fails, inspect its entry and log before continuing.
@@ -87,12 +87,15 @@ An agent driving the host uses `extensions_reload`, `extensions_manage` (`list`/
 The host resolves `@github/copilot-sdk/extension` automatically. Do not install an SDK package to run the extension. Local rehearsal requires no dependency installation once the modules are present. Maintainers use:
 
 ```sh
+nvm use
 npm ci
 npm test
 npm run check
 ```
 
 `npm ci` installs development dependencies, including the QR generator; it is not an attendee step.
+
+`npm test` and `npm run check` refuse to start on Node older than the `engines` floor, and `npm ci` fails the same way because `engine-strict` is enabled. That guard is deliberate: on Node 18 the loopback `fetch` suites leave experimental undici handles open, so the run hangs forever instead of reporting failures. The suite also runs with a per-test timeout and forced exit, so a leaked handle cannot stall it.
 
 ## What learners practice
 
