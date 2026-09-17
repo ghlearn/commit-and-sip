@@ -12,6 +12,20 @@ The renderer uses text nodes for the guide and templates, not HTML evaluation or
 
 Rehearsal stays entirely in the panel. The explicit unranked canvas pilot reviews real GitHub data in the panel, without claiming native evidence. Future native `live` review may open authentic PR views elsewhere inside the Copilot App. This scope decision does not implement native navigation or evidence capture; all existing native-live gates remain mandatory. No learner GitHub.com navigation, production deployment, or simulated native-live certification is introduced.
 
+## Booth flow reconciliation: mascot drink naming and rating
+
+A booth flow was proposed in which the attendee invents a drink name combining Mona, Ducky, and Copilot, an agent rates that name from 1 to 100 as the score, the attendee merges the pull request, and the exercise issue ends with a nickname, that score, and a leaderboard link. The preserved [outline](exercise-outline.md) already covers the packaging and the closing issue update, and `booth/orders.json` already supplies the three approved mascot drinks (`mona-latte`, `copilot-cortado`, `ducky-cold-brew`). Three parts of that proposal conflict with the outline, so the implemented behavior resolves them as follows. This section records design intent only; it certifies no live readiness.
+
+| Proposal | Outline constraint | Implemented resolution |
+| --- | --- | --- |
+| Attendee types an invented drink name | Low typing; authoring a pull request is out of scope. Public output excludes free-form attendee text. | The attendee selects an approved catalog drink at setup, then reviews the prepared change against that order's criteria. Free-form attendee naming is not implemented and would require an outline amendment plus brand, trademark, and moderation approval before any attendee text is stored or published. |
+| An agent rating from 1 to 100 is the score | Primary rank must be deterministic and recomputed server-side; Copilot judging is commentary or a named award unless a calibrated, pinned, moderated rubric is approved. | A correct scored completion remains 1,000 with equal scores sharing rank. Any Copilot rating is unranked commentary and stays unavailable until a real attributed, moderated, trusted judge is configured. |
+| The attendee merges the pull request | Approval is the explicit human decision; merge or apply is separately authorized to avoid shared-branch conflicts. | `approve` stays the graded human decision and is never merge. A separately authorized operator or workflow merges, and `serve` independently verifies the actual merge and resulting menu. Copilot-assisted merge outside the canvas is permitted but is not a grading gate. |
+
+Nickname ordering also differs: the barista handle is generated only after the menu update succeeds, is persisted before remote submission, and appears in the final exercise-issue update with the score, rank, award, and approved QR reference. It is not shown when the issue is first opened and is never derived from attendee identity.
+
+Attendee-authored names, agent-determined rank, and attendee-performed merge as a completion signal are therefore not supported by the current implementation. Adopting them is a deliberate amendment of outline sections 3, 5, and 6 and open questions 3 and 4, and it does not change the unresolved production work recorded below.
+
 ## Supported canvas boundary
 
 The project extension entrypoint is `.github/extensions/commit-and-sip/extension.mjs`. The installed host's extension SDK documentation is the authority for `joinSession`, `createCanvas`, lifecycle callbacks, action schemas, and error handling. Consult that installed documentation or the host extension authoring guide; do not infer undocumented navigation or telemetry APIs from the existence of a canvas.
