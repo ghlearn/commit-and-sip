@@ -111,6 +111,46 @@ test("live is fail-closed without configuration or native evidence", async t => 
   assert.equal((await live.store.read()).results.length, 0);
 });
 
+test("a staff assignment may pin an attendee-invented drink inline", async t => {
+  const invented = {
+    artwork: "original-latte-cup", description: "A mona-inspired pour invented at the Level Up Lounge.",
+    id: "mona-moonlight-latte", name: "Mona Moonlight Latte", price: 5.75, serving: "hot"
+  };
+  const assign = order => ({
+    mode: "live", repo: "ghlearn/commit-and-sip",
+    runs: {
+      "pinned-run": {
+        issueNumber: 1, prNumber: 2, baseRef: "main", reviewer: "booth",
+        headSha: "a".repeat(40), orderId: order.id, order
+      }
+    }
+  });
+
+  const live = await fixture(t, { config: assign(invented), github: {} });
+  const opened = await live.engine.open({ runId: "pinned-run", mode: "live" });
+  assert.deepEqual(opened.order, invented, "the pinned order is used even though it is not in the catalog");
+
+  // The pinned order is part of the assignment, so editing it later must break the binding.
+  const tampered = new RunEngine({
+    store: live.store, catalog: await loadCatalog(),
+    config: assign({ ...invented, price: 4.25 }), github: {}
+  });
+  await assert.rejects(tampered.get("pinned-run"), { code: "assignment_changed" });
+
+  for (const broken of [
+    { ...invented, id: "different-id" },
+    { ...invented, artwork: "unapproved-cup" },
+    { ...invented, price: 0 },
+    { ...invented, extra: true }
+  ]) {
+    const bad = await fixture(t, {
+      config: { ...assign(invented), runs: { "pinned-run": { ...assign(invented).runs["pinned-run"], order: broken } } },
+      github: {}
+    });
+    await assert.rejects(bad.engine.open({ runId: "pinned-run", mode: "live" }), { code: "invalid_order" });
+  }
+});
+
 test("prototype property names are ordinary isolated run IDs, not inherited records", async t => {
   const { engine } = await fixture(t);
   await assert.rejects(engine.get("constructor"), { code: "run_missing" });

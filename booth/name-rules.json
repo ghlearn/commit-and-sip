@@ -1,0 +1,19 @@
+{
+  "minLength": 3,
+  "maxLength": 40,
+  "mascots": ["mona", "ducky", "copilot"],
+  "artworkByMascot": {
+    "mona": "original-latte-cup",
+    "copilot": "original-cortado-cup",
+    "ducky": "original-cold-brew-glass"
+  },
+  "prices": [4, 4.25, 4.5, 4.75, 5, 5.25, 5.5, 5.75, 6, 6.25],
+  "servings": ["hot", "cold"],
+  "proposal": {
+    "flawRate": 0.5,
+    "flawFields": ["price", "serving"]
+  },
+  "blockedTerms": [
+    "blocked-example-term"
+  ]
+}

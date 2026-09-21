@@ -1,6 +1,6 @@
 import {
   DomainError, requireValue, exactInput, validRunId, makeRun, publicRun,
-  rehearsalIssue, rehearsalReview, generateHandle, liveAssignment, validBaseRef
+  rehearsalIssue, rehearsalReview, generateHandle, liveAssignment, validBaseRef, assignedOrder
 } from "./domain.mjs";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -27,7 +27,7 @@ export class RunEngine {
     this.requireLiveAdapters(run.mode);
     const assigned = liveAssignment(this.config, this.catalog, run.runId);
     requireValue(isDeepStrictEqual(assigned, run.assignment) &&
-      isDeepStrictEqual(this.catalog.orders.find(order => order.id === assigned.orderId), run.order),
+      isDeepStrictEqual(assignedOrder(this.catalog, assigned), run.order),
     "assignment_changed", "This saved run has a different or unbound assignment, source, order, or check policy. Restore its original configuration.");
     if (run.mode === "live-canvas-pilot") requireValue(
       ["order", "reviewing", "approved", "pilot-served"].includes(run.phase) &&
@@ -69,7 +69,8 @@ export class RunEngine {
       }
       if (input.mode === "rehearsal") requireValue(typeof input.orderId === "string", "order_required",
         "Choose a catalog drink explicitly when creating a new rehearsal. Omit it only when resuming a saved run.", 400);
-      const order = this.catalog.orders.find(item => item.id === (assignment?.orderId ?? input.orderId));
+      const order = assignment ? assignedOrder(this.catalog, assignment)
+        : this.catalog.orders.find(item => item.id === input.orderId);
       requireValue(order, "invalid_order", "Choose Mona Latte, Copilot Cortado, or Ducky Cold Brew.", 400);
       run = makeRun({
         runId: input.runId, mode: input.mode, order,

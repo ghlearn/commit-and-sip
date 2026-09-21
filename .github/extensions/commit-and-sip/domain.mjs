@@ -37,6 +37,25 @@ export async function loadCatalog() {
   return { orders, words };
 }
 
+// Mirrors the merge-time drink gate in services/github.mjs so a staff-pinned
+// inline order cannot be accepted here and then rejected at serve time.
+const DRINK_KEYS = ["artwork", "description", "id", "name", "price", "serving"];
+const ARTWORK = ["original-latte-cup", "original-cortado-cup", "original-cold-brew-glass"];
+
+export function validateOrderShape(order) {
+  requireValue(order !== null && typeof order === "object" && !Array.isArray(order) &&
+    JSON.stringify(Object.keys(order).sort()) === JSON.stringify(DRINK_KEYS),
+  "invalid_order", "A pinned order must use the exact drink schema.", 400);
+  requireValue(["id", "name", "description", "artwork"].every(key =>
+    typeof order[key] === "string" && order[key].trim() && order[key].length <= 500),
+  "invalid_order", "Pinned order text is invalid.", 400);
+  requireValue(["hot", "cold"].includes(order.serving) && ARTWORK.includes(order.artwork) &&
+    /^[a-z0-9][a-z0-9-]{0,79}$/.test(order.id) &&
+    Number.isFinite(order.price) && order.price > 0 && order.price <= 1000,
+  "invalid_order", "Pinned order ID, artwork, serving, or price is invalid.", 400);
+  return order;
+}
+
 export function generateHandle(words, used) {
   for (let attempt = 0; attempt < 1024; attempt++) {
     const handle = [words.adjectives, words.verbs, words.nouns]
@@ -94,8 +113,21 @@ export function preparedAssignment(config, catalog, assignment) {
   requireValue(assignment.requiredChecks === undefined ||
     (Array.isArray(assignment.requiredChecks) && JSON.stringify(assignment.requiredChecks) === JSON.stringify(requiredChecks)),
   "assignment_changed", "The provisioned required checks differ from current staff policy. Restore the original policy.");
-  requireValue(catalog.orders.some(order => order.id === assignment.orderId), "invalid_order", "The assigned order must exist in the booth catalog.", 400);
+  if (assignment.order === undefined) {
+    requireValue(catalog.orders.some(order => order.id === assignment.orderId), "invalid_order", "The assigned order must exist in the booth catalog.", 400);
+  } else {
+    validateOrderShape(assignment.order);
+    requireValue(assignment.order.id === assignment.orderId, "invalid_order", "A pinned attendee order must match its assigned order ID.", 400);
+  }
   return { ...assignment, repo: config.repo, requiredChecks: [...requiredChecks] };
+}
+
+// A staff assignment either names a catalog drink or pins the attendee's
+// invented drink inline. The pinned object is part of the assignment, so the
+// existing deep-equal binding check still detects any later tampering.
+export function assignedOrder(catalog, assignment) {
+  if (assignment?.order !== undefined) return validateOrderShape(assignment.order);
+  return catalog.orders.find(item => item.id === assignment?.orderId) ?? null;
 }
 
 export function makeRun({ runId, mode, order, assignment = null, now = new Date().toISOString() }) {
