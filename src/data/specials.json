@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "artwork": "original-latte-cup",
+    "description": "An octo-cat classic with espresso and steamed milk.",
+    "id": "mona-latte",
+    "name": "Mona Latte",
+    "price": 5.5,
+    "serving": "hot"
+  }
+]
