@@ -15,7 +15,31 @@ export class BoothPanel {
 
   async get() {
     if (!this.runId) return { phase: "idle", ...(await this.engine.house()) };
-    return this.decorate(await this.engine.get(this.runId));
+    const state = await this.currentRun();
+    if (!state) return { phase: "idle", ...(await this.engine.house()) };
+    return this.decorate(state);
+  }
+
+  // The panel's cursor is a cache of who is at the counter, and the ledger can
+  // move without it: staff close an abandoned station, or an event archive
+  // wipes the ledger entirely. Either leaves this panel pointing at a run the
+  // attendee never finished, which would refuse `begin` as already_started and
+  // strand the station. Reconcile instead of trusting the cursor: a run that is
+  // gone or already finished releases it, and the next attendee can start.
+  async currentRun() {
+    let state;
+    try {
+      state = await this.engine.get(this.runId);
+    } catch (error) {
+      if (error?.code !== "run_missing") throw error;
+      this.runId = null;
+      return null;
+    }
+    if (state.phase === "complete") {
+      this.runId = null;
+      return null;
+    }
+    return state;
   }
 
   // The QR image is derived from the verified destination rather than stored,
@@ -29,6 +53,9 @@ export class BoothPanel {
     if (action === "refresh") { exactInput(input); return this.get(); }
     if (action === "begin") {
       exactInput(input);
+      // Release a cursor the ledger has already moved past, so a staff close or
+      // an event wipe does not leave this station refusing every new attendee.
+      if (this.runId) await this.currentRun();
       requireValue(!this.runId, "already_started",
         "This station already has a barista. Finish that order before starting another.", 409);
       // Guard the gap between minting a run ID and recording it, so a double
@@ -43,6 +70,7 @@ export class BoothPanel {
         this.busy = false;
       }
     }
+    if (this.runId) await this.currentRun();
     requireValue(this.runId, "not_started", "Start an order at this station first.", 409);
     const state = await this.engine.dispatch(this.runId, action, input);
     // Serving commits locally first; publishing to the event leaderboard is a

@@ -41,7 +41,7 @@ Staff need Node.js 22 or newer and a Copilot App/CLI build supporting project ca
 4. Inspect the registered `commit-and-sip` canvas capabilities.
 5. Open the canvas with no input, or `{}`. The counter opens idle and ready for the next attendee.
 
-To take a drink off the menu, see [taking a drink down](booth/RUNBOOK.md#taking-a-drink-down). Removal is a staff command, deliberately not a button on the attendee screen.
+Staff operations live on a second canvas, `commit-and-sip-admin`: event totals, results export, drink takedown, closing an abandoned station, and the end-of-event archive and reset. It is deliberately not part of the attendee screen, which faces a queue. See the [staff dashboard](booth/RUNBOOK.md#staff-dashboard), [taking a drink down](booth/RUNBOOK.md#taking-a-drink-down), and [ending an event](booth/RUNBOOK.md#ending-an-event).
 
 An agent driving the host uses `extensions_reload`, `extensions_manage` (`list`/`inspect`), `list_canvas_capabilities`, `open_canvas`, and `invoke_canvas_action`. These are host tools, not shell commands. Discover the loaded extension and provider identifiers instead of inventing them. Choose a panel `instanceId` when opening, then reuse that panel handle for actions.
 
@@ -74,6 +74,7 @@ Scores run from 1 to **5,000** and come from a deterministic rubric in code, not
 | [Learner entry guide](docs/learner-guide.md) | Attendees and facilitators |
 | [Booth runbook](booth/RUNBOOK.md) | Setup, moderation, recovery, reset, and event staff |
 | [Blocklist sourcing proposal](docs/blocklist-sourcing.md) | Whoever owns the moderation decision |
+| [Leaderboard service design](docs/leaderboard-service.md) | Whoever builds the event leaderboard |
 | [Integration contract](docs/integration-contract.md) | Leaderboard and service implementers |
 | [Architecture and validation](docs/architecture.md) | Maintainers |
 | [Asset capture checklist](.github/images/README.md) | Authentic screenshots, accessible QR, branding |
@@ -93,5 +94,7 @@ The booth reads one optional ignored file, `booth/local-config.json`. It current
 That URL must be public HTTPS with no credentials, fragment, or nonstandard port. Retired pull-request keys such as `mode`, `runs`, `repo`, and `requiredChecks` are rejected on start rather than ignored, so a stale config cannot look configured. Never put credentials in that file, the renderer, the repository, or a QR URL.
 
 State persists in `$COPILOT_HOME/extensions/commit-and-sip/artifacts/ledger.json`; `COPILOT_HOME` defaults to `~/.copilot`. Staff may set `COMMIT_AND_SIP_DATA_DIR` to an absolute directory before the host launches. The store uses `ledger.lock` and atomic, fsynced writes. Closing or reloading a panel does not reset the booth, and hand-over does not erase the house menu.
+
+Exports and archives are written beside the ledger, under `exports/`, and never into the repository. **Deleting the cloned repository does not delete attendee data** — it deletes the reviewed blocklist and staff configuration while leaving every name and removal record on the machine. End an event through the dashboard, then copy the archive off the device.
 
 Neither a device's loopback renderer nor repository assets are public phone destinations. Do not publish an event QR until an approved, publicly reachable HTTPS leaderboard exists.

@@ -6,6 +6,7 @@ import { BoothEngine } from "./booth-engine.mjs";
 import { loadNameRules } from "./services/coffee-name.mjs";
 import { blocklistStatus } from "./services/moderation.mjs";
 import { boothCanvasDefinition } from "./canvas.mjs";
+import { adminCanvasDefinition } from "./admin-canvas.mjs";
 
 const catalog = await loadCatalog();
 let config = {};
@@ -30,11 +31,16 @@ async function guarded(fn) {
 const rules = await loadNameRules();
 const engine = new BoothEngine({ store, catalog, rules, leaderboardUrl: config.leaderboardUrl ?? null });
 
+const reportError = error =>
+  session?.log(`Commit & Sip HTTP service error: ${error.name}; check staff configuration.`, { level: "error" });
+
 session = await joinSession({
-  canvases: [createCanvas(boothCanvasDefinition({
-    engine, guarded,
-    reportError: error => session?.log(`Commit & Sip HTTP service error: ${error.name}; check staff configuration.`, { level: "error" })
-  }))]
+  canvases: [
+    createCanvas(boothCanvasDefinition({ engine, guarded, reportError })),
+    // Staff-only, and a separate canvas on purpose: the attendee screen must
+    // stay a surface with no destructive action reachable from it.
+    createCanvas(adminCanvasDefinition({ engine, guarded, reportError })),
+  ]
 });
 
 // Attendee names go on a published menu, so an unreviewed blocklist is a real

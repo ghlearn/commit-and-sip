@@ -1,8 +1,12 @@
-import { mkdir, readFile, rename, open, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, open, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DomainError } from "./domain.mjs";
+
+// Chosen so listArtifacts, which only offers .json, can never show a pending
+// archive to staff as though it were a verified one.
+const PENDING_SUFFIX = ".pending";
 
 // The booth and the staff scripts must resolve the same ledger. Working this
 // out in two places invites drift, and the failure mode is silent: a removal
@@ -19,6 +23,68 @@ export class RunStore {
     this.directory = directory;
     this.path = join(directory, "ledger.json");
     this.lock = join(directory, "ledger.lock");
+    // Exports and archives live beside the ledger, never inside the repository
+    // clone: that clone is disposable and may be deleted after an event, and
+    // committing attendee data would publish it.
+    this.exports = join(directory, "exports");
+  }
+
+  // Refuses to overwrite. Two archives on one day must never collide silently,
+  // because the survivor would look like a complete record of both.
+  async writeArtifact(name, payload) {
+    await mkdir(this.exports, { recursive: true, mode: 0o700 });
+    const path = join(this.exports, name);
+    let file;
+    try {
+      file = await open(path, "wx", 0o600);
+    } catch (error) {
+      if (error.code === "EEXIST") {
+        throw new DomainError("artifact_exists", `${name} already exists. Nothing was written.`, 409);
+      }
+      throw error;
+    }
+    try {
+      await file.writeFile(`${JSON.stringify(payload, null, 2)}\n`);
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    return path;
+  }
+
+  async readArtifact(path) {
+    return JSON.parse(await readFile(path, "utf8"));
+  }
+
+  async listArtifacts() {
+    try {
+      const names = await readdir(this.exports);
+      return names.filter(name => name.endsWith(".json")).sort();
+    } catch (error) {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    }
+  }
+
+  // An archive has to exist on disk before it can be read back and verified,
+  // but a file that fails that check must never look like a good copy of the
+  // event. Pending artifacts carry a suffix listArtifacts ignores, so they are
+  // invisible to staff until publishArtifact renames one into place.
+  async writePendingArtifact(name, payload) {
+    return this.writeArtifact(`${name}${PENDING_SUFFIX}`, payload);
+  }
+
+  async publishArtifact(pendingPath) {
+    if (!pendingPath.endsWith(PENDING_SUFFIX)) throw new Error("Only a pending artifact can be published.");
+    const path = pendingPath.slice(0, -PENDING_SUFFIX.length);
+    await rename(pendingPath, path);
+    return path;
+  }
+
+  // Best effort on purpose: the caller is already failing, and a leftover
+  // pending file is far less harmful than masking the original error.
+  async discardArtifact(path) {
+    await rm(path, { force: true }).catch(() => {});
   }
 
   async read() {

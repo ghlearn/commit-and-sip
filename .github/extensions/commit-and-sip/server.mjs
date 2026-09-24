@@ -3,9 +3,10 @@ import { readFile } from "node:fs/promises";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { DomainError, exactInput, requireValue } from "./domain.mjs";
 
-const assets = new Map([
-  ["/", ["booth.html", "text/html; charset=utf-8"]],
-  ["/booth.js", ["booth.js", "text/javascript; charset=utf-8"]],
+// Shared by every panel. Page-specific documents and scripts are added per
+// server instead, so a booth panel cannot serve the staff dashboard's script
+// to whoever is standing at the counter.
+const shared = new Map([
   ["/style.css", ["style.css", "text/css; charset=utf-8"]],
   ["/fonts/MonaSansVF.woff2", ["fonts/MonaSansVF.woff2", "font/woff2"]],
   ["/fonts/MonaSansVF-Italic.woff2", ["fonts/MonaSansVF-Italic.woff2", "font/woff2"]],
@@ -30,8 +31,13 @@ async function bodyJSON(request) {
   catch { throw new DomainError("invalid_json", "Action input must be valid JSON.", 400); }
 }
 
-export async function startServer({ engine, reportError = () => {}, panel, home = "booth.html" }) {
+export async function startServer({ engine, reportError = () => {}, panel, home = "booth.html", script = "booth.js" }) {
   requireValue(panel && typeof panel === "object", "invalid_panel", "The local service requires a panel.", 500);
+  const assets = new Map([
+    ...shared,
+    ["/", [home, "text/html; charset=utf-8"]],
+    [`/${script}`, [script, "text/javascript; charset=utf-8"]],
+  ]);
   const ticket = randomBytes(32).toString("hex");
   let origin;
   const server = createServer(async (request, response) => {
@@ -49,9 +55,7 @@ export async function startServer({ engine, reportError = () => {}, panel, home 
         "host_rejected", "Unrecognized loopback host.", 403);
       const url = new URL(request.url, origin);
       if (request.method === "GET" && assets.has(url.pathname)) {
-        let [file, type] = assets.get(url.pathname);
-        // The booth screen is one page across every phase.
-        if (url.pathname === "/") file = home;
+        const [file, type] = assets.get(url.pathname);
         const bytes = await readFile(new URL(`renderer/${file}`, import.meta.url));
         response.writeHead(200, { "Content-Type": type });
         response.end(bytes);
