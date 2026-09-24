@@ -17,7 +17,9 @@ Reload extensions after changing extension code or the step document.
 ## Before a session
 
 1. Use Node.js 22+ (`nvm use` reads the pinned `.nvmrc`) and a Copilot host supporting project canvas extensions.
-2. For development validation and QR tooling, run `npm ci`, `npm test`, and `npm run check`. The booth runtime needs no dependency install once its modules are present. The extension SDK is host-resolved; do not install it.
+2. Run `npm ci`, `npm test`, and `npm run check`. The extension SDK is host-resolved; do not install it.
+
+   The booth *runs* without `npm ci` — a fresh clone serves both canvases and the whole attendee flow. What it loses is the **QR code on the served screen**: `qrcode` is a development dependency, so without it `renderQrDataUrl` returns `null` and the panel falls back to the plain link. That fallback is deliberate rather than a broken image, but it is easy to miss, so the extension now logs a warning at start-up when a leaderboard is configured and the encoder is absent. Treat it like the blocklist warning: read the start-up log. Verified by running a booth from a fresh clone both ways.
 3. Keep the data directory writable by the booth operator and inaccessible to unrelated users. Default: `$COPILOT_HOME/extensions/commit-and-sip/artifacts/`, where `COPILOT_HOME` defaults to `~/.copilot`. To isolate a staff device, set `COMMIT_AND_SIP_DATA_DIR` to an approved absolute directory before launching the host. Do not point it into the repository.
 4. Reload extensions in the host. List loaded extensions, then inspect the project `commit-and-sip` entry and its log if it is failed. Reinspect after reload; file existence alone is not evidence the provider is running.
 5. **Read the start-up log.** A moderation warning means the blocklist is still an unreviewed placeholder. Treat it as a release blocker, not noise.

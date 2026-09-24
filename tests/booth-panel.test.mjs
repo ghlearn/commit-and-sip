@@ -141,6 +141,17 @@ test("a missing QR encoder degrades to the plain link instead of a broken code",
     "the link itself is still offered");
 });
 
+// The fallback above is correct but invisible, so staff need it surfaced at
+// start-up. Pin both directions: a booth that installed the encoder must not be
+// warned, and one that skipped it must be.
+test("a missing QR encoder is detectable so start-up can warn staff", async () => {
+  const { qrEncoderAvailable } = await import("../.github/extensions/commit-and-sip/services/qr.mjs");
+  assert.equal(await qrEncoderAvailable(() => Promise.reject(new Error("not installed"))), false,
+    "a booth that skipped npm ci is reported as missing the encoder");
+  assert.equal(await qrEncoderAvailable(), true,
+    "this repository has the encoder installed, so no warning is owed");
+});
+
 // The canvas definition is what the App loads, so exercise it directly rather
 // than trusting that the panel wiring underneath it is reached.
 async function canvasFixture(t, options = {}) {

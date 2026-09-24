@@ -18,3 +18,15 @@ export async function renderQrDataUrl(url, load = () => import("qrcode")) {
     return null;
   }
 }
+
+// The fallback above is deliberate but invisible: a booth set up without
+// `npm ci` looks healthy while every attendee gets a URL to type instead of a
+// code to scan. Staff should learn that at start-up, not from a queue.
+export async function qrEncoderAvailable(load = () => import("qrcode")) {
+  try {
+    await load();
+    return true;
+  } catch {
+    return false;
+  }
+}

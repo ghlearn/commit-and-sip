@@ -5,6 +5,7 @@ import { dataDirectory, RunStore } from "./store.mjs";
 import { BoothEngine } from "./booth-engine.mjs";
 import { loadNameRules } from "./services/coffee-name.mjs";
 import { blocklistStatus } from "./services/moderation.mjs";
+import { qrEncoderAvailable } from "./services/qr.mjs";
 import { boothCanvasDefinition } from "./canvas.mjs";
 import { adminCanvasDefinition } from "./admin-canvas.mjs";
 
@@ -48,4 +49,13 @@ session = await joinSession({
 const moderation = blocklistStatus(rules.blocklist);
 if (!moderation.ready) {
   await session.log(`Commit & Sip moderation is not event-ready: ${moderation.reason} Review booth/blocked-terms.json before publishing attendee names.`, { level: "warning" });
+}
+
+// The QR falls back to a plain link when the encoder is missing, which is the
+// right behaviour but a silent one. Without this a booth that skipped `npm ci`
+// runs all day before anyone notices attendees are typing URLs. Only worth
+// saying when a leaderboard is configured, since otherwise there is no
+// destination to encode and the served screen shows no QR either way.
+if (config.leaderboardUrl && !(await qrEncoderAvailable())) {
+  await session.log("Commit & Sip cannot render QR codes: the qrcode encoder is not installed, so the served screen will show a plain link instead. Run npm ci at this booth.", { level: "warning" });
 }
