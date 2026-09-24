@@ -35,8 +35,9 @@ function tokens(name) {
 
 function alliterationPoints(name, mascot) {
   const initial = mascot[0];
-  // The mascot word itself is required, so only echoes after it count.
-  const echoes = tokens(name).slice(1).filter(token => token.startsWith(initial)).length;
+  // The mascot is required wherever it sits, so only the other words count as
+  // echoes of it.
+  const echoes = tokens(name).filter(token => !token.includes(mascot) && token.startsWith(initial)).length;
   if (echoes >= 2) return 800;
   return echoes === 1 ? 450 : 0;
 }
@@ -51,8 +52,9 @@ function wordplayPoints(name, mascot) {
   const list = tokens(name);
   let points = 0;
   const signals = [];
-  // A blend fuses the mascot into a longer word, such as "Monachino".
-  if (list[0] !== mascot && list[0]?.startsWith(mascot)) {
+  // A blend fuses the mascot into a longer word, such as "Monachino", wherever
+  // that word sits in the name.
+  if (list.some(token => token !== mascot && token.includes(mascot))) {
     points += 450;
     signals.push("blend");
   }
@@ -76,12 +78,12 @@ function economyPoints(name) {
 
 function rarityPoints(name, mascot) {
   const inventive = new Set(tokens(name).filter(token =>
-    !token.startsWith(mascot) && !COFFEE_TERMS.includes(token) && !COMMON_WORDS.includes(token)));
+    !token.includes(mascot) && !COFFEE_TERMS.includes(token) && !COMMON_WORDS.includes(token)));
   return { points: Math.min(inventive.size, 3) * 400, inventive: [...inventive] };
 }
 
 export function scoreCoffeeName(raw, rules) {
-  const { name, id, mascot } = validateCoffeeName(raw, rules);
+  const { name, id, mascot, placement } = validateCoffeeName(raw, rules);
   requireValue(!EXAMPLE_IDS.includes(id), "example_name",
     "That is one of the house examples. Invent your own drink to be scored.", 400);
 
@@ -99,5 +101,7 @@ export function scoreCoffeeName(raw, rules) {
   const total = breakdown.reduce((sum, part) => sum + part.points, 0);
   // Clamped so a rubric change can never emit an out-of-range competition score.
   const score = Math.min(Math.max(total, 1), MAX_SCORE);
-  return { breakdown, id, mascot, name, score };
+  // Placement is reported, never scored: no position is worth more than another,
+  // so the attendee's choice of where to put the mascot stays a free one.
+  return { breakdown, id, mascot, name, placement, score };
 }

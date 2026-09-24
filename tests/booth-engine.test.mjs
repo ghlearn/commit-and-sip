@@ -131,3 +131,88 @@ test("unknown actions and malformed input are refused", async t => {
   await assert.rejects(engine.open({ runId: "booth-1", mode: "booth" }), { status: 400 });
   await assert.rejects(engine.open({ runId: "" }), { code: "invalid_run", status: 400 });
 });
+
+test("the attendee picks a mascot and where it sits, and the name must match", async t => {
+  const { engine } = await booth(t);
+  await engine.open({ runId: "booth-1" });
+  // Declaring a choice is honoured, not quietly overridden by what was typed.
+  await assert.rejects(
+    engine.dispatch("booth-1", "submit_name", { name: "Cold Brew Ducky", mascot: "mona" }),
+    { code: "mascot_mismatch", status: 400 });
+  await assert.rejects(
+    engine.dispatch("booth-1", "submit_name", { name: "Cold Brew Ducky", placement: "start" }),
+    { code: "placement_mismatch", status: 400 });
+  await assert.rejects(
+    engine.dispatch("booth-1", "submit_name", { name: "Cold Brew Ducky", placement: "sideways" }),
+    { code: "invalid_choice", status: 400 });
+  // A rejected choice costs them nothing; the run is untouched.
+  assert.equal((await engine.get("booth-1")).phase, "naming");
+
+  const served = await engine.dispatch("booth-1", "submit_name",
+    { name: "Cold Brew Ducky", mascot: "ducky", placement: "end" });
+  assert.equal(served.submission.placement, "end");
+  assert.equal(served.phase, "served");
+});
+
+test("every placement is accepted and none of them is worth more", async t => {
+  const placements = { "Mona Mocha": "start", "Iced Ducky Cup": "middle", "Morning Copilot": "end", "Monachino": "blend" };
+  for (const [name, placement] of Object.entries(placements)) {
+    const { engine } = await booth(t);
+    await engine.open({ runId: "booth-1" });
+    const served = await engine.dispatch("booth-1", "submit_name", { name, placement });
+    assert.equal(served.submission.placement, placement);
+    assert.ok(served.submission.score > 0 && served.submission.score <= 5000);
+  }
+});
+
+test("completing hands the booth to the next attendee without erasing the menu", async t => {
+  const { engine } = await booth(t);
+  const start = await engine.open({ runId: "booth-1" });
+  await assert.rejects(engine.dispatch("booth-1", "complete", {}),
+    { code: "not_served", status: 409 }, "finishing early would leave no entry behind");
+
+  await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonlight" });
+  const done = await engine.dispatch("booth-1", "complete", {});
+  assert.equal(done.phase, "complete");
+  assert.ok(done.completedAt, "the finish time is recorded");
+  assert.ok(done.standing, "they still see where they placed");
+
+  // Completing is idempotent, so a double click cannot corrupt the run.
+  assert.equal((await engine.dispatch("booth-1", "complete", {})).completedAt, done.completedAt);
+
+  // The next attendee starts clean but inherits the menu built so far.
+  const next = await engine.open({ runId: "booth-2" });
+  assert.equal(next.phase, "naming");
+  assert.notEqual(next.handle, start.handle);
+  assert.ok(next.houseMenu.some(entry => entry.id === "mona-moonlight"), "the drink stays on the menu");
+  assert.equal(next.leaderboard.length, 1, "and stays on the leaderboard");
+  await assert.rejects(engine.dispatch("booth-2", "submit_name", { name: "Mona Moonlight" }),
+    { code: "duplicate_drink", status: 409 }, "so it cannot be claimed twice");
+});
+
+test("a completed run cannot be reopened to invent a second drink", async t => {
+  const { engine } = await booth(t);
+  await engine.open({ runId: "booth-1" });
+  await engine.dispatch("booth-1", "submit_name", { name: "Ducky Daybreak" });
+  await engine.dispatch("booth-1", "complete", {});
+  await assert.rejects(engine.dispatch("booth-1", "submit_name", { name: "Ducky Dusk" }),
+    { code: "already_served", status: 409 });
+  assert.equal((await engine.open({ runId: "booth-1" })).phase, "complete", "reopening shows the finished state");
+});
+
+test("the QR destination is only offered once staff configure a real one", async t => {
+  const { engine } = await booth(t);
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Meridian" });
+  assert.equal(served.attendeeUrl, null, "no destination is deployed, so none is invented");
+  assert.equal(served.leaderboardUrl, null);
+
+  const live = await booth(t, { leaderboardUrl: "https://example.test/board" });
+  const open = await live.engine.open({ runId: "booth-2" });
+  assert.equal(open.attendeeUrl, null, "there is nothing to scan before they have played");
+  const entry = await live.engine.dispatch("booth-2", "submit_name", { name: "Copilot Comet" });
+  assert.equal(entry.attendeeUrl, `https://example.test/board?handle=${open.handle}`);
+
+  assert.throws(() => new BoothEngine({ store: null, catalog, rules, leaderboardUrl: "not-a-url" }),
+    { code: "invalid_leaderboard_url" }, "a URL that scans to nothing is refused up front");
+});

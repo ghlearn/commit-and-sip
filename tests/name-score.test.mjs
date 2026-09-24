@@ -59,7 +59,7 @@ test("the house examples are never scored", () => {
 });
 
 test("scoring refuses anything the name rules reject", () => {
-  for (const name of ["Morning Espresso", "Cold Brew Ducky", "Mona <img src=x>", "Mo", "Mona blocked-example-term"]) {
+  for (const name of ["Morning Espresso", "Latte Supreme", "Mona <img src=x>", "Mo", "Mona blocked-example-term"]) {
     assert.throws(() => scoreCoffeeName(name, rules), { code: "invalid_name", status: 400 });
   }
 });

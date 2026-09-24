@@ -1,4 +1,5 @@
 import { DomainError, requireValue, exactInput, validRunId, generateHandle } from "./domain.mjs";
+import { PLACEMENTS } from "./services/coffee-name.mjs";
 import { addDrink, leaderboard, seedMenu, standingFor } from "./services/booth-menu.mjs";
 
 // The booth flow is entirely canvas-driven: the attendee is given a handle,
@@ -6,11 +7,29 @@ import { addDrink, leaderboard, seedMenu, standingFor } from "./services/booth-m
 // review, approval, merge, or issue write, so it shares none of the live
 // engine's evidence gates. It keeps its own phase machine deliberately rather
 // than threading a second shape through the reviewed live engine.
-const PHASES = ["naming", "served"];
+const PHASES = ["naming", "served", "complete"];
 
 export class BoothEngine {
   constructor({ store, catalog, rules, leaderboardUrl = null }) {
+    // An unparseable or non-web destination would produce a QR that scans to
+    // nothing, so it is refused at construction rather than shown to attendees.
+    if (leaderboardUrl !== null) {
+      let parsed = null;
+      try { parsed = new URL(leaderboardUrl); } catch { parsed = null; }
+      requireValue(parsed && (parsed.protocol === "https:" || parsed.protocol === "http:"),
+        "invalid_leaderboard_url", "The configured leaderboard URL is not a valid web address.");
+    }
     Object.assign(this, { store, catalog, rules, leaderboardUrl });
+  }
+
+  // The QR target is real only when staff have configured a deployed
+  // leaderboard. With none configured this stays null and the canvas must say
+  // so plainly rather than render a placeholder as a working code.
+  attendeeUrl(run) {
+    if (!this.leaderboardUrl || run.phase === "naming") return null;
+    const url = new URL(this.leaderboardUrl);
+    url.searchParams.set("handle", run.handle);
+    return url.toString();
   }
 
   // The menu lives alongside runs in the same ledger, defaulted so an existing
@@ -23,6 +42,8 @@ export class BoothEngine {
   present(run, data) {
     const menu = this.houseMenu(data);
     return {
+      attendeeUrl: this.attendeeUrl(run),
+      completedAt: run.completedAt ?? null,
       createdAt: run.createdAt,
       handle: run.handle,
       // The attendee's handle is shown from the very start so they can note it
@@ -33,10 +54,11 @@ export class BoothEngine {
       leaderboardUrl: this.leaderboardUrl,
       mascots: this.rules.mascots,
       phase: run.phase,
+      placements: PLACEMENTS,
       runId: run.runId,
       statusMessage: run.statusMessage,
       submission: run.submission,
-      standing: run.phase === "served" ? standingFor(menu, run.runId) : null,
+      standing: run.phase === "naming" ? null : standingFor(menu, run.runId),
     };
   }
 
@@ -82,22 +104,39 @@ export class BoothEngine {
   async dispatch(runId, action, input = {}) {
     requireValue(validRunId(runId), "invalid_run", "Invalid run ID.", 400);
     if (action === "refresh") { exactInput(input); return this.get(runId); }
-    requireValue(action === "submit_name", "unknown_action", "That action is not available at this booth.", 400);
-    exactInput(input, ["name"]);
+    requireValue(["submit_name", "complete"].includes(action),
+      "unknown_action", "That action is not available at this booth.", 400);
+    exactInput(input, action === "complete" ? [] : ["name", "mascot", "placement"]);
     return this.store.transaction(data => {
       const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
       requireValue(run, "run_missing", "That run does not exist. Start a new one.", 404);
       requireValue(run.mode === "booth", "run_conflict", "That run belongs to a different exercise mode.");
       requireValue(PHASES.includes(run.phase), "invalid_phase", "This run has an unusable state. Ask booth staff.");
+
+      if (action === "complete") {
+        // Completion closes out this attendee so the canvas can be handed to the
+        // next one. Their drink stays on the house menu and the leaderboard: the
+        // run is finished, not erased.
+        requireValue(run.phase !== "naming", "not_served",
+          "Add your drink to the menu before finishing.", 409);
+        if (run.phase === "complete") return this.present(run, data);
+        run.phase = "complete";
+        run.completedAt = new Date().toISOString();
+        run.events.push({ type: "completed", at: run.completedAt });
+        run.statusMessage = "Thanks for playing. The booth is ready for the next barista.";
+        return this.present(run, data);
+      }
+
       // One drink per attendee keeps the competition fair and the menu readable.
       requireValue(run.phase === "naming", "already_served",
         "You have already added your drink. Each attendee invents one.", 409);
 
       const entry = addDrink(this.houseMenu(data), {
+        choice: { mascot: input.mascot, placement: input.placement },
         handle: run.handle, rawName: input.name, rules: this.rules, runId,
       });
       run.submission = {
-        breakdown: entry.breakdown, id: entry.id, name: entry.name,
+        breakdown: entry.breakdown, id: entry.id, name: entry.name, placement: entry.placement,
         price: entry.price, score: entry.score, serving: entry.serving,
       };
       run.phase = "served";

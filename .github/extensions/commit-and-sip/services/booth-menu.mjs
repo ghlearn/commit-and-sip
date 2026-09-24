@@ -1,5 +1,5 @@
 import { requireValue } from "../domain.mjs";
-import { buildAttendeeOrder, coffeeNameId, normalizeCoffeeName } from "./coffee-name.mjs";
+import { buildAttendeeOrder, coffeeNameId, normalizeCoffeeName, PLACEMENT_LABELS, PLACEMENTS } from "./coffee-name.mjs";
 import { EXAMPLE_IDS, scoreCoffeeName } from "./name-score.mjs";
 
 // The house menu is the shared artefact of the booth: seeded examples plus every
@@ -21,10 +21,14 @@ export function findDrink(menu, id) {
   return menu.find(entry => entry.id === id) ?? null;
 }
 
-export function addDrink(menu, { rawName, rules, runId, handle, now = new Date().toISOString() }) {
+export function addDrink(menu, { rawName, rules, runId, handle, choice = {}, now = new Date().toISOString() }) {
   requireValue(Array.isArray(menu), "menu_invalid", "The house menu is unavailable. Ask booth staff to restore it.");
   requireValue(typeof runId === "string" && runId.length > 0, "invalid_run", "A run ID is required to add a drink.", 400);
   requireValue(typeof handle === "string" && handle.length > 0, "invalid_handle", "A barista handle is required to add a drink.", 400);
+  requireValue(choice.mascot === undefined || rules.mascots.includes(choice.mascot),
+    "invalid_choice", "Pick one of the booth mascots.", 400);
+  requireValue(choice.placement === undefined || PLACEMENTS.includes(choice.placement),
+    "invalid_choice", `Pick a placement: ${PLACEMENTS.join(", ")}.`, 400);
 
   // Check for a duplicate before scoring so an attendee who retypes an existing
   // drink is told plainly, rather than being scored and then refused.
@@ -36,9 +40,16 @@ export function addDrink(menu, { rawName, rules, runId, handle, now = new Date()
       : `${clash?.name} is already on the menu. Invent a different drink.`,
     409);
 
-  const { name, mascot, score, breakdown } = scoreCoffeeName(rawName, rules);
+  const { name, mascot, placement, score, breakdown } = scoreCoffeeName(rawName, rules);
+  // The canvas lets the attendee choose a mascot and where it sits. Honour that
+  // choice by checking the typed name against it instead of quietly overriding.
+  requireValue(choice.mascot === undefined || choice.mascot === mascot, "mascot_mismatch",
+    `You chose ${choice.mascot}, but ${name} uses ${mascot}. Change the name or the mascot.`, 400);
+  requireValue(choice.placement === undefined || choice.placement === placement, "placement_mismatch",
+    `You chose ${mascot} ${PLACEMENT_LABELS[choice.placement]}, but ${name} has it ${PLACEMENT_LABELS[placement]}.`, 400);
+
   const drink = buildAttendeeOrder(rawName, rules, runId);
-  const entry = { ...drink, breakdown, createdAt: now, example: false, handle, mascot, runId, score };
+  const entry = { ...drink, breakdown, createdAt: now, example: false, handle, mascot, placement, runId, score };
   requireValue(entry.id === id, "menu_invalid", "The drink ID changed between checks. Try the name again.");
   menu.push(entry);
   return entry;

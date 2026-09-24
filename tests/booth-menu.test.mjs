@@ -28,7 +28,7 @@ test("an invented drink is scored and appended to the menu", () => {
   assert.ok(Array.isArray(entry.breakdown) && entry.breakdown.length > 0, "the score stays explainable at the booth");
   assert.deepEqual(Object.keys(entry).sort(), [
     "artwork", "breakdown", "createdAt", "description", "example", "handle",
-    "id", "mascot", "name", "price", "runId", "score", "serving"
+    "id", "mascot", "name", "placement", "price", "runId", "score", "serving"
   ]);
   assert.equal(menu.length, 4);
 });

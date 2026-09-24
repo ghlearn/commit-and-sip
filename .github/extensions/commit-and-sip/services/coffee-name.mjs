@@ -61,19 +61,43 @@ export function validateCoffeeName(raw, rules) {
   for (const fragment of FORBIDDEN_SUBSTRINGS) {
     if (lower.includes(fragment)) reject("Remove links, mentions, and repeated punctuation from the name.");
   }
-  // Every menu item must be prefixed with a mascot, so the house menu reads as
-  // one family. A blend such as "Monachino" still starts with the token.
-  const mascot = rules.mascots.find(token => lower.startsWith(token));
-  if (!mascot) reject(`Start the name with ${rules.mascots.join(", ")}.`);
+  // Every menu item must carry a mascot so the house menu reads as one family,
+  // but the attendee chooses where it sits: "Mona Mocha", "Cold Brew Ducky",
+  // and the blend "Monachino" are all valid placements of the same token.
+  const mascot = rules.mascots.find(token => lower.includes(token));
+  if (!mascot) reject(`Include ${rules.mascots.join(", ")} somewhere in the name.`);
   for (const term of rules.blockedTerms) {
     if (lower.includes(term)) reject("That name is not available. Try another.");
   }
   const id = coffeeNameId(name);
   if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(id)) reject("That name cannot become a menu ID. Try another.");
-  // The mascot is the prefix, not the whole drink. A bare mascot leaves nothing
-  // invented and would let the first attendee claim "Mona" outright.
-  if (id === mascot) reject(`Add your own twist after ${mascot}. The name cannot be just the mascot.`);
-  return { name, id, mascot };
+  // The mascot is what they build on, not the whole drink. A bare mascot leaves
+  // nothing invented and would let the first attendee claim "Mona" outright.
+  if (id === mascot) reject(`Add your own twist to ${mascot}. The name cannot be just the mascot.`);
+  return { name, id, mascot, placement: mascotPlacement(name, mascot) };
+}
+
+// Where the attendee actually put the mascot. The canvas offers this as a
+// choice, so it is reported back rather than inferred silently.
+export const PLACEMENTS = ["start", "middle", "end", "blend"];
+
+export const PLACEMENT_LABELS = {
+  blend: "blended into a word",
+  end: "at the end",
+  middle: "in the middle",
+  only: "on its own",
+  start: "at the start",
+};
+
+export function mascotPlacement(name, mascot) {
+  const list = name.toLowerCase().split(" ").filter(Boolean);
+  const index = list.findIndex(word => word.replace(/[^a-z0-9]/g, "").includes(mascot));
+  if (index === -1) return null;
+  // A blend fuses the mascot into a longer word, so it has no word position.
+  if (list[index].replace(/[^a-z0-9]/g, "") !== mascot) return "blend";
+  if (list.length === 1) return "only";
+  if (index === 0) return "start";
+  return index === list.length - 1 ? "end" : "middle";
 }
 
 function digest(...parts) {

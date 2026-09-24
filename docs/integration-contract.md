@@ -20,10 +20,11 @@ The booth exercise is a creative naming competition run entirely inside the Copi
 | --- | --- |
 | Distribution | The exercise repository is a template a booth admin copies to their own handle and adds to the Copilot App. The canvas extension, skill, catalog, and name rules travel with the repository. Ignored `booth/local-config.json` and the run store do not, so each booth configures its own. |
 | Handle | `BoothEngine.open` mints a curated three-word handle immediately, before the attendee invents anything, so they can note it down and find themselves on the leaderboard later. Handles are unique within a booth. Reopening a run returns the same handle. |
-| Naming | The attendee types one name. It must be prefixed with `mona`, `copilot`, or `ducky`; a blend such as `Monachino` qualifies. The mascot is a prefix to build on, so a bare `Mona` is rejected — the attendee has to add something of their own. `validateCoffeeName` applies the structural anti-injection rules and the staff `blockedTerms` list. |
+| Naming | The attendee types one name that must contain `mona`, `copilot`, or `ducky`, and chooses where it sits: at the start, in the middle, at the end, or blended into a word such as `Monachino`. `mascotPlacement` reports the placement actually used, and a declared mascot or placement is checked against the typed name rather than quietly overridden. The mascot is something to build on, so a bare `Mona` is rejected — the attendee has to add something of their own. `validateCoffeeName` applies the structural anti-injection rules and the staff `blockedTerms` list. |
 | Uniqueness | Enforced on the canonical menu ID, so casing and spacing variants collide. The attendee is told which existing drink clashed, including when it is a house example. A refused name costs nothing: the phase, menu, and ledger are unchanged, and they simply try again. |
-| Scoring | A deterministic rubric in `services/name-score.mjs` scores 1-5000 over alliteration, coffee craft, wordplay, house shape, and invention. |
+| Scoring | A deterministic rubric in `services/name-score.mjs` scores 1-5000 over alliteration, coffee craft, wordplay, house shape, and invention. Placement is recorded but never scored, so no position is worth more than another and the choice stays free. |
 | Result | The canvas shows the score breakdown, the updated house menu, and the attendee's rank. A leaderboard link or QR appears only once staff configure an approved public destination. |
+| Completion | `complete` closes out the attendee so the booth can be handed to the next one. It requires a served drink, is idempotent against a double click, and finishes the run rather than erasing it: the drink stays on the house menu and the leaderboard, and remains unavailable to later attendees. The next attendee is a new run with a new handle. |
 
 ### Scoring is a rubric, not a judge
 
@@ -39,7 +40,7 @@ One booth is authoritative only for its own menu and cannot know what was invent
 
 `leaderboard()` already ranks by score with equal scores sharing a rank, matching the completion authority's convention. The authority's existing handle reservation and deterministic collision suffix are the seam for making handles globally unique.
 
-The leaderboard destination is unresolved. `leaderboardUrl` stays null unless staff configure an approved destination, and no link or QR is invented. The existing requirement for an approved publicly reachable HTTPS destination and a real issue-renderable QR asset is unchanged.
+The leaderboard destination is unresolved. `leaderboardUrl` stays null unless staff configure an approved destination, and no link or QR is invented. `BoothEngine` refuses a non-web `leaderboardUrl` at construction rather than rendering a code that scans to nothing, exposes `attendeeUrl` only after the attendee has played, and leaves it null when nothing is configured. The existing requirement for an approved publicly reachable HTTPS destination and a real issue-renderable QR asset is unchanged.
 
 ### Not yet built
 

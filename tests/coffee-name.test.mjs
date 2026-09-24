@@ -37,22 +37,27 @@ test("booth name rules load and validate", () => {
 });
 
 test("a valid mascot name is normalized and given a menu ID", () => {
-  assert.deepEqual(validateCoffeeName("  Ducky   Doppio  ", rules), { name: "Ducky Doppio", id: "ducky-doppio", mascot: "ducky" });
-  assert.deepEqual(validateCoffeeName("Mona's Morning Mocha", rules), { name: "Mona's Morning Mocha", id: "monas-morning-mocha", mascot: "mona" });
+  assert.deepEqual(validateCoffeeName("  Ducky   Doppio  ", rules),
+    { name: "Ducky Doppio", id: "ducky-doppio", mascot: "ducky", placement: "start" });
+  assert.deepEqual(validateCoffeeName("Mona's Morning Mocha", rules),
+    { name: "Mona's Morning Mocha", id: "monas-morning-mocha", mascot: "mona", placement: "blend" });
   assert.equal(validateCoffeeName("COPILOT CREAM", rules).mascot, "copilot");
   assert.equal(validateCoffeeName("Copilot Cold-Brew 2", rules).id, "copilot-cold-brew-2");
   assert.equal(normalizeCoffeeName("A\u00a0\u00a0B"), "A B");
   assert.equal(coffeeNameId("Mona's  Café-Latte"), "monas-caf-latte");
 });
 
-test("every name must be prefixed with a mascot, not merely contain one", () => {
-  for (const name of ["Morning Espresso", "Plain Latte", "Octocat Brew"]) rejects(name, /Start the name with mona, ducky, copilot/);
-  // A mascot later in the name no longer qualifies; the menu reads as one family.
-  for (const name of ["Cold Brew Ducky", "Iced Mona", "The Copilot Cup"]) rejects(name, /Start the name with/);
-  assert.equal(validateCoffeeName("Monastery Blend", rules).mascot, "mona", "a blended prefix is accepted deliberately");
+test("a mascot must appear somewhere, but the attendee chooses where", () => {
+  for (const name of ["Morning Espresso", "Plain Latte", "Octocat Brew"]) rejects(name, /Include mona, ducky, copilot somewhere/);
+  // The attendee picks the placement, so every position is equally valid.
+  assert.equal(validateCoffeeName("Mona Mocha", rules).placement, "start");
+  assert.equal(validateCoffeeName("Cold Brew Ducky", rules).placement, "end");
+  assert.equal(validateCoffeeName("Iced Copilot Cup", rules).placement, "middle");
+  assert.equal(validateCoffeeName("Monastery Blend", rules).placement, "blend");
+  assert.equal(validateCoffeeName("Monastery Blend", rules).mascot, "mona");
 });
 
-test("the mascot is a prefix to build on, not the whole drink", () => {
+test("the mascot is something to build on, not the whole drink", () => {
   // Otherwise the first attendee claims "Mona" outright and invents nothing.
   for (const name of ["Mona", "Ducky", "Copilot", "  copilot  ", "DUCKY"]) {
     rejects(name, /cannot be just the mascot/);
@@ -81,7 +86,8 @@ test("attendee text cannot smuggle injection or spoofing into GitHub surfaces", 
   // Line breaks and tabs are neutralized to single spaces rather than rejected,
   // so a multi-line paste cannot survive into an issue body or PR title.
   for (const raw of ["Mona\nLatte", "Mona\r\nLatte", "Mona\tLatte", "Mona\u2028Latte"]) {
-    assert.deepEqual(validateCoffeeName(raw, rules), { name: "Mona Latte", id: "mona-latte", mascot: "mona" });
+    assert.deepEqual(validateCoffeeName(raw, rules),
+      { name: "Mona Latte", id: "mona-latte", mascot: "mona", placement: "start" });
   }
 });
 
