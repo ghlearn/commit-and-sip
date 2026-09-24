@@ -5,12 +5,21 @@
     "reviewedAt": null,
     "source": null,
     "notes": [
-      "This file is a shipped placeholder, not a moderation decision. The entries below only demonstrate the two match modes.",
-      "Before any event that publishes attendee names, replace entries with a reviewed list, record the reviewer and date, set placeholder to false, and cite the source.",
-      "Prefer vendoring an attributed, maintained public list over writing one here, and have a human owner accept it.",
-      "Use match \"substring\" only for terms that are never part of an innocent word, because substring matching rejects every name containing the fragment.",
-      "Use match \"word\" for anything that appears inside ordinary words, so a name like Classic Mona Cold Brew is not rejected.",
-      "Matching folds digits to letters, removes spaces, hyphens and apostrophes, and collapses repeated characters, so do not add spaced, doubled or leetspeak spellings of a term you already list."
+      "This file is a shipped placeholder, not a moderation decision. The two entries below only demonstrate the match modes and block nothing real.",
+      "Before any event that publishes attendee names, replace entries, set placeholder to false, and record reviewedBy, reviewedAt and source. See docs/blocklist-sourcing.md for where terms should come from and why a short reviewable list is preferred to a large vendored one.",
+      "Work the categories below and record a decision for each, including a deliberate 'nothing to add'. A category left unconsidered is the common failure, not a category judged empty.",
+      "Category 1 of 6: slurs targeting race, ethnicity, nationality, religion, sexual orientation, gender identity, or disability.",
+      "Category 2 of 6: sexual and sexually explicit terms.",
+      "Category 3 of 6: references to violence, self-harm, and suicide.",
+      "Category 4 of 6: hate-group names, slogans, and coded terms.",
+      "Category 5 of 6: named real people. Every name here contains mona, copilot or ducky, which makes defamatory constructions about a specific person easy to build.",
+      "Category 6 of 6: anything specific to this event, venue, or sponsor that would embarrass the booth on a public menu.",
+      "Choose the match mode per term, not per category. Use substring only where the fragment is never part of an innocent word; several slurs are not, and an over-broad substring entry silently refuses ordinary names at the counter. Use word for anything that appears inside ordinary words, so Classic Mona Cold Brew is not rejected by an entry for a shorter word inside it.",
+      "Do not add spaced, doubled or leetspeak spellings of a term you already list. Matching folds digits to letters, removes spaces, hyphens and apostrophes, and collapses repeated characters, so those variants are already covered and only add false positives.",
+      "Numeric hate codes must be listed in their folded letter form, not as digits, because digit folding rewrites them before comparison.",
+      "Scope the list to the languages the event actually runs in, and re-review per event. One approval is not permanent.",
+      "The test suite deliberately does not reference the terms in this file, so replacing them will not break it and you never need to put a moderation term in a test.",
+      "A list is a prediction about what someone will type. Staff takedown (npm run remove, see booth/RUNBOOK.md) is what covers everything this file misses."
     ]
   },
   "entries": [

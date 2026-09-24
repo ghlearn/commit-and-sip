@@ -59,7 +59,14 @@ test("the house examples are never scored", () => {
 });
 
 test("scoring refuses anything the name rules reject", () => {
-  for (const name of ["Morning Espresso", "Latte Supreme", "Mona <img src=x>", "Mo", "Mona blocked-example-term"]) {
+  for (const name of ["Morning Espresso", "Latte Supreme", "Mona <img src=x>", "Mo"]) {
     assert.throws(() => scoreCoffeeName(name, rules), { code: "invalid_name", status: 400 });
   }
+  // A blocked name is refused before it can be scored. The term is a fixture so
+  // this stays true whatever the reviewed list ends up containing.
+  const blocked = {
+    ...rules,
+    blocklist: { review: { placeholder: true }, entries: [{ term: "zzqq", match: "substring" }] }
+  };
+  assert.throws(() => scoreCoffeeName("Mona zzqq", blocked), { code: "invalid_name", status: 400 });
 });

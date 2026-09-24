@@ -57,6 +57,8 @@ Three reasons, in order of weight.
 
 ## What the reviewer records
 
+The checklist itself lives in `review.notes` inside `booth/blocked-terms.json`, so it is in front of whoever opens the file: six categories to work through, with a decision recorded for each — including a deliberate "nothing to add", because a category left unconsidered is the common failure rather than a category judged empty.
+
 Set in `booth/blocked-terms.json`:
 
 - `review.placeholder` → `false`
@@ -64,5 +66,7 @@ Set in `booth/blocked-terms.json`:
 - `review.reviewedAt` → an ISO date
 - `review.source` → what the terms were drawn from, including the licence if a list was vendored
 - `review.notes` → keep the matching guidance; replace the placeholder text
+
+The test suite does not reference the terms in the file, and pins only the honest invariant that a placeholder never claims readiness while an approved list must record a reviewer and date. Replacing the entries and signing off will not break it, and no moderation term ever needs to be written into a test.
 
 Then confirm the booth start no longer logs the moderation warning. That warning disappearing is the only automated signal that the gap is closed, and it checks provenance, not adequacy. **Nothing in this repository can certify that a list is sufficient.** Scope the list to the languages the event actually runs in, and re-review it for each event rather than treating one approval as permanent.

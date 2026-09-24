@@ -95,8 +95,15 @@ test("length limits and the staff blocklist are enforced after normalization", (
   rejects("Mo", /3 to 40 characters/);
   rejects(`Mona ${"a".repeat(40)}`, /3 to 40 characters/);
   assert.equal(validateCoffeeName(`Mona ${"a".repeat(35)}`, rules).name.length, 40);
-  rejects("Mona blocked-example-term", /not available/);
-  rejects("MONA BLOCKED-EXAMPLE-TERM", /not available/);
+  // Deliberately a fixture, not whatever the shipped list happens to contain.
+  // Pinning these to real moderation terms would mean a reviewer replacing the
+  // placeholder had to paste slurs into this file to keep the suite green.
+  const blocked = {
+    ...rules,
+    blocklist: { review: { placeholder: true }, entries: [{ term: "zzqq", match: "substring" }] }
+  };
+  rejects("Mona zzqq", /not available/, blocked);
+  rejects("MONA ZZQQ", /not available/, blocked);
   // The retired flat list could not have caught this; the structured list folds
   // the digit swap back to "brew" before comparing.
   rejects("Ducky Br3w", /not available/, {

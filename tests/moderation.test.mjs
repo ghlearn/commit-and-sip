@@ -71,20 +71,32 @@ test("readiness is reported separately so a placeholder still loads", () => {
   assert.equal(blocklistStatus({ review: { placeholder: false, reviewedBy: "x", reviewedAt: "2026-01-01" }, entries: [] }).ready, false);
 });
 
-test("the shipped blocklist is valid, wired to names, and honestly unreviewed", async () => {
+test("the shipped blocklist is valid, wired to names, and honest about its own review state", async () => {
   const shipped = await loadBlocklist();
   const status = blocklistStatus(shipped);
-  assert.equal(status.ready, false, "the shipped list is a placeholder and must not claim readiness");
+  // Asserting a flat `ready === false` would have meant that approving the list
+  // broke the suite -- the one edit this file exists to invite. Pin the honest
+  // invariant instead, which holds before and after a reviewer signs off.
+  if (shipped.review.placeholder) {
+    assert.equal(status.ready, false, "a placeholder must never claim readiness");
+  } else {
+    assert.ok(shipped.entries.length, "an approved list must not be empty");
+    assert.ok(status.ready, `an approved list must record its reviewer and date: ${status.reason}`);
+  }
 
   const rules = await loadNameRules();
-  assert.deepEqual(rules.blocklist, shipped);
-  assert.throws(() => validateCoffeeName("Mona blocked-example-term", rules), { code: "invalid_name" });
-  // Evasion of the shipped placeholder is blocked by the same folding.
-  assert.throws(() => validateCoffeeName("Mona blockedexampleterm", rules), { code: "invalid_name" });
-  assert.throws(() => validateCoffeeName("Mona exampleword", rules), { code: "invalid_name" });
-  // Word mode leaves a longer word alone.
-  assert.equal(validateCoffeeName("Mona Examplewordsmith", rules).id, "mona-examplewordsmith");
-  assert.equal(validateCoffeeName("Mona Moonrise", rules).id, "mona-moonrise");
+  assert.deepEqual(rules.blocklist, shipped, "the shipped list must be the one name validation uses");
+
+  // Probe with whatever the file actually contains rather than a hardcoded term.
+  // Matching behaviour is covered above on fixtures, so this survives the
+  // placeholder being replaced by a reviewed list without ever naming a term
+  // here -- a reviewer must never have to paste slurs into the test suite.
+  for (const entry of shipped.entries) {
+    assert.ok(findBlockedTerm(entry.term, shipped),
+      `the shipped list does not catch its own entry "${entry.term}"`);
+  }
+  assert.equal(validateCoffeeName("Mona Moonrise", rules).id, "mona-moonrise",
+    "an ordinary name must survive whatever list is shipped");
 });
 
 test("an absent blocklist is not treated as a match", () => {
