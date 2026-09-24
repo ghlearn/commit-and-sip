@@ -54,6 +54,43 @@ test("clashing with a house example says so plainly", () => {
   assert.match(error.message, /house examples/);
 });
 
+// Staff procedure depends on this split. A duplicate is already visible on the
+// menu, so naming it leaks nothing. A blocklist hit and a staff takedown must
+// stay indistinguishable, or the generic wording identifies a blocklist hit by
+// elimination and the counter starts guessing aloud what somebody else typed.
+test("a removed drink is refused in the same words as a blocklist hit, and a duplicate is not", () => {
+  const menu = seedMenu(catalog);
+  const invented = add(menu, "Mona Moonlight Mocha", "run-1", "brave-brewing-otter");
+  const message = fn => {
+    try { fn(); } catch (error) { return error.message; }
+    throw new Error("the name was accepted when it should have been refused");
+  };
+
+  const removed = message(() => addDrink(menu, {
+    rawName: "Ducky Daybreak", rules, runId: "run-2", handle: "keen-frothing-vole",
+    now: "2026-01-01T00:00:00.000Z", removedIds: ["ducky-daybreak"]
+  }));
+  // A fixture term, never the shipped list: replacing the placeholder must not
+  // oblige a reviewer to paste moderation terms into the suite to keep it green.
+  const blockedRules = {
+    ...rules,
+    blocklist: { review: { placeholder: true }, entries: [{ term: "zzqq", match: "substring" }] }
+  };
+  const blocked = message(() => addDrink(menu, {
+    rawName: "Mona zzqq", rules: blockedRules, runId: "run-3", handle: "swift-steaming-hare",
+    now: "2026-01-01T00:00:00.000Z"
+  }));
+  const duplicate = message(() => add(menu, "Mona Moonlight Mocha", "run-4", "glad-pouring-stoat"));
+
+  assert.equal(removed, blocked,
+    "a takedown and a blocklist hit must be worded identically, or one is identifiable by elimination");
+  assert.ok(!/removed|takedown|staff|blocklist|blocked/i.test(removed),
+    "and the shared wording must not hint at why");
+  assert.match(duplicate, new RegExp(invented.name),
+    "a duplicate names the drink, which is already on the menu in front of them");
+  assert.notEqual(duplicate, removed);
+});
+
 test("the leaderboard ranks by score and shares rank on ties", () => {
   const menu = seedMenu(catalog);
   add(menu, "Mona Moonlight Mocha", "run-1", "brave-brewing-otter");
