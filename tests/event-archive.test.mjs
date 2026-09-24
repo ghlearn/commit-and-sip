@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RunStore } from "../.github/extensions/commit-and-sip/store.mjs";
@@ -265,4 +265,44 @@ test("artifact names are safe on every filesystem staff might use", () => {
   const name = artifactName("event", "2026-02-01T10:00:00.000Z");
   assert.equal(name, "event-2026-02-01T10-00-00-000Z.json");
   assert.ok(!name.includes(":"), "colons are not valid in filenames everywhere");
+});
+
+// Review found the read-back gate compared only aggregate counts and the score
+// sum, so a stale or corrupted archive holding different records could pass it
+// and license a wipe it should have refused.
+test("verification rejects an archive whose totals match but whose records do not", async t => {
+  const { engine, store } = await booth(t);
+  await attendee(engine, "booth-1", "Mona Moonlight");
+  const data = await store.read();
+
+  const honest = { kind: "commit-and-sip-archive", ledger: data };
+  assert.equal(archiveMatches(honest, data), true, "an accurate copy still passes");
+
+  // Same attendee count, same completion count, same score: only the drink
+  // somebody actually invented is wrong.
+  const swapped = JSON.parse(JSON.stringify(data));
+  const entry = swapped.menu.find(drink => !drink.example);
+  entry.name = "Something Else Entirely";
+  assert.equal(
+    archiveMatches({ kind: "commit-and-sip-archive", ledger: swapped }, data), false,
+    "a ledger that is not a restorable copy must never license a wipe");
+});
+
+test("a failed archive leaves nothing behind that staff could mistake for a good copy", async t => {
+  const { engine, store } = await booth(t);
+  await attendee(engine, "booth-1", "Mona Moonlight");
+
+  // Corrupt the read-back so verification fails the way a bad disk would.
+  store.readArtifact = async () => ({ kind: "commit-and-sip-archive", ledger: emptyLedger() });
+  await assert.rejects(
+    engine.archiveAndWipe({ archivedBy: "Sam", confirm: "wipe" }),
+    error => error.code === "archive_unverified");
+
+  assert.deepEqual(await store.listArtifacts(), [], "no half-trusted archive is offered to staff");
+  // listArtifacts only ever shows .json, so check the directory itself: the
+  // pending file must be cleaned up, not merely hidden from the dashboard.
+  const left = await readdir(store.exports).catch(() => []);
+  assert.deepEqual(left, [], "and no pending file is left on disk either");
+  const survived = await store.read();
+  assert.equal(eventSummary(survived).invented, 1, "and the event is still in the ledger");
 });

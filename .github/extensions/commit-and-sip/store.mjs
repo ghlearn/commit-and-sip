@@ -4,6 +4,10 @@ import { isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DomainError } from "./domain.mjs";
 
+// Chosen so listArtifacts, which only offers .json, can never show a pending
+// archive to staff as though it were a verified one.
+const PENDING_SUFFIX = ".pending";
+
 // The booth and the staff scripts must resolve the same ledger. Working this
 // out in two places invites drift, and the failure mode is silent: a removal
 // that appears to succeed against a directory the running booth never reads.
@@ -60,6 +64,27 @@ export class RunStore {
       if (error.code === "ENOENT") return [];
       throw error;
     }
+  }
+
+  // An archive has to exist on disk before it can be read back and verified,
+  // but a file that fails that check must never look like a good copy of the
+  // event. Pending artifacts carry a suffix listArtifacts ignores, so they are
+  // invisible to staff until publishArtifact renames one into place.
+  async writePendingArtifact(name, payload) {
+    return this.writeArtifact(`${name}${PENDING_SUFFIX}`, payload);
+  }
+
+  async publishArtifact(pendingPath) {
+    if (!pendingPath.endsWith(PENDING_SUFFIX)) throw new Error("Only a pending artifact can be published.");
+    const path = pendingPath.slice(0, -PENDING_SUFFIX.length);
+    await rename(pendingPath, path);
+    return path;
+  }
+
+  // Best effort on purpose: the caller is already failing, and a leftover
+  // pending file is far less harmful than masking the original error.
+  async discardArtifact(path) {
+    await rm(path, { force: true }).catch(() => {});
   }
 
   async read() {

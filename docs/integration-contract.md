@@ -66,7 +66,11 @@ There are two canvases over one `BoothEngine`: `commit-and-sip` for the attendee
 
 Keeping them apart is a boundary, not tidiness. The attendee screen is unattended and faces a queue, so no destructive operation may be reachable from it; the engine's attendee dispatch whitelist rejects every staff action name, and a test pins that in both directions. The loopback server scopes its page and script assets per panel so a booth server cannot serve the dashboard's script either.
 
+Be precise about what that boundary is. It stops a *destructive action being routed through the attendee surface* — the page in front of the queue, and the HTTP endpoints behind it. It is **not** an authorization check: both canvases are registered in one App session, so any actor who can drive that session can open the staff canvas. The ledger is protected by physical control of the App, and the `wipe` confirmation and recorded staff name are friction and audit, not authentication. Any implementation that needs a real staff-only guarantee must add one; do not read this separation as providing it.
+
 `BoothPanel` is the station: one panel serves attendee after attendee, holding only the current run, so `begin` mints a fresh handle and `complete` clears the cursor and returns the counter to idle with the previous drink still on the house menu. A double click on `begin` is refused rather than stranding a started run.
+
+That cursor is a cache, and the ledger can move without it — staff closing an abandoned station, or an event archive wiping the ledger. The panel therefore reconciles before it trusts the cursor: a run that is gone or already finished releases the station instead of refusing the next attendee as `already_started` or failing a refresh as `run_missing`. Any surface that holds a run ID across staff operations owes the same reconciliation.
 
 QR codes are rendered server-side into a data URL because the loopback server's `script-src 'self'` policy forbids a CDN; `services/qr.mjs` returns null rather than a broken code if rendering fails. The QR is derived from the verified destination on each read rather than stored, so it cannot outlive or contradict the configured leaderboard.
 
@@ -78,7 +82,7 @@ Attendee data lives in the data directory outside the checkout. **Deleting the c
 
 The ledger is per machine. A multi-station event has one menu, one set of standings, and one duplicate check per booth, and must be archived once per booth. Cross-booth uniqueness is a leaderboard-service responsibility, not something a station can provide.
 
-`archive_and_wipe` is the only operation that destroys data. Its ordering is required, not incidental: write the archive inside the ledger transaction, read it back off disk, compare summaries, and only then reset. A failed read-back must leave the event intact. Artifacts must never overwrite an existing file, and must never be written into the checkout.
+`archive_and_wipe` is the only operation that destroys data. Its ordering is required, not incidental: write the archive inside the ledger transaction, read it back off disk, compare it against the live ledger, and only then reset. The comparison must cover the whole ledger, not only summary totals — equal counts and an equal score sum do not make a file a restorable copy. A failed read-back must leave the event intact, and must not leave the unverified file where staff could mistake it for a good archive. Artifacts must never overwrite an existing file, and must never be written into the checkout.
 
 A wipe must be refused while a station is mid-order. Because attendee hand-over requires a served drink, staff must have an explicit way to close an abandoned station, or an attendee who walks away strands the machine permanently. Closing a station ends a turn and keeps any drink already served on the menu; it is not a takedown and must not be recorded as one.
 

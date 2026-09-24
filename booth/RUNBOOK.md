@@ -81,6 +81,10 @@ Staff operations have their own canvas, `commit-and-sip-admin`, opened with no i
 
 Open it on a staff device, or on the booth machine turned away from the counter. It shows removal reasons and staff names, so it is not a screen to leave facing attendees.
 
+**Understand what separates this from the attendee screen.** Keeping staff actions off the booth canvas prevents *mis-routing*: the attendee-facing page cannot export, close a station, or erase an event, and the booth canvas rejects those action names outright. That is not an authorization boundary. Anyone who can drive this Copilot App session can open the staff canvas and archive the event, so **the thing actually protecting the ledger is physical control of the App** — not a permission check. Typing `wipe` and recording a staff name are deliberate friction and an audit trail, not authentication.
+
+In practice: do not leave the App session unattended and unlocked at a staffed booth, and treat the machine running the booth as staff equipment. If an event needs a stronger guarantee than that, the dashboard should be run from a separate staff device rather than the booth machine.
+
 It reports the event totals, which stations are still open, whether the blocklist is approved, whether a leaderboard is configured, where the data actually lives on disk, the house menu, the removals log, and the files written so far. Everything it shows is read from the same ledger the booth writes; it is a view, not a second source of truth.
 
 The same drink takedown is available there as well as on the command line. The dashboard is more convenient mid-event; the command works when no host is running.
@@ -90,6 +94,8 @@ The same drink takedown is available there as well as on the command line. The d
 Hand-over is the attendee's own action and it requires a served drink. An attendee who starts an order and walks away therefore leaves a station **nobody can hand over**, and that blocks the end-of-event archive.
 
 Close it from the dashboard: pick the station under **Open stations**, give your name, and confirm. Any drink they already served stays on the house menu and in the standings — closing a station ends a turn, it is not a takedown. Who closed it is recorded in the ledger.
+
+The booth screen returns to the house menu by itself the next time it is used or refreshed. It does not need to be closed and reopened, and the next attendee can start an order straight away.
 
 ## Ending an event
 
@@ -103,7 +109,7 @@ The ledger is also **per machine**. A multi-station event has one menu and one s
 4. Read what the dashboard reports back: the archive path, and how many drinks and removals now exist **only** in that file.
 5. **Copy the archive off this machine** before the device is reimaged, returned, or handed to another team. The dashboard cannot restore it, and nothing else holds a copy.
 
-The order is archive, verify, then wipe. The archive is written inside the ledger lock so no run can slip in between, then read back off disk and compared against the ledger before anything is erased. If the read-back does not match, nothing is wiped and the event survives; preserve the ledger and check storage before retrying.
+The order is archive, verify, then wipe. The archive is written inside the ledger lock so no run can slip in between, then read back off disk and compared against the ledger before anything is erased. The comparison covers the **whole ledger**, not just the totals, so an archive that is not a restorable copy cannot pass it. If the read-back does not match, nothing is wiped, the event survives, and the failed file is removed rather than left in `exports` where it could be mistaken for a good archive. Preserve the ledger and check storage before retrying.
 
 Archives and exports are written to `<data directory>/exports`, never into the repository, and an existing file is never overwritten.
 

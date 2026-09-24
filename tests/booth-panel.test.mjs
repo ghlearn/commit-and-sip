@@ -268,3 +268,40 @@ test("a removed drink never keeps congratulating the attendee", async () => {
   const html = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/booth.html", import.meta.url), "utf8");
   assert.match(html, /id="served-qr-removed"[^>]*hidden/, "the removal notice starts hidden");
 });
+
+// Review found that closing an abandoned station moved the ledger but left this
+// panel holding the old run, so the station refused every following attendee.
+test("a station staff closed is ready for the next attendee", async t => {
+  const booth = await station(t);
+  const started = await booth.act("begin");
+  assert.equal(started.status, 200);
+  const { runId } = started.body;
+  assert.ok(runId, "the panel reports which run is at the counter");
+
+  await booth.engine.closeStation({ runId, closedBy: "Sam" });
+
+  const idle = await booth.state();
+  assert.equal(idle.status, 200);
+  assert.equal(idle.body.phase, "idle", "the screen returns to the house menu on its own");
+
+  const next = await booth.act("begin");
+  assert.equal(next.status, 200, "and the next attendee can start");
+  assert.notEqual(next.body.runId, runId, "as a new run, not the closed one");
+});
+
+test("a station whose event was archived recovers instead of failing", async t => {
+  const booth = await station(t);
+  const started = await booth.act("begin");
+  await booth.act("submit_name", { name: "Mona Moonlight" });
+  const { runId } = started.body;
+  await booth.engine.closeStation({ runId, closedBy: "Sam" });
+  await booth.engine.archiveAndWipe({ archivedBy: "Sam", confirm: "wipe" });
+
+  // The run this panel remembers no longer exists anywhere.
+  const idle = await booth.state();
+  assert.equal(idle.status, 200, "refreshing must not fail with run_missing");
+  assert.equal(idle.body.phase, "idle");
+
+  const next = await booth.act("begin");
+  assert.equal(next.status, 200, "the booth opens the next event without being reopened");
+});

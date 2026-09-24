@@ -65,7 +65,7 @@ No leaderboard service is deployed and `leaderboardClient` defaults to null. Any
 
 Staff operations are a **second canvas**, `commit-and-sip-admin`, not a mode of the attendee one. The attendee screen is unattended and faces a queue, so its dispatch whitelist stays `submit_name`, `complete`, and `refresh`; export, station close, takedown, and archive-and-wipe are not reachable from it under any action name, and a test pins that in both directions.
 
-An **export** is read-only and safe mid-event. An **archive-and-wipe** is the only operation that destroys data, and its ordering is the whole safety property: the archive is written inside the ledger transaction so no run can be added between the archive and the wipe, then read back off disk and compared against the ledger summary before anything is reset. A failed read-back leaves the event intact. Artifacts are opened `wx` so an existing file is never overwritten, and they are written to `<data directory>/exports`, never into the checkout.
+An **export** is read-only and safe mid-event. An **archive-and-wipe** is the only operation that destroys data, and its ordering is the whole safety property: the archive is written inside the ledger transaction so no run can be added between the archive and the wipe, then read back off disk and compared against the live ledger before anything is reset. The comparison is a canonical digest of the whole ledger alongside the summary totals, because matching counts alone can also be true of a file that is not a restorable copy. The archive is written under a pending name that `listArtifacts` ignores and renamed into place only once it verifies, so a file that fails is removed rather than left looking like a saved event. A failed read-back leaves the event intact. Artifacts are opened `wx` so an existing file is never overwritten, and they are written to `<data directory>/exports`, never into the checkout.
 
 A wipe is refused while any station is still mid-order. Because hand-over requires a served drink, an attendee who walks away would otherwise strand a station permanently, so staff can close one explicitly; a drink already served stays on the menu, since closing a station ends a turn and is not a takedown.
 
@@ -106,7 +106,8 @@ Keep regression coverage for:
 - Phase transitions, including that completing clears the counter without erasing the served result or house menu.
 - Local-first publication, receipt mismatch rejection, and retry on refresh.
 - Staff takedown: name reservation after removal, attendee-facing withdrawal of every success claim, and that removal stays out of the dispatched action set.
-- Event lifecycle: archive-then-verify-then-wipe ordering, refusal on an active station, an empty booth, a missing confirmation, or an archive that did not read back, no-overwrite on artifacts, and that a closed station keeps its served drink.
+- Event lifecycle: archive-then-verify-then-wipe ordering, refusal on an active station, an empty booth, a missing confirmation, or an archive that did not read back, that a failed archive leaves no file behind, no-overwrite on artifacts, and that a closed station keeps its served drink.
+- Station reconciliation: a station closed by staff, or one whose event was archived, returns to idle and accepts the next attendee rather than refusing as `already_started` or failing as `run_missing`.
 - Loopback action boundaries: capability ticket, exact origin and host, content type, and bounded bodies.
 - Palette contrast, bundled font provenance, and QR decoding of the generated image.
 

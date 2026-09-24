@@ -148,10 +148,20 @@ export class BoothEngine {
         "nothing_to_archive", "There is nothing recorded to archive. Nothing was changed.", 409);
 
       const payload = archivePayload(data, { archivedBy, now });
-      const path = await this.store.writeArtifact(artifactName("event", now), payload);
-      const written = await this.store.readArtifact(path);
-      requireValue(archiveMatches(written, data), "archive_unverified",
-        "The archive did not read back correctly, so nothing was wiped. Preserve the ledger and ask staff to check storage.", 500);
+      // Verify before publishing, not after. The file has to exist to be read
+      // back, but one that fails the check must not survive in exports/ where
+      // staff could copy it off believing the event was saved.
+      const pending = await this.store.writePendingArtifact(artifactName("event", now), payload);
+      let path;
+      try {
+        const written = await this.store.readArtifact(pending);
+        requireValue(archiveMatches(written, data), "archive_unverified",
+          "The archive did not read back correctly, so nothing was wiped. Preserve the ledger and ask staff to check storage.", 500);
+        path = await this.store.publishArtifact(pending);
+      } catch (error) {
+        await this.store.discardArtifact(pending);
+        throw error;
+      }
 
       const empty = emptyLedger();
       for (const key of Object.keys(data)) delete data[key];

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { requireValue } from "../domain.mjs";
 
 // End-of-event handling is the one place where a booth destroys data, so the
@@ -88,12 +89,34 @@ export function artifactName(prefix, now = new Date().toISOString()) {
 // The archive is read back off the disk and compared before anything is
 // destroyed. Trusting the write to have worked is exactly the assumption that
 // turns a routine reset into a lost event.
+//
+// Summary totals alone are not enough to license destruction: two different
+// ledgers can share an attendee count and a score sum, so a corrupted or stale
+// archive could pass while holding the wrong records. The digest compares the
+// whole ledger, which is what "restorable copy" actually means.
 export function archiveMatches(written, data) {
   if (!written || written.kind !== "commit-and-sip-archive" || !written.ledger) return false;
   const before = eventSummary(data);
   const after = eventSummary(written.ledger);
-  return ["attendees", "completed", "invented", "removals", "scored"]
-    .every(key => before[key] === after[key]);
+  if (!["attendees", "completed", "invented", "removals", "scored"].every(key => before[key] === after[key])) return false;
+  return ledgerDigest(written.ledger) === ledgerDigest(data);
+}
+
+// A JSON round trip preserves content but not key order, so the digest is taken
+// over a canonically ordered form. Equal content must hash equal regardless of
+// how either side happened to be serialized.
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    const ordered = {};
+    for (const key of Object.keys(value).sort()) ordered[key] = canonical(value[key]);
+    return ordered;
+  }
+  return value;
+}
+
+export function ledgerDigest(ledger) {
+  return createHash("sha256").update(JSON.stringify(canonical(ledger) ?? null)).digest("hex");
 }
 
 export function emptyLedger() {
