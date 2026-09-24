@@ -59,7 +59,7 @@ test("npm entrypoints guard the runtime and cannot hang forever", async () => {
   assert.equal(scripts.pretest, "node scripts/require-node.mjs");
   assert.equal(scripts.precheck, "node scripts/require-node.mjs");
   assert.match(scripts.test, /^node --test --test-timeout=\d+ --test-force-exit tests\/\*\.test\.mjs$/);
-  for (const name of ["preflight-live.mjs", "provision-live.mjs"]) {
+  for (const name of ["generate-qr.mjs"]) {
     const source = await readRoot(`scripts/${name}`);
     assert.match(source, /import \{ guardNodeVersion \} from "\.\/require-node\.mjs";/);
     assert.match(source, /^guardNodeVersion\(\);$/m);

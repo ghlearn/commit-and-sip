@@ -1,6 +1,6 @@
 import { DomainError, requireValue, exactInput, validRunId, generateHandle } from "./domain.mjs";
 import { PLACEMENTS } from "./services/coffee-name.mjs";
-import { validateLeaderboardUrl } from "./services/completion.mjs";
+import { validateLeaderboardUrl } from "./services/public-url.mjs";
 import { addDrink, leaderboard, seedMenu, standingFor } from "./services/booth-menu.mjs";
 import {
   confirmedSync, failedSync, initialSync, submissionFor, syncView, validateLeaderboardClient, validateReceipt

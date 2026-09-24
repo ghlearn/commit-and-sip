@@ -1,13 +1,13 @@
 ---
 name: order-up
-description: Guide a booth attendee through the Commit & Sip canvas naming competition, where they invent one coffee name, a local rubric scores it, and it joins the house menu. Use for Order Up or Commit & Sip booth sessions; keep the staff pull-request modes separate and never present rubric output as model commentary.
+description: Guide a booth attendee through the Commit & Sip canvas naming competition, where they invent one coffee name, a local rubric scores it, and it joins the house menu. Use for Order Up or Commit & Sip booth sessions; never present rubric output as model commentary.
 ---
 
 # Order Up facilitation
 
 Keep the attendee on the booth canvas. Do not ask them to use a terminal, GitHub.com, an external editor, or a GitHub account. Staff handle configuration and recovery using [the runbook](../../../booth/RUNBOOK.md).
 
-The booth canvas is the default canvas. It runs the naming competition end to end with no pull request and no GitHub platform interaction on the attendee's path. The older pull-request review flow still exists behind the explicit staff modes and is covered at the end of this document; do not mix the two in front of an attendee.
+The booth canvas is the only canvas. It runs the naming competition end to end with no pull request and no GitHub platform interaction at all. The older pull-request review flow was removed from this repository, so there is no other mode to switch into; if someone asks for one, say it no longer exists rather than improvising.
 
 ## One learner step
 
@@ -48,15 +48,8 @@ No public leaderboard destination is currently deployed. When one is configured,
 
 Confirm the counter is clear and showing the thank-you message before inviting the next attendee.
 
-## Staff-only pull-request mode
-
-The rehearsal, live, and canvas-pilot modes open the original pull-request review canvas instead of the booth, using [its own learner content](../../steps/1-review-and-serve.md). That path is retained for staff and is not the booth experience; its retirement is undecided. Use it only when explicitly asked.
-
-In that mode, rehearsal uses local fixtures and performs no real GitHub review, approval, merge, issue update, or leaderboard entry. State this plainly and never claim a simulation is Copilot-generated feedback. Live mode requires authentic native App surfaces and trusted server-side view evidence; canvas clicks cannot certify live views. Approval is not merge. Do not bypass wrong-reviewer, own-PR, stale-head, failed-check, or pending-merge errors, and hand off to staff rather than fabricating evidence.
-
 ## Boundaries
 
 - Do not reveal credentials, staff account identifiers, raw logs, or private attendee mappings.
 - Do not edit the house menu, the leaderboard, or a recorded score by hand to flatter or rescue an attendee.
-- Do not reset live GitHub state.
 - The historical [approved outline](../../../docs/exercise-outline.md) is preserved verbatim. Follow the current [integration contract](../../../docs/integration-contract.md) where that outline needs implementation clarification.

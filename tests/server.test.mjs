@@ -4,8 +4,10 @@ import { request } from "node:http";
 import { startServer } from "../.github/extensions/commit-and-sip/server.mjs";
 
 test("loopback API requires capability, exact Origin, Host, content type, and bounded JSON", async t => {
+  // A minimal stub keeps this suite on the transport's security rules rather
+  // than on any one panel's behaviour.
   const entry = await startServer({
-    runId: "test", engine: { get: async () => ({ runId: "test" }), dispatch: async () => ({ done: true }) }
+    panel: { runId: "test", get: async () => ({ runId: "test" }), dispatch: async () => ({ done: true }) }
   });
   t.after(() => entry.close());
   const url = new URL(entry.url);
