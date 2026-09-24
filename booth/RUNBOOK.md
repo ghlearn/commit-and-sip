@@ -43,7 +43,9 @@ Never put credentials in that file, the renderer, the repository, or a QR URL.
 
 The booth publishes attendee-invented names on the house menu, so the blocklist is event-safety configuration, not a code detail. `booth/blocked-terms.json` ships as an explicit placeholder: `review.placeholder` is `true`, the entries only demonstrate the two match modes, and no moderation decision has been made. The booth still runs with it, and the extension logs a warning naming the gap every time it starts in booth mode. Treat that warning as a release blocker, not noise.
 
-To make it event-ready, replace `entries`, set `review.placeholder` to `false`, and record `reviewedBy`, `reviewedAt`, and `source`. `blocklistStatus` refuses to report readiness until all of those are present, so a half-finished edit cannot look approved. Prefer vendoring an attributed, maintained public list over writing terms by hand, and have a named human owner accept it. Nothing in this repository certifies a list as adequate.
+To make it event-ready, replace `entries`, set `review.placeholder` to `false`, and record `reviewedBy`, `reviewedAt`, and `source`. `blocklistStatus` refuses to report readiness until all of those are present, so a half-finished edit cannot look approved. Have a named human owner accept it. Nothing in this repository certifies a list as adequate.
+
+[Sourcing the moderation blocklist](../docs/blocklist-sourcing.md) sets out where terms can come from and why a short reviewable list is recommended over a large vendored one. It is a proposal, not an approval.
 
 Choose the match mode deliberately. `substring` rejects every name containing the fragment anywhere, so reserve it for terms that are never part of an innocent word. `word` requires the term to consume whole words, so `grind` does not reject `Grinder`. Getting this wrong is the common failure: an over-broad `substring` entry silently rejects ordinary names at the counter, and attendees see only "That name is not available."
 

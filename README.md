@@ -73,6 +73,7 @@ Scores run from 1 to **5,000** and come from a deterministic rubric in code, not
 | [Step 1: Name a drink for the house menu](.github/steps/1-name-a-drink.md) | Canonical learner instructions |
 | [Learner entry guide](docs/learner-guide.md) | Attendees and facilitators |
 | [Booth runbook](booth/RUNBOOK.md) | Setup, moderation, recovery, reset, and event staff |
+| [Blocklist sourcing proposal](docs/blocklist-sourcing.md) | Whoever owns the moderation decision |
 | [Integration contract](docs/integration-contract.md) | Leaderboard and service implementers |
 | [Architecture and validation](docs/architecture.md) | Maintainers |
 | [Asset capture checklist](.github/images/README.md) | Authentic screenshots, accessible QR, branding |
