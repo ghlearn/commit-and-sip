@@ -5,6 +5,10 @@ import { addDrink, leaderboard, removeDrink, seedMenu, standingFor } from "./ser
 import {
   confirmedSync, failedSync, initialSync, submissionFor, syncView, validateLeaderboardClient, validateReceipt
 } from "./services/leaderboard.mjs";
+import {
+  archiveMatches, archivePayload, artifactName, emptyLedger, eventSummary, exportPayload, WIPE_CONFIRMATION
+} from "./services/event-archive.mjs";
+import { blocklistStatus } from "./services/moderation.mjs";
 
 // The booth flow is entirely canvas-driven: the attendee is given a handle,
 // invents one drink, and sees their score and standing. It performs no GitHub
@@ -69,6 +73,90 @@ export class BoothEngine {
         run.events.push({ type: "removed", at: record.removedAt });
       }
       return record;
+    });
+  }
+
+  // --- Staff operations -----------------------------------------------------
+  // None of these are reachable from `dispatch`. The attendee canvas is an
+  // unattended screen facing a queue; exporting, archiving and wiping belong to
+  // a separate staff surface, the same reasoning that keeps takedown out.
+
+  // What staff need before deciding anything. Removal reasons and staff names
+  // appear here and nowhere on the attendee screen.
+  async adminOverview() {
+    const data = await this.store.read();
+    const menu = this.houseMenu(data);
+    return {
+      archives: await this.store.listArtifacts(),
+      blocklist: blocklistStatus(this.rules.blocklist),
+      dataDirectory: this.store.directory,
+      houseMenu: menu.map(({ example, handle, id, name, score }) => ({ example, handle, id, name, score })),
+      leaderboard: leaderboard(menu),
+      leaderboardUrl: this.leaderboardUrl,
+      removals: this.removalLog(data),
+      summary: eventSummary(data),
+    };
+  }
+
+  // Hand-over is the attendee's own action, and it requires a served drink. An
+  // attendee who starts an order and walks away therefore leaves a station that
+  // nobody can close, which would block the end-of-event archive forever. This
+  // is the staff way out, and it is recorded rather than silent.
+  async closeStation({ runId, closedBy }) {
+    requireValue(validRunId(runId), "invalid_run", "Invalid run ID.", 400);
+    requireValue(typeof closedBy === "string" && closedBy.trim().length > 0,
+      "invalid_close", "Record who closed this station.", 400);
+    return this.store.transaction(data => {
+      const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
+      requireValue(run && run.mode === "booth", "run_missing", "That station does not exist.", 404);
+      requireValue(run.phase !== "complete", "already_complete", "That station is already handed over.", 409);
+      const at = new Date().toISOString();
+      run.phase = "complete";
+      run.completedAt = at;
+      run.closedBy = closedBy.trim();
+      // A drink that reached the menu stays on it. Closing a station ends the
+      // attendee's turn; it is not a takedown and must not look like one.
+      run.events.push({ type: "closed_by_staff", at });
+      return { handle: run.handle, runId, served: Boolean(run.submission) };
+    });
+  }
+
+  // Reading results out mid-event is safe and changes nothing, so it is kept
+  // separate from the archive: staff should never have to risk a wipe to get a
+  // copy of the standings.
+  async exportResults({ exportedBy, now = new Date().toISOString() } = {}) {
+    const data = await this.store.read();
+    const payload = exportPayload(data, { exportedBy, now });
+    const path = await this.store.writeArtifact(artifactName("results", now), payload);
+    return { path, summary: payload.summary };
+  }
+
+  // The destructive one. Order is the entire safety property: archive, read it
+  // back, compare it against what is still in the ledger, and only then reset.
+  // Writing happens inside the transaction so no run can be added between the
+  // archive and the wipe and be destroyed without ever being recorded.
+  async archiveAndWipe({ archivedBy, confirm, now = new Date().toISOString() } = {}) {
+    requireValue(confirm === WIPE_CONFIRMATION, "confirmation_required",
+      `Type ${WIPE_CONFIRMATION} to confirm. Nothing was changed.`, 400);
+    return this.store.transaction(async data => {
+      const summary = eventSummary(data);
+      // An attendee mid-order would lose the drink on the screen in front of
+      // them. Finish or hand over the station first.
+      requireValue(summary.active.length === 0, "station_active",
+        `${summary.active.length === 1 ? "One station still has" : `${summary.active.length} stations still have`} an attendee. Close or hand over every order first. Nothing was changed.`, 409);
+      requireValue(summary.attendees > 0 || summary.invented > 0 || summary.removals > 0,
+        "nothing_to_archive", "There is nothing recorded to archive. Nothing was changed.", 409);
+
+      const payload = archivePayload(data, { archivedBy, now });
+      const path = await this.store.writeArtifact(artifactName("event", now), payload);
+      const written = await this.store.readArtifact(path);
+      requireValue(archiveMatches(written, data), "archive_unverified",
+        "The archive did not read back correctly, so nothing was wiped. Preserve the ledger and ask staff to check storage.", 500);
+
+      const empty = emptyLedger();
+      for (const key of Object.keys(data)) delete data[key];
+      Object.assign(data, empty);
+      return { archive: path, summary };
     });
   }
 

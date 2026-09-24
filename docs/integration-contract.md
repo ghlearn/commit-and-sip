@@ -62,7 +62,9 @@ A blocklist is a prediction about what someone will type, so it cannot be the on
 
 ### Canvas wiring
 
-The booth canvas is the only canvas. `extension.mjs` constructs one `BoothEngine` and registers `boothCanvasDefinition`; there is no mode branch, because there is no other mode. The canvas takes no open input and exposes four actions: `begin`, `submit_name`, `complete`, and `refresh`.
+There are two canvases over one `BoothEngine`: `commit-and-sip` for the attendee and `commit-and-sip-admin` for staff. Neither takes open input, which is precisely why staff operations cannot be a mode of the attendee canvas — there is no input to select one with. The attendee canvas exposes `begin`, `submit_name`, `complete`, and `refresh`. The staff canvas exposes `refresh`, `export_results`, `remove_drink`, `close_station`, and `archive_and_wipe`.
+
+Keeping them apart is a boundary, not tidiness. The attendee screen is unattended and faces a queue, so no destructive operation may be reachable from it; the engine's attendee dispatch whitelist rejects every staff action name, and a test pins that in both directions. The loopback server scopes its page and script assets per panel so a booth server cannot serve the dashboard's script either.
 
 `BoothPanel` is the station: one panel serves attendee after attendee, holding only the current run, so `begin` mints a fresh handle and `complete` clears the cursor and returns the counter to idle with the previous drink still on the house menu. A double click on `begin` is refused rather than stranding a started run.
 
@@ -70,9 +72,21 @@ QR codes are rendered server-side into a data URL because the loopback server's 
 
 The loopback server keeps its per-panel capability ticket, exact origin and host checks, content-type enforcement, and bounded request bodies. Those protections are independent of which flow runs behind them and were retained through the retirement, along with their tests.
 
+### Event lifecycle and data ownership
+
+Attendee data lives in the data directory outside the checkout. **Deleting the cloned repository is not a cleanup**: it removes the reviewed blocklist and staff configuration and leaves every attendee name and removal record untouched. Any implementer or operator instruction that treats repository deletion as end-of-event data handling is wrong.
+
+The ledger is per machine. A multi-station event has one menu, one set of standings, and one duplicate check per booth, and must be archived once per booth. Cross-booth uniqueness is a leaderboard-service responsibility, not something a station can provide.
+
+`archive_and_wipe` is the only operation that destroys data. Its ordering is required, not incidental: write the archive inside the ledger transaction, read it back off disk, compare summaries, and only then reset. A failed read-back must leave the event intact. Artifacts must never overwrite an existing file, and must never be written into the checkout.
+
+A wipe must be refused while a station is mid-order. Because attendee hand-over requires a served drink, staff must have an explicit way to close an abandoned station, or an attendee who walks away strands the machine permanently. Closing a station ends a turn and keeps any drink already served on the menu; it is not a takedown and must not be recorded as one.
+
+Retention of archive files — duration, owner, deletion schedule — is still unapproved. Do not invent one.
+
 ### Browser verification is part of the contract
 
-The booth screen was verified in a real browser twice, and each time it found a defect that the whole passing suite had missed. First, `#pick-placement` carried `required` while its default option had an empty value, so `reportValidity()` silently blocked every submission with no visible error. Second, `#pick-mascot` defaulted to a real selection, so a typed name was rejected for a mascot claim the attendee never made.
+Every screen under `renderer/` must be driven through a browser before it is considered verified, including the staff dashboard, where the refusal paths matter as much as the successful wipe. The booth screen was verified in a real browser twice, and each time it found a defect that the whole passing suite had missed. First, `#pick-placement` carried `required` while its default option had an empty value, so `reportValidity()` silently blocked every submission with no visible error. Second, `#pick-mascot` defaulted to a real selection, so a typed name was rejected for a mascot claim the attendee never made.
 
 API-level tests do not exercise HTML form validation or default-selected `<option>` semantics. Static checks now assert that neither picker is `required` and that both keep an empty-value default. Treat form-bearing canvas UI as unverified until it has been driven through a browser.
 

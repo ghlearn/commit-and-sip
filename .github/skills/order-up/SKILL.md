@@ -7,7 +7,9 @@ description: Guide a booth attendee through the Commit & Sip canvas naming compe
 
 Keep the attendee on the booth canvas. Do not ask them to use a terminal, GitHub.com, an external editor, or a GitHub account. Staff handle configuration and recovery using [the runbook](../../../booth/RUNBOOK.md).
 
-The booth canvas is the only canvas. It runs the naming competition end to end with no pull request and no GitHub platform interaction at all. The older pull-request review flow was removed from this repository, so there is no other mode to switch into; if someone asks for one, say it no longer exists rather than improvising.
+The booth canvas is the only canvas an attendee touches. It runs the naming competition end to end with no pull request and no GitHub platform interaction at all. The older pull-request review flow was removed from this repository, so there is no other mode to switch into; if someone asks for one, say it no longer exists rather than improvising.
+
+There is a separate staff canvas, `commit-and-sip-admin`, for exporting results, closing a station, taking a drink down, and ending an event. It is not part of facilitation and must not be opened in front of a queue: it shows removal reasons and staff names and can erase the event. Leave it to staff and the [runbook](../../../booth/RUNBOOK.md#staff-dashboard).
 
 ## One learner step
 

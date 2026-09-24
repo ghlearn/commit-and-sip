@@ -71,15 +71,53 @@ Scores run from 1 to 5,000. Speed, retries, and accessibility assistance never r
 
 Hand-over is the reset. The attendee chooses **I'm done — hand over to the next barista** and the counter returns to idle for the next person. There is no reset command and none is needed.
 
+Hand-over needs a served drink. If somebody leaves before naming one, see [closing an abandoned station](#closing-an-abandoned-station). Resetting the booth for a *new event* is a different operation: see [ending an event](#ending-an-event).
+
 Hand-over deliberately keeps the served drink on the house menu and the entry in the booth standings. That is the point of the station: the menu grows through the event. If an attendee asks to remove their drink, that is a moderation decision for staff, not a self-service action. See [taking a drink down](#taking-a-drink-down).
+
+## Staff dashboard
+
+Staff operations have their own canvas, `commit-and-sip-admin`, opened with no input like the booth one. It is a **second canvas, not a mode of the attendee screen**: that screen faces a queue, so nothing on it can export, close a station, take a drink down, or erase an event. The booth canvas rejects those action names outright.
+
+Open it on a staff device, or on the booth machine turned away from the counter. It shows removal reasons and staff names, so it is not a screen to leave facing attendees.
+
+It reports the event totals, which stations are still open, whether the blocklist is approved, whether a leaderboard is configured, where the data actually lives on disk, the house menu, the removals log, and the files written so far. Everything it shows is read from the same ledger the booth writes; it is a view, not a second source of truth.
+
+The same drink takedown is available there as well as on the command line. The dashboard is more convenient mid-event; the command works when no host is running.
+
+## Closing an abandoned station
+
+Hand-over is the attendee's own action and it requires a served drink. An attendee who starts an order and walks away therefore leaves a station **nobody can hand over**, and that blocks the end-of-event archive.
+
+Close it from the dashboard: pick the station under **Open stations**, give your name, and confirm. Any drink they already served stays on the house menu and in the standings — closing a station ends a turn, it is not a takedown. Who closed it is recorded in the ledger.
+
+## Ending an event
+
+Everything an attendee produced lives on **this machine**, under the data directory, not in the repository. Deleting the cloned repository deletes the reviewed blocklist and the staff configuration while leaving every attendee name and removal record exactly where it was. It is not a cleanup. Do not use it as one.
+
+The ledger is also **per machine**. A multi-station event has one menu and one set of standings per booth, and each machine is archived separately.
+
+1. Close or hand over every open station. The archive is refused while an attendee is mid-order, because wiping under them would delete the drink on the screen in front of them.
+2. Optionally **Export results** first. This is read-only and safe at any point during an event; it does not replace the archive, and the archive does not require it.
+3. Under **End the event**, give your name and type `wipe` to confirm. Typed rather than clicked, because this erases every attendee record at this booth.
+4. Read what the dashboard reports back: the archive path, and how many drinks and removals now exist **only** in that file.
+5. **Copy the archive off this machine** before the device is reimaged, returned, or handed to another team. The dashboard cannot restore it, and nothing else holds a copy.
+
+The order is archive, verify, then wipe. The archive is written inside the ledger lock so no run can slip in between, then read back off disk and compared against the ledger before anything is erased. If the read-back does not match, nothing is wiped and the event survives; preserve the ledger and check storage before retrying.
+
+Archives and exports are written to `<data directory>/exports`, never into the repository, and an existing file is never overwritten.
+
+After a wipe the booth opens with only the three house examples, no standings, and no removals. Names reserved by the archived event are free again, so a drink invented at the last event can be invented again at the next one.
+
+Retention of the archive files themselves — how long to keep them, who owns them, and when they are deleted — still needs approval. Do not invent a duration.
 
 ## Taking a drink down
 
 A blocklist is a guess about what someone will type. This is the control that works after the fact, and it is why an imperfect list is survivable.
 
-Removal is a command, not a canvas button. The booth screen faces a queue, so a takedown control on it would let anyone delete a rival's entry. It writes through the same ledger lock as the booth, so it is safe to run while a station is live.
+Removal is staff-only. The booth screen faces a queue, so a takedown control on it would let anyone delete a rival's entry; it lives on the [staff dashboard](#staff-dashboard) and on the command line instead. Both write through the same ledger lock as the booth, so either is safe to run while a station is live.
 
-Find the ID, then remove it, recording who you are and why:
+From the dashboard, choose the drink under **Take a drink down** and give your name and a reason. From a terminal, find the ID, then remove it, recording who you are and why:
 
 ```
 npm run remove -- --list
@@ -164,4 +202,4 @@ Keep staff-only daily observations of completion time, staff intervention, rejec
 
 Those are historical proposed targets, not results already achieved. Measurement tooling is unresolved. Do not invent evidence.
 
-End of day: preserve approved backups, close panels, and stop intake. Event-data retention period, deletion schedule, responsible owner, and access policy still need approval; do not invent a duration or delete records while the event continues. Publish only approved anonymous outputs.
+End of day: preserve approved backups, close panels, and stop intake. At the end of the whole event, follow [ending an event](#ending-an-event) and copy the archive off the machine. Event-data retention period, deletion schedule, responsible owner, and access policy still need approval; do not invent a duration or delete records while the event continues. Publish only approved anonymous outputs.

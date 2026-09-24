@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="light">
+  <title>Commit &amp; Sip - Booth staff</title>
+  <link rel="icon" href="data:,">
+  <link rel="preload" href="/fonts/MonaSansVF.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/admin.js" defer></script>
+</head>
+<body>
+  <main class="launcher" id="admin" aria-busy="true">
+    <p class="eyebrow">Commit &amp; Sip - Booth staff</p>
+    <h1>Booth staff dashboard</h1>
+    <p class="notice"><strong>This screen is for staff.</strong> It shows removal reasons and staff names, and it can erase the event. Do not leave it open on the attendee-facing screen.</p>
+
+    <section id="admin-error" class="notice error-notice" role="alert" hidden>
+      <h2>Something needs attention</h2>
+      <p id="admin-error-message"></p>
+      <button id="admin-retry" type="button">Refresh connection</button>
+    </section>
+
+    <p id="admin-notice" class="notice" role="status" aria-live="polite" hidden></p>
+
+    <section aria-labelledby="totals-heading">
+      <h2 id="totals-heading">This event</h2>
+      <ul id="admin-totals"></ul>
+      <p id="admin-active" class="notice error-notice" role="status" hidden></p>
+    </section>
+
+    <section id="stations-section" aria-labelledby="stations-heading" hidden>
+      <h2 id="stations-heading">Open stations</h2>
+      <p>An attendee who walks away mid-order leaves a station nobody can hand over, and the event cannot be archived until it is closed. Any drink they already served stays on the menu.</p>
+      <ul id="admin-stations"></ul>
+      <form id="close-form">
+        <fieldset id="close-fields">
+          <legend>Close a station</legend>
+          <label for="close-run">Station</label>
+          <select id="close-run"><option value="">Choose a station</option></select>
+          <label for="close-by">Your name</label>
+          <input id="close-by" type="text" required maxlength="80" autocomplete="off">
+          <button id="close-submit" type="submit">Close this station</button>
+        </fieldset>
+      </form>
+      <p id="close-problem" class="notice error-notice" role="alert" hidden></p>
+    </section>
+
+    <section aria-labelledby="health-heading">
+      <h2 id="health-heading">Station health</h2>
+      <ul id="admin-health"></ul>
+    </section>
+
+    <section aria-labelledby="export-heading">
+      <h2 id="export-heading">Export results</h2>
+      <p>Writes the current drinks, scores, and removals to a staff file. This changes nothing and is safe to run during an event.</p>
+      <form id="export-form">
+        <fieldset id="export-fields">
+          <legend>Export</legend>
+          <label for="export-by">Your name</label>
+          <input id="export-by" type="text" required maxlength="80" autocomplete="off" aria-describedby="export-help">
+          <p id="export-help">Recorded in the file so the export can be attributed later.</p>
+          <button id="export-submit" class="primary" type="submit">Export results</button>
+        </fieldset>
+      </form>
+    </section>
+
+    <section aria-labelledby="menu-heading">
+      <h2 id="menu-heading">House menu</h2>
+      <p id="admin-menu-empty" hidden>No drinks have been invented yet.</p>
+      <ul id="admin-menu" class="menu"></ul>
+    </section>
+
+    <section aria-labelledby="takedown-heading">
+      <h2 id="takedown-heading">Take a drink down</h2>
+      <p>The drink leaves the menu and the standings. The name stays reserved, so it cannot be entered again. House examples cannot be removed here.</p>
+      <form id="takedown-form">
+        <fieldset id="takedown-fields">
+          <legend>Takedown</legend>
+          <label for="takedown-id">Drink</label>
+          <select id="takedown-id" aria-describedby="takedown-help">
+            <option value="">Choose a drink</option>
+          </select>
+          <p id="takedown-help">Only attendee-invented drinks appear here.</p>
+          <label for="takedown-by">Your name</label>
+          <input id="takedown-by" type="text" required maxlength="80" autocomplete="off">
+          <label for="takedown-reason">Reason</label>
+          <input id="takedown-reason" type="text" required maxlength="200" autocomplete="off" aria-describedby="reason-help">
+          <p id="reason-help">Kept in the ledger for accountability. Never shown to the attendee.</p>
+          <button id="takedown-submit" type="submit">Remove from the menu</button>
+        </fieldset>
+      </form>
+      <p id="takedown-problem" class="notice error-notice" role="alert" hidden></p>
+    </section>
+
+    <section aria-labelledby="removals-heading">
+      <h2 id="removals-heading">Removals</h2>
+      <p id="admin-removals-empty" hidden>Nothing has been removed at this booth.</p>
+      <ul id="admin-removals"></ul>
+    </section>
+
+    <section aria-labelledby="archives-heading">
+      <h2 id="archives-heading">Saved files</h2>
+      <p id="admin-archives-empty" hidden>No exports or archives have been written yet.</p>
+      <p class="muted" id="admin-directory"></p>
+      <ul id="admin-archives"></ul>
+    </section>
+
+    <section aria-labelledby="wipe-heading">
+      <h2 id="wipe-heading">End the event</h2>
+      <p>Archives everything recorded at this booth, then clears it for the next event. The archive is written and read back before anything is erased.</p>
+      <p><strong>This cannot be undone from the dashboard.</strong> The archive file is the only copy, so copy it off this machine before reimaging or returning it.</p>
+      <form id="wipe-form">
+        <fieldset id="wipe-fields">
+          <legend>Archive and reset</legend>
+          <label for="wipe-by">Your name</label>
+          <input id="wipe-by" type="text" required maxlength="80" autocomplete="off">
+          <label for="wipe-confirm">Type <code>wipe</code> to confirm</label>
+          <input id="wipe-confirm" type="text" required maxlength="20" autocomplete="off" spellcheck="false" aria-describedby="wipe-help">
+          <p id="wipe-help">Deliberately typed rather than clicked, because this erases every attendee record at this booth.</p>
+          <button id="wipe-submit" type="submit">Archive this event and reset the booth</button>
+        </fieldset>
+      </form>
+      <p id="wipe-problem" class="notice error-notice" role="alert" hidden></p>
+    </section>
+
+    <p class="muted">Attendee data lives on this machine, not in the repository. Deleting the cloned repository does not remove it.</p>
+  </main>
+</body>
+</html>

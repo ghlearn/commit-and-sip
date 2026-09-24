@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, open, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, open, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -19,6 +19,47 @@ export class RunStore {
     this.directory = directory;
     this.path = join(directory, "ledger.json");
     this.lock = join(directory, "ledger.lock");
+    // Exports and archives live beside the ledger, never inside the repository
+    // clone: that clone is disposable and may be deleted after an event, and
+    // committing attendee data would publish it.
+    this.exports = join(directory, "exports");
+  }
+
+  // Refuses to overwrite. Two archives on one day must never collide silently,
+  // because the survivor would look like a complete record of both.
+  async writeArtifact(name, payload) {
+    await mkdir(this.exports, { recursive: true, mode: 0o700 });
+    const path = join(this.exports, name);
+    let file;
+    try {
+      file = await open(path, "wx", 0o600);
+    } catch (error) {
+      if (error.code === "EEXIST") {
+        throw new DomainError("artifact_exists", `${name} already exists. Nothing was written.`, 409);
+      }
+      throw error;
+    }
+    try {
+      await file.writeFile(`${JSON.stringify(payload, null, 2)}\n`);
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    return path;
+  }
+
+  async readArtifact(path) {
+    return JSON.parse(await readFile(path, "utf8"));
+  }
+
+  async listArtifacts() {
+    try {
+      const names = await readdir(this.exports);
+      return names.filter(name => name.endsWith(".json")).sort();
+    } catch (error) {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    }
   }
 
   async read() {

@@ -4,14 +4,17 @@
 
 | Component | Responsibility |
 | --- | --- |
-| `extension.mjs` | Join the SDK session, load the catalog, name rules and optional staff config, and register the booth canvas |
+| `extension.mjs` | Join the SDK session, load the catalog, name rules and optional staff config, and register the attendee and staff canvases |
 | `canvas.mjs` | Declare the canvas, its action schemas, and panel lifecycle |
 | `booth-panel.mjs` | Bind one open panel to the local service and dispatch validated actions |
+| `admin-canvas.mjs` | Declare the staff dashboard canvas and its action schemas, separately from the attendee one |
+| `admin-panel.mjs` | Bind one open staff panel and serialise the destructive operation |
+| `services/event-archive.mjs` | Decide what an export and an archive contain, and whether an archive read back intact |
 | `booth-engine.mjs` | Attendee phase machine: handle, name validation, scoring, house menu, leaderboard publication |
 | `domain.mjs` | Shared validation helpers, catalog loading, curated handle generation, staff config validation |
 | `store.mjs` | Persistent ledger, exclusive file lock, atomic fsynced persistence |
 | `server.mjs` | Loopback HTTP boundary and renderer assets; dispatches only validated actions |
-| `renderer/` | The single attendee screen; presentation and controls only |
+| `renderer/` | The attendee screen and the staff dashboard; presentation and controls only |
 | `services/coffee-name.mjs` | Name rules, mascot and placement validation, blocklist lookup |
 | `services/name-score.mjs` | Deterministic rubric scoring out of 5,000 |
 | `services/booth-menu.mjs` | House menu projection, duplicate detection, standings, staff takedown |
@@ -58,6 +61,16 @@ Receipts are accepted only when the handle, name, and score match what was submi
 
 No leaderboard service is deployed and `leaderboardClient` defaults to null. Any configured URL must pass `validateLeaderboardUrl`: HTTPS only, no credentials, fragment, or nonstandard port, and no private, loopback, reserved, or reserved-suffix host. Do not present a placeholder QR as a production destination.
 
+## Staff surface and event lifecycle
+
+Staff operations are a **second canvas**, `commit-and-sip-admin`, not a mode of the attendee one. The attendee screen is unattended and faces a queue, so its dispatch whitelist stays `submit_name`, `complete`, and `refresh`; export, station close, takedown, and archive-and-wipe are not reachable from it under any action name, and a test pins that in both directions.
+
+An **export** is read-only and safe mid-event. An **archive-and-wipe** is the only operation that destroys data, and its ordering is the whole safety property: the archive is written inside the ledger transaction so no run can be added between the archive and the wipe, then read back off disk and compared against the ledger summary before anything is reset. A failed read-back leaves the event intact. Artifacts are opened `wx` so an existing file is never overwritten, and they are written to `<data directory>/exports`, never into the checkout.
+
+A wipe is refused while any station is still mid-order. Because hand-over requires a served drink, an attendee who walks away would otherwise strand a station permanently, so staff can close one explicitly; a drink already served stays on the menu, since closing a station ends a turn and is not a takedown.
+
+Deleting the cloned repository is **not** a cleanup. Attendee data lives in the data directory outside the checkout, so deleting the clone removes the reviewed blocklist and staff configuration while leaving every attendee name and removal record in place. The ledger is also per machine: a multi-station event is archived once per booth.
+
 ## Canvas color palette and typography
 
 The booth screen uses an intentionally light green-and-white palette in `renderer/style.css`: white canvas, pale-green supporting surfaces, forest-green text and primary actions, and a dark-green menu with white lettering. Semantic tokens cover text, muted text, borders, action/hover/focus, menu contrast, and red error feedback. Host color overrides are intentionally unused so a dark surrounding App cannot replace the requested white canvas. Errors keep literal messages and distinct red treatment; progress uses labels and borders rather than color alone. `tests/palette.test.mjs` checks authored text, control, and focus contrast, including disabled controls.
@@ -93,12 +106,13 @@ Keep regression coverage for:
 - Phase transitions, including that completing clears the counter without erasing the served result or house menu.
 - Local-first publication, receipt mismatch rejection, and retry on refresh.
 - Staff takedown: name reservation after removal, attendee-facing withdrawal of every success claim, and that removal stays out of the dispatched action set.
+- Event lifecycle: archive-then-verify-then-wipe ordering, refusal on an active station, an empty booth, a missing confirmation, or an archive that did not read back, no-overwrite on artifacts, and that a closed station keeps its served drink.
 - Loopback action boundaries: capability ticket, exact origin and host, content type, and bounded bodies.
 - Palette contrast, bundled font provenance, and QR decoding of the generated image.
 
-### Browser verification is required for the attendee form
+### Browser verification is required for every rendered screen
 
-Two real defects reached a fully green suite and were caught only in a browser: a `required` attribute on a control whose default option had an empty value, and a mascot picker that defaulted to a real selection the attendee never made. API-level tests do not exercise HTML form validation or default-selected `<option>` semantics. Any change to `renderer/booth.html` or `booth.js` needs a browser walkthrough, not just `npm test`.
+Real defects have reached a fully green suite and been caught only in a browser: a `required` attribute on a control whose default option had an empty value, a mascot picker that defaulted to a real selection the attendee never made, and success wording that survived a takedown. API-level tests do not exercise HTML form validation, default-selected `<option>` semantics, or what a screen actually says. Any change under `renderer/` needs a browser walkthrough, not just `npm test` — the staff dashboard included, where the walkthrough must cover the refusal paths as well as the successful wipe.
 
 ## Release evidence still needed
 
