@@ -1,0 +1,28 @@
+{
+  "review": {
+    "placeholder": true,
+    "reviewedBy": null,
+    "reviewedAt": null,
+    "source": null,
+    "notes": [
+      "This file is a shipped placeholder, not a moderation decision. The entries below only demonstrate the two match modes.",
+      "Before any event that publishes attendee names, replace entries with a reviewed list, record the reviewer and date, set placeholder to false, and cite the source.",
+      "Prefer vendoring an attributed, maintained public list over writing one here, and have a human owner accept it.",
+      "Use match \"substring\" only for terms that are never part of an innocent word, because substring matching rejects every name containing the fragment.",
+      "Use match \"word\" for anything that appears inside ordinary words, so a name like Classic Mona Cold Brew is not rejected.",
+      "Matching folds digits to letters, removes spaces, hyphens and apostrophes, and collapses repeated characters, so do not add spaced, doubled or leetspeak spellings of a term you already list."
+    ]
+  },
+  "entries": [
+    {
+      "term": "blocked-example-term",
+      "match": "substring",
+      "note": "Placeholder retained so the rejection path stays exercised until a reviewed list replaces this file."
+    },
+    {
+      "term": "exampleword",
+      "match": "word",
+      "note": "Placeholder showing word mode: rejects the standalone word but not a longer word containing it."
+    }
+  ]
+}

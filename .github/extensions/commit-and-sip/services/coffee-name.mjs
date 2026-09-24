@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { DomainError, requireValue } from "../domain.mjs";
+import { findBlockedTerm, loadBlocklist, validateBlocklist } from "./moderation.mjs";
 
 // Attendee text reaches GitHub issue bodies, pull-request titles, and menu data.
 // These rules reject injection and spoofing structurally; blockedTerms is a
@@ -11,7 +12,8 @@ const CLOSING = /[A-Za-z0-9]$/;
 const FORBIDDEN_SUBSTRINGS = ["http", "www.", ".com", ".net", ".org", "@", "#", "--"];
 
 export async function loadNameRules() {
-  return validateNameRules(JSON.parse(await readFile(new URL("../../../../booth/name-rules.json", import.meta.url), "utf8")));
+  const rules = validateNameRules(JSON.parse(await readFile(new URL("../../../../booth/name-rules.json", import.meta.url), "utf8")));
+  return { ...rules, blocklist: await loadBlocklist() };
 }
 
 export function validateNameRules(rules) {
@@ -35,6 +37,7 @@ export function validateNameRules(rules) {
   requireValue(Array.isArray(rules.blockedTerms) &&
     rules.blockedTerms.every(term => typeof term === "string" && term.trim().length > 0 && term === term.toLowerCase()),
   "invalid_name_rules", "Blocked terms must be nonempty lowercase strings.", 400);
+  if (rules.blocklist !== undefined) validateBlocklist(rules.blocklist);
   return rules;
 }
 
@@ -69,6 +72,9 @@ export function validateCoffeeName(raw, rules) {
   for (const term of rules.blockedTerms) {
     if (lower.includes(term)) reject("That name is not available. Try another.");
   }
+  // The structured list also catches spacing, doubling and digit-swap evasion,
+  // which a plain substring test on the raw name does not.
+  if (findBlockedTerm(name, rules.blocklist)) reject("That name is not available. Try another.");
   const id = coffeeNameId(name);
   if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(id)) reject("That name cannot become a menu ID. Try another.");
   // The mascot is what they build on, not the whole drink. A bare mascot leaves

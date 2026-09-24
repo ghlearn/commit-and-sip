@@ -7,6 +7,7 @@ import { RunStore } from "./store.mjs";
 import { RunEngine } from "./engine.mjs";
 import { BoothEngine } from "./booth-engine.mjs";
 import { loadNameRules } from "./services/coffee-name.mjs";
+import { blocklistStatus } from "./services/moderation.mjs";
 import { boothCanvasDefinition, canvasDefinition } from "./canvas.mjs";
 import { liveAdapters } from "./services/live.mjs";
 
@@ -39,8 +40,9 @@ engine = new RunEngine({ store, catalog, config });
 // default canvas. The pull-request review flow stays reachable for staff who
 // explicitly configure one of its modes.
 const booth = !["rehearsal", "live", "live-canvas-pilot"].includes(config.mode);
+const boothRules = booth ? await loadNameRules() : null;
 const boothEngine = booth
-  ? new BoothEngine({ store, catalog, rules: await loadNameRules(), leaderboardUrl: config.leaderboardUrl ?? null })
+  ? new BoothEngine({ store, catalog, rules: boothRules, leaderboardUrl: config.leaderboardUrl ?? null })
   : null;
 
 session = await joinSession({
@@ -55,4 +57,13 @@ if (["live", "live-canvas-pilot"].includes(config.mode)) {
   const adapters = liveAdapters(config, process.env.COMMIT_AND_SIP_COMPLETION_TOKEN);
   engine.github = adapters.github;
   engine.completion = adapters.completion;
+}
+
+// Attendee names go on a published menu, so an unreviewed blocklist is a real
+// event risk. Say so every start rather than letting it pass unnoticed.
+if (booth) {
+  const moderation = blocklistStatus(boothRules.blocklist);
+  if (!moderation.ready) {
+    await session.log(`Commit & Sip moderation is not event-ready: ${moderation.reason} Review booth/blocked-terms.json before publishing attendee names.`, { level: "warning" });
+  }
 }

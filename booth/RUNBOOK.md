@@ -36,6 +36,18 @@ If the provider/App restarts after an empty-input launch, the panel returns to s
 
 The old error `runId is a required property; mode is a required property` indicates the runtime still has the old declaration. Staff with host tooling must reload extensions and inspect the provider before retrying an empty open. Reload tools are host capabilities, not shell commands; repository changes alone do not restart a loaded provider.
 
+## Moderation blocklist — review required before publishing attendee names
+
+The booth publishes attendee-invented names on the house menu, so the blocklist is event-safety configuration, not a code detail. `booth/blocked-terms.json` ships as an explicit placeholder: `review.placeholder` is `true`, the entries only demonstrate the two match modes, and no moderation decision has been made. The booth still runs with it, and the extension logs a warning naming the gap every time it starts in booth mode. Treat that warning as a release blocker, not noise.
+
+To make it event-ready, replace `entries`, set `review.placeholder` to `false`, and record `reviewedBy`, `reviewedAt`, and `source`. `blocklistStatus` refuses to report readiness until all of those are present, so a half-finished edit cannot look approved. Prefer vendoring an attributed, maintained public list over writing terms by hand, and have a named human owner accept it. Nothing in this repository certifies a list as adequate.
+
+Choose the match mode deliberately. `substring` rejects every name containing the fragment anywhere, so reserve it for terms that are never part of an innocent word. `word` requires the term to consume whole words, so `grind` does not reject `Grinder`. Getting this wrong is the common failure: an over-broad `substring` entry silently rejects ordinary names at the counter, and attendees see only "That name is not available."
+
+Do not add spaced, doubled, or leetspeak spellings of a term you already list. Matching folds digits to letters, removes spaces, hyphens, and apostrophes, and collapses repeated characters before comparing, and `word` mode also joins runs of consecutive tokens, so `b a d`, `b-a-d`, `baaad`, and `b4d` all reduce to the same entry. Extra variants add false positives without adding coverage.
+
+The blocklist is one layer. The name charset already rejects non-ASCII, so homoglyph and zero-width evasion cannot reach the list, and links, mentions, and repeated punctuation are rejected structurally. None of that substitutes for human moderation of what a list should contain, or for brand and trademark review of names and artwork.
+
 ## Native-live configuration checklist — blocked until integrations exist
 
 Create the staff configuration:
