@@ -113,3 +113,13 @@ test("live guide remains one Skills step and explains native evidence and pendin
   assert.doesNotMatch(copy, /Choose Start rehearsal order|Apply rehearsal menu/);
   assert.equal(content.completion, null);
 });
+
+test("the booth step guide stays renderable by the canvas parser", async () => {
+  // Not yet loaded by content.mjs, so nothing else would catch it drifting
+  // into structure the parser rejects before it can be wired to the canvas.
+  const markdown = await readFile(new URL("../.github/steps/1-name-a-drink.md", import.meta.url), "utf8");
+  const parsed = parseStep(markdown);
+  assert.equal(parsed.title, "Step 1: Name a drink for the house menu");
+  assert.ok(parsed.sections.length >= 5);
+  assert.ok(parsed.sections.every(section => section.paragraphs.length));
+});

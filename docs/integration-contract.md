@@ -50,7 +50,7 @@ The booth screen was verified in a real browser, which found a defect the whole 
 
 ### Not yet built
 
-The live and canvas-pilot GitHub paths remain in the tree and are untouched, pending a decision on retiring them. The facilitation skill and the learner step still describe the pull-request review flow and need rewriting for the naming competition. The `blockedTerms` list is a placeholder needing moderated content, and brand and trademark review of names and artwork, before any event that publishes attendee text. Making the repository a public template is a visibility change requiring its own review.
+The live and canvas-pilot GitHub paths remain in the tree and are untouched, pending a decision on retiring them. `.github/steps/1-review-and-serve.md` is still correct for those staff modes, because `content.mjs` renders it in the review canvas; the booth path has its own `.github/steps/1-name-a-drink.md`, which parses under the same strict parser but is not yet wired to a canvas, since the booth screen explains itself inline. The facilitation skill, README, and learner guide now lead with the booth flow and keep the pull-request flow in a clearly labelled staff-only section. The `blockedTerms` list is a placeholder needing moderated content, and brand and trademark review of names and artwork, before any event that publishes attendee text. Making the repository a public template is a visibility change requiring its own review.
 
 ## Supported canvas boundary
 

@@ -1,22 +1,28 @@
 # Commit & Sip
 
-**Order Up at the Level Up Lounge:** a five-minute, app-only exercise in reviewing a small pull request. Inspect the proposal, compare it with an order, check the automated results, and make an explicit approval decision before serving the drink.
+**Order Up at the Level Up Lounge:** a five-minute, app-only naming competition. Invent one coffee that carries `mona`, `ducky`, or `copilot`, get it scored out of 5,000 by a local rubric, and put it on the house menu for the rest of the event.
 
 ## One step, entirely in the App
 
-**Audience:** beginners and GitHub-curious booth attendees. **Goal:** compare a proposed menu change with its acceptance criteria before making a human approval decision. **Duration:** about five minutes, with no speed or hint penalties.
+**Audience:** beginners and GitHub-curious booth attendees. **Goal:** invent a drink name nobody has served here yet. **Duration:** about five minutes, with no speed or hint penalties.
 
-You need only the booth's preconfigured Copilot App and an assigned rehearsal canvas. No coding, cloning, account setup, terminal, or external editor is required. Staff supply the device and handle setup and recovery.
+You need only the booth's preconfigured Copilot App. No coding, cloning, account setup, GitHub sign-in, terminal, or external editor is required, and the attendee never opens a pull request. Staff supply the device and handle setup and recovery.
 
-**Open:** click **Commit & Sip** with no input to reach **Choose your order**. Explicitly choose **New rehearsal**, a drink, and a never-used run ID, then select **Create new rehearsal**. To recover existing work, choose **Resume saved rehearsal** and enter its exact run ID instead. Nothing is created merely by opening the canvas.
+**Open:** click **Commit & Sip** with no input. The booth canvas is the default canvas and takes no open input; the counter opens idle and ready.
 
-**Start:** in the assigned canvas, choose **Start rehearsal order**. Follow **Step 1: Review and serve your order**: read the order, inspect Summary / Changes / Checks, answer the checkpoint, explicitly approve, then choose **Apply rehearsal menu**. The built-in **Read the step guide** control contains the [canonical learner step](.github/steps/1-review-and-serve.md); you do not need to leave the canvas to read it.
+**Start:** choose **Start my order**. The station mints a barista handle, then follow **Step 1: Name a drink for the house menu**: pick a mascot and where it sits, type your name, and choose **Add it to the menu**. The [canonical learner step](.github/steps/1-name-a-drink.md) matches what the screen tells you.
 
-**Resume or retry:** choose **Refresh progress**, or reopen the same assigned run. If serving succeeded but the result is delayed, choose **Retry result**. Staff assign a fresh run for the next attendee; reloading is not a reset. See the [reset procedure](booth/RUNBOOK.md#reset-between-attendees).
+**Finish:** read the score breakdown, take your place on the leaderboard, then choose **I'm done - hand over to the next barista**. That clears the counter for the next attendee; your drink stays on the menu and your entry stays on the leaderboard. See the [reset procedure](booth/RUNBOOK.md#reset-between-attendees).
 
-Fresh direct rehearsal opens require the drink's `orderId`; only resuming a saved run may omit it. Live staff assignments must pin the intended `baseRef` and effective required checks, and disabled live configuration blocks saved live sessions without resetting their data.
+Mona Latte, Copilot Cortado, and Ducky Cold Brew are worked examples. They are never scored and never appear on the leaderboard. The menu is first come, first served, so a name already taken is reported back and you try another.
 
-This is a canvas-led adaptation of a GitHub Skills exercise: one learner step with several activities, not a five-step course. Staff initialization is outside the learner step. Actions validate the repository; they do not drive learner transitions, create exercise issues, or gate rehearsal on workflow queue time. There is no Step 2 or automatic issue closure.
+This is a canvas-led adaptation of a GitHub Skills exercise: one learner step with several activities, not a five-step course. Staff setup is outside the learner step. Actions validate the repository; they do not drive learner transitions, create exercise issues, or gate play on workflow queue time. There is no Step 2 or automatic issue closure.
+
+## Staff-only pull-request modes
+
+The original pull-request review flow is retained behind the explicit `rehearsal`, `live`, and `live-canvas-pilot` modes, which open a different canvas with its own [learner content](.github/steps/1-review-and-serve.md). It is not the booth experience and its retirement is undecided.
+
+In those modes, fresh direct rehearsal opens require the drink's `orderId`; only resuming a saved run may omit it. Live staff assignments must pin the intended `baseRef` and effective required checks, and disabled live configuration blocks saved live sessions without resetting their data.
 
 ## Status: rehearsal and an unranked canvas pilot, not production-ready
 
@@ -112,7 +118,8 @@ For live global collisions, the authority reserves the same curated three-word p
 
 | Document | Audience |
 | --- | --- |
-| [Step 1: Review and serve your order](.github/steps/1-review-and-serve.md) | Canonical learner instructions, also shown inside the canvas |
+| [Step 1: Name a drink for the house menu](.github/steps/1-name-a-drink.md) | Canonical learner instructions for the booth naming competition |
+| [Step 1: Review and serve your order](.github/steps/1-review-and-serve.md) | Learner instructions for the staff-only pull-request modes |
 | [Learner entry guide](docs/learner-guide.md) | Attendees and facilitators |
 | [Booth runbook](booth/RUNBOOK.md) | Setup, rehearsal, retries, reset, and event staff |
 | [Integration contract](docs/integration-contract.md) | Native host and service implementers |
