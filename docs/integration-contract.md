@@ -109,6 +109,8 @@ Publication happens after the store transaction commits and the lock is released
 
 ## Implementer requirements for a leaderboard service
 
+[Leaderboard service design](leaderboard-service.md) works these requirements into a concrete proposal — hosting, booth authentication, retraction, and server-side moderation. It is a proposal; nothing is deployed.
+
 A client implements `publish(submission)` and owns its own timeout. The booth must never wait on a slow service.
 
 The submitted payload is deliberately minimal — handle, drink ID, name, and score. It carries no run ID, device, or booth identity, because an anonymous handle is all a public board needs.
