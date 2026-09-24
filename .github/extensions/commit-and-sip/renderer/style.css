@@ -14,29 +14,36 @@
 }
 
 /* Keep the cafe green and white even when the surrounding host uses a dark theme. */
+/*
+ * Greens are sampled from the GitHub brand illustration, not picked by eye.
+ * The one adjustment is the accent: the illustration's signature green
+ * (#028e29) only reaches 4.28:1 on white, under the 4.5:1 floor for body text,
+ * so the accent is that same hue darkened until it clears AA. Decorative
+ * surfaces keep the brighter values, which carry no text.
+ */
 :root {
   color-scheme: light;
   --page: #ffffff;
-  --surface: #f0f7f2;
+  --surface: #f0fafc;
   --text: #172f23;
   --muted: #466452;
   --line: #6e8978;
-  --accent: #176b3a;
-  --accent-hover: #10512b;
+  --accent: #027221;
+  --accent-hover: #015417;
   --on-accent: #ffffff;
-  --focus: #11753c;
+  --focus: #027221;
   --error: #a12635;
   --error-surface: #fff4f5;
   --cafe-paper: #ffffff;
   --cafe-ink: #172f23;
   --cafe-chalk: #ffffff;
   --cafe-board: #143d2a;
-  --board-muted: #d0e7d8;
+  --board-muted: #beffd0;
   --board-line: #8bb89e;
-  --board-frame: #176b3a;
-  --board-highlight: #bde9cc;
+  --board-frame: #027221;
+  --board-highlight: #beffd0;
   --cup-white: #ffffff;
-  --cup-shade: #d0e7d8;
+  --cup-shade: #b5fdca;
   --body-font: "Mona Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --utility-font: var(--font-mono, "SFMono-Regular", Consolas, "Liberation Mono", monospace);
   --label-font: var(--body-font);
