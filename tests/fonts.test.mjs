@@ -21,9 +21,9 @@ test("bundled Mona Sans faces and license match the unmodified upstream release"
   assert.match(license, /SIL OPEN FONT LICENSE Version 1\.1/);
 });
 
-test("setup and exercise serve the local fonts with correct MIME and same-origin CSP", async t => {
-  for (const runId of [undefined, "font-test"]) {
-    const panel = await startServer({ engine: {}, runId });
+test("the booth screen serves the local fonts with correct MIME and same-origin CSP", async t => {
+  {
+    const panel = await startServer({ panel: { runId: "font-test", get: async () => ({}), dispatch: async () => ({}) } });
     t.after(() => panel.close());
     const origin = new URL(panel.url).origin;
     const page = await fetch(panel.url);

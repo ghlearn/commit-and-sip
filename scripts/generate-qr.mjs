@@ -3,7 +3,10 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
-import { validateLeaderboardUrl, verifyPublicUrl } from "../.github/extensions/commit-and-sip/services/completion.mjs";
+import { guardNodeVersion } from "./require-node.mjs";
+import { validateLeaderboardUrl, verifyPublicUrl } from "../.github/extensions/commit-and-sip/services/public-url.mjs";
+
+guardNodeVersion();
 
 export async function generateQr({ url, output, verify = verifyPublicUrl }) {
   const target = validateLeaderboardUrl(url);

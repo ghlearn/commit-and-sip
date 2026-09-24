@@ -212,6 +212,10 @@ details p { max-width: 70ch; font-size: 15px; margin: 10px 0; }
 .launcher button[type="submit"] { margin-top: 22px; }
 .launcher p { overflow-wrap: anywhere; }
 .launcher #setup-run-help { max-width: 70ch; font-size: 14px; margin-top: 10px; }
+/* The board used to sit in a column that supplied the gap. On the booth
+   page it is a sibling in normal flow, so it carries its own spacing. */
+.launcher .chalkboard { margin: 30px 0; }
+.launcher .chalkboard + section { margin-top: 30px; }
 
 #app-result h2 { font-size: 24px; }
 #app-result-status { font-weight: 600; }

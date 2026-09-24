@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="light">
+  <title>Commit &amp; Sip - Name a drink</title>
+  <link rel="icon" href="data:,">
+  <link rel="preload" href="/fonts/MonaSansVF.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/booth.js" defer></script>
+</head>
+<body>
+  <main class="launcher" id="booth" aria-busy="true">
+    <p class="eyebrow">Commit &amp; Sip - Level Up Lounge</p>
+
+    <section id="booth-error" class="notice error-notice" role="alert" hidden>
+      <h2>Let's get you back to the counter</h2>
+      <p id="booth-error-message"></p>
+      <button id="booth-retry" type="button">Refresh connection</button>
+    </section>
+
+    <!-- Between attendees. -->
+    <section id="view-idle" hidden>
+      <h1>Name a drink. Take a bow.</h1>
+      <p id="idle-welcome" role="status" aria-live="polite">Step up and invent a coffee for the house menu.</p>
+      <section class="notice">
+        <h2>How it works</h2>
+        <p>You get a barista handle, you invent one drink using <strong>mona</strong>, <strong>ducky</strong>, or <strong>copilot</strong>, and a rubric scores it out of 5,000. Your drink joins the house menu for the rest of the event.</p>
+        <p>Everything happens on this screen. There is no terminal, no GitHub sign-in, and nothing to install.</p>
+      </section>
+      <button id="begin" class="primary" type="button">Start my order</button>
+    </section>
+
+    <!-- Inventing a drink. -->
+    <section id="view-naming" hidden>
+      <h1>Invent your drink.</h1>
+      <p class="notice"><strong>Your barista handle:</strong> <span id="naming-handle" class="handle"></span><br>
+        Write this down. It is how you find yourself on the leaderboard later.</p>
+      <form id="name-form">
+        <fieldset id="name-fields">
+          <legend>Your drink</legend>
+
+          <label for="pick-mascot">Mascot</label>
+          <select id="pick-mascot" aria-describedby="mascot-help">
+            <option value="">Any - I'll just type it</option>
+          </select>
+          <p id="mascot-help">Optional. Your name must contain one mascot; pick one here only if you want it checked.</p>
+
+          <label for="pick-placement">Where does the mascot go?</label>
+          <select id="pick-placement" aria-describedby="placement-help">
+            <option value="">Anywhere - I'll just type it</option>
+          </select>
+          <p id="placement-help">Optional. Pick a spot and we'll check your name matches it.</p>
+
+          <label for="pick-name">Drink name</label>
+          <input id="pick-name" type="text" required minlength="3" maxlength="40" autocomplete="off" spellcheck="false" aria-describedby="name-help">
+          <p id="name-help">3 to 40 characters. Letters, numbers, spaces, hyphens, and apostrophes.</p>
+
+          <button id="name-submit" class="primary" type="submit">Add it to the menu</button>
+        </fieldset>
+      </form>
+      <p id="name-problem" class="notice error-notice" role="alert" hidden></p>
+    </section>
+
+    <!-- Scored and on the menu. -->
+    <section id="view-served" hidden>
+      <h1 id="served-heading">You're on the menu.</h1>
+      <p class="notice"><strong id="served-name"></strong> scored <strong id="served-score"></strong> out of 5,000.<br>
+        Barista <span id="served-handle" class="handle"></span> - <span id="served-standing"></span></p>
+      <p id="served-event" class="muted" hidden></p>
+
+      <section aria-labelledby="breakdown-heading">
+        <h2 id="breakdown-heading">How it scored</h2>
+        <ul id="served-breakdown"></ul>
+      </section>
+
+      <section aria-labelledby="qr-heading">
+        <h2 id="qr-heading">Your place on the leaderboard</h2>
+        <div id="served-qr"></div>
+        <p id="served-qr-link" hidden><a id="served-qr-anchor" rel="noreferrer noopener" target="_blank"></a></p>
+        <p id="served-qr-none" hidden>No leaderboard has been published for this event yet, so there is nothing to scan. Note your handle down and staff will point you to the results.</p>
+        <p id="served-qr-removed" hidden>Booth staff removed this drink from the house menu, so it has no leaderboard place. Please speak to staff at the counter.</p>
+      </section>
+
+      <button id="finish" class="primary" type="button">I'm done - hand over to the next barista</button>
+    </section>
+
+    <section class="chalkboard" aria-labelledby="menu-heading">
+      <div class="board-heading"><h2 id="menu-heading">House menu</h2><p>Every drink invented at this booth.</p></div>
+      <svg class="cup-art" xmlns="http://www.w3.org/2000/svg" width="400" height="280" viewBox="0 0 400 280" fill="none" role="img" aria-labelledby="cup-title cup-description">
+        <title id="cup-title">Commit and Sip house cup</title>
+        <desc id="cup-description">Original café illustration: a white cup, hand-drawn coffee swirl, and steam above a pale-green saucer.</desc>
+        <path d="M188 73c-25-23 28-25 9-53M223 65c-15-17 18-22 10-37" stroke="var(--board-muted)" stroke-width="3" stroke-linecap="round" opacity=".65"/>
+        <ellipse cx="207" cy="225" rx="125" ry="22" fill="var(--cafe-board)"/>
+        <ellipse cx="200" cy="216" rx="117" ry="21" stroke="var(--board-highlight)" stroke-width="2"/>
+        <path d="M120 115c0 53 14 96 76 99s84-46 84-99" fill="var(--cup-white)" stroke="var(--cup-white)" stroke-width="3"/>
+        <path d="M279 125c66-20 58 65-11 52" stroke="var(--cup-white)" stroke-width="16"/>
+        <ellipse cx="200" cy="115" rx="80" ry="27" fill="#C08A54" stroke="var(--cup-white)" stroke-width="9"/>
+        <ellipse cx="200" cy="115" rx="67" ry="20" fill="#8A5534"/>
+        <path d="M170 113c7-20 33-15 31 0-1-16 26-17 32-4 5 11-18 21-32 24-8-6-35-12-31-20Z" fill="var(--cup-white)"/>
+        <path d="M181 111c13 1 18 8 21 17m17-17c-9 1-15 7-17 17" stroke="#C08A54" stroke-width="2" stroke-linecap="round"/>
+        <path d="M141 142c4 30 11 46 25 53" stroke="var(--cup-shade)" stroke-width="4" stroke-linecap="round"/>
+        <path d="m188 161-10 9 10 9m24-18 10 9-10 9m-8-24-8 30" stroke="var(--accent)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+        <path d="M71 195c-5-4-10-1-10 4s4 8 9 6 6-7 1-10Zm267 7c-5-4-10-1-10 4s4 8 9 6 6-7 1-10Z" stroke="var(--board-highlight)" stroke-width="2"/>
+        <path d="m64 202 6-5m261 12 5-5M121 242h35m11 0h12m58 0h42" stroke="var(--board-muted)" stroke-width="2" stroke-linecap="round" opacity=".5"/>
+      </svg>
+      <ul id="house-menu" class="menu"></ul>
+    </section>
+
+    <section aria-labelledby="board-heading">
+      <h2 id="board-heading">Leaderboard</h2>
+      <p id="board-empty" hidden>No drinks have been invented yet. Be the first.</p>
+      <ol id="leaderboard"></ol>
+    </section>
+
+    <p class="muted">The three house drinks are worked examples. They are not scored and never appear on the leaderboard.</p>
+  </main>
+</body>
+</html>

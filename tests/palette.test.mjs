@@ -36,21 +36,24 @@ test("green-and-white palette meets AA for text, secondary text, and action stat
   assert.ok(contrast("board-line", "cafe-board") >= 3);
 });
 
-test("both entrypoints share the light palette and artwork follows semantic colors", async () => {
-  for (const filename of ["index.html", "launcher.html"]) {
-    const html = await readFile(new URL(filename, renderer), "utf8");
-    assert.match(html, /name="color-scheme" content="light"/);
-    assert.match(html, /href="\/style\.css"/);
-  }
+test("the booth screen shares the light palette and carries the house cup on the board", async () => {
+  const booth = await readFile(new URL("booth.html", renderer), "utf8");
+  assert.match(booth, /name="color-scheme" content="light"/);
+  assert.match(booth, /href="\/style\.css"/);
   assert.equal(colors.page, "#ffffff");
   assert.equal(colors["on-accent"], "#ffffff");
   assert.match(css, /color-scheme: light/);
   assert.doesNotMatch(css, /var\(--(?:background-color-default|text-color-default|color-focus-outline)/);
   assert.match(css, /@media \(forced-colors: active\)/);
-  const html = await readFile(new URL("index.html", renderer), "utf8");
-  assert.match(html, /fill="var\(--cup-white\)"/);
-  assert.match(html, /stroke="var\(--board-highlight\)"/);
-  assert.doesNotMatch(html, /cream cup|brass-colored saucer/);
+  assert.match(booth, /fill="var\(--cup-white\)"/);
+  assert.match(booth, /stroke="var\(--board-highlight\)"/);
+  assert.doesNotMatch(booth, /cream cup|brass-colored saucer/);
+  // The cup is white on pale green. It is only legible against the dark
+  // board, so it must stay inside the chalkboard rather than on the page.
+  const board = booth.match(/<section class="chalkboard"[\s\S]*?<\/section>/);
+  assert.ok(board, "cup artwork needs a chalkboard section");
+  assert.match(board[0], /class="cup-art"/);
+  assert.ok(contrast("cup-white", "cafe-board") >= 4.5);
 });
 
 test("bundled Mona Sans covers reading and display roles while retaining monospace and tabular results", async () => {
@@ -65,9 +68,7 @@ test("bundled Mona Sans covers reading and display roles while retaining monospa
   assert.equal((css.match(/font-display: swap/g) ?? []).length, 2);
   assert.match(css, /font-optical-sizing: auto/);
   assert.doesNotMatch(css, /@import|url\(["']?https?:/);
-  for (const filename of ["index.html", "launcher.html"]) {
-    const html = await readFile(new URL(filename, renderer), "utf8");
-    assert.doesNotMatch(html, /fonts\.googleapis|fonts\.gstatic/);
-    assert.match(html, /rel="preload" href="\/fonts\/MonaSansVF\.woff2" as="font" type="font\/woff2" crossorigin/);
-  }
+  const html = await readFile(new URL("booth.html", renderer), "utf8");
+  assert.doesNotMatch(html, /fonts\.googleapis|fonts\.gstatic/);
+  assert.match(html, /rel="preload" href="\/fonts\/MonaSansVF\.woff2" as="font" type="font\/woff2" crossorigin/);
 });

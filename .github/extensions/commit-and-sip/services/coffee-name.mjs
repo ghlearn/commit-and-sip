@@ -1,0 +1,131 @@
+import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { DomainError, requireValue } from "../domain.mjs";
+import { findBlockedTerm, loadBlocklist, validateBlocklist } from "./moderation.mjs";
+
+// Attendee text is published on the house menu and the leaderboard. These rules
+// reject injection and spoofing structurally; booth/blocked-terms.json is a
+// separate staff-reviewed moderation list and is not a substitute for review.
+const ALLOWED = /^[A-Za-z0-9 '-]+$/;
+const OPENING = /^[A-Za-z0-9]/;
+const CLOSING = /[A-Za-z0-9]$/;
+const FORBIDDEN_SUBSTRINGS = ["http", "www.", ".com", ".net", ".org", "@", "#", "--"];
+
+export async function loadNameRules() {
+  const rules = validateNameRules(JSON.parse(await readFile(new URL("../../../../booth/name-rules.json", import.meta.url), "utf8")));
+  return { ...rules, blocklist: await loadBlocklist() };
+}
+
+export function validateNameRules(rules) {
+  const positiveInt = value => Number.isSafeInteger(value) && value > 0;
+  requireValue(rules && typeof rules === "object" && !Array.isArray(rules), "invalid_name_rules", "Booth name rules must be an object.", 400);
+  requireValue(positiveInt(rules.minLength) && positiveInt(rules.maxLength) && rules.minLength <= rules.maxLength,
+    "invalid_name_rules", "Booth name rules need a valid length range.", 400);
+  requireValue(Array.isArray(rules.mascots) && rules.mascots.length > 0 &&
+    rules.mascots.every(token => typeof token === "string" && /^[a-z]{2,20}$/.test(token)) &&
+    new Set(rules.mascots).size === rules.mascots.length,
+  "invalid_name_rules", "Booth name rules need unique lowercase mascot tokens.", 400);
+  requireValue(rules.artworkByMascot && typeof rules.artworkByMascot === "object" &&
+    rules.mascots.every(token => ["original-latte-cup", "original-cortado-cup", "original-cold-brew-glass"].includes(rules.artworkByMascot[token])),
+  "invalid_name_rules", "Every mascot needs approved artwork.", 400);
+  requireValue(Array.isArray(rules.prices) && rules.prices.length > 0 &&
+    rules.prices.every(price => Number.isFinite(price) && price > 0 && price <= 1000 && Math.round(price * 100) === price * 100),
+  "invalid_name_rules", "Booth prices must be positive amounts with at most two decimals.", 400);
+  requireValue(Array.isArray(rules.servings) && rules.servings.length > 0 &&
+    rules.servings.every(serving => ["hot", "cold"].includes(serving)) && new Set(rules.servings).size === rules.servings.length,
+  "invalid_name_rules", "Booth servings must be unique hot/cold values.", 400);
+  // One list, not two. A flat `blockedTerms` array used to be checked here with
+  // a plain substring test: no evasion resistance, no word mode, and not
+  // mentioned anywhere in the runbook's review procedure. Anything it could
+  // express is a strictly better `substring` entry in booth/blocked-terms.json.
+  // Reject the key rather than ignore it, so a reviewer cannot add terms to a
+  // file nothing reads and believe the booth is moderated.
+  requireValue(rules.blockedTerms === undefined, "invalid_name_rules",
+    "blockedTerms is retired. Put moderation terms in booth/blocked-terms.json.", 400);
+  if (rules.blocklist !== undefined) validateBlocklist(rules.blocklist);
+  return rules;
+}
+
+export function normalizeCoffeeName(raw) {
+  requireValue(typeof raw === "string", "invalid_name", "Enter a coffee name.", 400);
+  // Normalize before validating so width/accent tricks cannot smuggle a blocked term.
+  return raw.normalize("NFKC").replace(/\s+/g, " ").trim();
+}
+
+export function coffeeNameId(name) {
+  return name.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+export function validateCoffeeName(raw, rules) {
+  validateNameRules(rules);
+  const name = normalizeCoffeeName(raw);
+  const reject = message => { throw new DomainError("invalid_name", message, 400); };
+  if (name.length < rules.minLength || name.length > rules.maxLength) {
+    reject(`Use ${rules.minLength} to ${rules.maxLength} characters.`);
+  }
+  if (!ALLOWED.test(name)) reject("Use only letters, numbers, spaces, hyphens, and apostrophes.");
+  if (!OPENING.test(name) || !CLOSING.test(name)) reject("Start and end the name with a letter or number.");
+  const lower = name.toLowerCase();
+  for (const fragment of FORBIDDEN_SUBSTRINGS) {
+    if (lower.includes(fragment)) reject("Remove links, mentions, and repeated punctuation from the name.");
+  }
+  // Every menu item must carry a mascot so the house menu reads as one family,
+  // but the attendee chooses where it sits: "Mona Mocha", "Cold Brew Ducky",
+  // and the blend "Monachino" are all valid placements of the same token.
+  const mascot = rules.mascots.find(token => lower.includes(token));
+  if (!mascot) reject(`Include ${rules.mascots.join(", ")} somewhere in the name.`);
+  // Matching folds digit swaps, removes separators and collapses repeats, so
+  // spacing or leetspeak does not get a blocked term onto the published menu.
+  if (findBlockedTerm(name, rules.blocklist)) reject("That name is not available. Try another.");
+  const id = coffeeNameId(name);
+  if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(id)) reject("That name cannot become a menu ID. Try another.");
+  // The mascot is what they build on, not the whole drink. A bare mascot leaves
+  // nothing invented and would let the first attendee claim "Mona" outright.
+  if (id === mascot) reject(`Add your own twist to ${mascot}. The name cannot be just the mascot.`);
+  return { name, id, mascot, placement: mascotPlacement(name, mascot) };
+}
+
+// Where the attendee actually put the mascot. The canvas offers this as a
+// choice, so it is reported back rather than inferred silently.
+export const PLACEMENTS = ["start", "middle", "end", "blend"];
+
+export const PLACEMENT_LABELS = {
+  blend: "blended into a word",
+  end: "at the end",
+  middle: "in the middle",
+  only: "on its own",
+  start: "at the start",
+};
+
+export function mascotPlacement(name, mascot) {
+  const list = name.toLowerCase().split(" ").filter(Boolean);
+  const index = list.findIndex(word => word.replace(/[^a-z0-9]/g, "").includes(mascot));
+  if (index === -1) return null;
+  // A blend fuses the mascot into a longer word, so it has no word position.
+  if (list[index].replace(/[^a-z0-9]/g, "") !== mascot) return "blend";
+  if (list.length === 1) return "only";
+  if (index === 0) return "start";
+  return index === list.length - 1 ? "end" : "middle";
+}
+
+function digest(...parts) {
+  return createHash("sha256").update(parts.join("\u0000")).digest();
+}
+
+function pick(list, bytes, offset) {
+  return list[bytes.readUInt32BE(offset) % list.length];
+}
+
+export function buildAttendeeOrder(raw, rules, runId) {
+  requireValue(typeof runId === "string" && runId.length > 0, "invalid_run", "A run ID is required to build an order.", 400);
+  const { name, id, mascot } = validateCoffeeName(raw, rules);
+  const bytes = digest("order", runId, id);
+  return {
+    artwork: rules.artworkByMascot[mascot],
+    description: `A ${mascot}-inspired pour invented at the Level Up Lounge.`,
+    id,
+    name,
+    price: pick(rules.prices, bytes, 0),
+    serving: pick(rules.servings, bytes, 4),
+  };
+}
