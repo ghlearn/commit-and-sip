@@ -2,6 +2,9 @@ import { DomainError, requireValue, exactInput, validRunId, generateHandle } fro
 import { PLACEMENTS } from "./services/coffee-name.mjs";
 import { validateLeaderboardUrl } from "./services/completion.mjs";
 import { addDrink, leaderboard, seedMenu, standingFor } from "./services/booth-menu.mjs";
+import {
+  confirmedSync, failedSync, initialSync, submissionFor, syncView, validateLeaderboardClient, validateReceipt
+} from "./services/leaderboard.mjs";
 
 // The booth flow is entirely canvas-driven: the attendee is given a handle,
 // invents one drink, and sees their score and standing. It performs no GitHub
@@ -11,7 +14,7 @@ import { addDrink, leaderboard, seedMenu, standingFor } from "./services/booth-m
 const PHASES = ["naming", "served", "complete"];
 
 export class BoothEngine {
-  constructor({ store, catalog, rules, leaderboardUrl = null }) {
+  constructor({ store, catalog, rules, leaderboardUrl = null, leaderboardClient = null }) {
     // Reuse the reviewed leaderboard rule rather than inventing a second,
     // weaker one here: a destination attendees are told to scan must be a
     // public HTTPS address, and anything else is refused before any QR exists.
@@ -19,7 +22,8 @@ export class BoothEngine {
       try { leaderboardUrl = validateLeaderboardUrl(leaderboardUrl); }
       catch { throw new DomainError("invalid_leaderboard_url", "The configured leaderboard URL is not an approved public HTTPS address."); }
     }
-    Object.assign(this, { store, catalog, rules, leaderboardUrl });
+    validateLeaderboardClient(leaderboardClient);
+    Object.assign(this, { store, catalog, rules, leaderboardUrl, leaderboardClient });
   }
 
   // The QR target is real only when staff have configured a deployed
@@ -70,7 +74,10 @@ export class BoothEngine {
       runId: run.runId,
       statusMessage: run.statusMessage,
       submission: run.submission,
+      // The booth's own standing is a local fact. The event standing is only
+      // ever what the service confirmed, so the two are reported separately.
       standing: run.phase === "naming" ? null : standingFor(this.houseMenu(data), run.runId),
+      sync: syncView(run.sync),
     };
   }
 
@@ -113,9 +120,37 @@ export class BoothEngine {
     return this.present(run, data);
   }
 
+  // Publishing happens after the local commit and outside the store lock, so a
+  // slow or unreachable service never holds up the booth or the next attendee.
+  // The entry is already durable; only the receipt is still missing.
+  async publish(runId) {
+    if (!this.leaderboardClient) return;
+    const data = await this.store.read();
+    const run = data.runs[runId];
+    if (run?.sync?.state !== "pending" && run?.sync?.state !== "failed") return;
+    const entry = this.houseMenu(data).find(item => !item.example && item.runId === runId);
+    if (!entry) return;
+    const submission = submissionFor(entry);
+    let outcome;
+    try {
+      outcome = { ok: true, receipt: validateReceipt(await this.leaderboardClient.publish(submission), submission) };
+    } catch (error) {
+      outcome = { ok: false, error };
+    }
+    await this.store.transaction(stored => {
+      const current = stored.runs[runId];
+      if (!current?.sync) return;
+      current.sync = outcome.ok
+        ? confirmedSync(current.sync, outcome.receipt)
+        : failedSync(current.sync, outcome.error);
+    });
+  }
+
   async dispatch(runId, action, input = {}) {
     requireValue(validRunId(runId), "invalid_run", "Invalid run ID.", 400);
-    if (action === "refresh") { exactInput(input); return this.get(runId); }
+    // A refresh is the natural moment to retry a submission that did not land,
+    // so a booth recovers from a network blip without staff intervention.
+    if (action === "refresh") { exactInput(input); await this.publish(runId).catch(() => {}); return this.get(runId); }
     requireValue(["submit_name", "complete"].includes(action),
       "unknown_action", "That action is not available at this booth.", 400);
     exactInput(input, action === "complete" ? [] : ["name", "mascot", "placement"]);
@@ -152,6 +187,7 @@ export class BoothEngine {
         price: entry.price, score: entry.score, serving: entry.serving,
       };
       run.phase = "served";
+      run.sync = initialSync(Boolean(this.leaderboardClient));
       run.events.push({ type: "served", at: entry.createdAt });
       run.statusMessage = `${entry.name} is on the menu and scored ${entry.score} out of 5000.`;
       return this.present(run, data);

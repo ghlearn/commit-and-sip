@@ -40,6 +40,12 @@ One booth is authoritative only for its own menu and cannot know what was invent
 
 `leaderboard()` already ranks by score with equal scores sharing a rank, matching the completion authority's convention. The authority's existing handle reservation and deterministic collision suffix are the seam for making handles globally unique.
 
+`services/leaderboard.mjs` is the client seam. A client implements `publish(submission)` and owns its own timeout; none is shipped, because no destination is deployed, and `leaderboardClient` defaults to null. The flow is local-first: `submit_name` commits the drink inside the store transaction, the lock is released, and only then is the entry published. A slow or unreachable service therefore cannot hold up the counter, fail an attendee's submission, or lose a drink that was already earned.
+
+A receipt is accepted only when its handle, name, and score match what was sent; anything else is recorded as a failure rather than shown, so a service answering about a different entry can never rank this attendee. Failures are retried on the next refresh, so a network blip recovers without staff. The submitted payload is deliberately minimal — handle, ID, name, score — carrying no run ID, device, or booth identity, since an anonymous handle is all a public board needs.
+
+`syncView` keeps two facts apart that are easy to conflate: the booth standing is local and the booth owns it, while an event rank exists only once the service confirms it. Until then the canvas says the place is still being confirmed, and the booth rank is labelled "at this booth" so it cannot be read as an event-wide placing.
+
 The leaderboard destination is unresolved. `leaderboardUrl` stays null unless staff configure an approved destination, and no link or QR is invented. `BoothEngine` refuses a non-web `leaderboardUrl` at construction rather than rendering a code that scans to nothing, exposes `attendeeUrl` only after the attendee has played, and leaves it null when nothing is configured. The existing requirement for an approved publicly reachable HTTPS destination and a real issue-renderable QR asset is unchanged.
 
 ### Moderation

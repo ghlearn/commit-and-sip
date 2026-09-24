@@ -233,3 +233,15 @@ test("no required control on the booth form defaults to an unselectable value", 
   // The placement picker is explicitly optional, so it must not be required.
   assert.doesNotMatch(html.match(/<select id="pick-placement"[^>]*>/)[0], /\brequired\b/);
 });
+
+test("the optional pickers default to no claim at all", async () => {
+  // A picker that defaults to a real mascot makes a claim the attendee never
+  // chose, so a typed "Ducky Driftwood" is rejected for a mona they never
+  // picked. Both pickers must start on an empty value.
+  const html = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/booth.html", import.meta.url), "utf8");
+  for (const id of ["pick-mascot", "pick-placement"]) {
+    const select = html.match(new RegExp(`<select id="${id}"[^>]*>[\\s\\S]*?</select>`))[0];
+    assert.match(select, /<option value=""/, `${id} must offer an empty default`);
+    assert.doesNotMatch(select, /\brequired\b/, `${id} is optional and must not be required`);
+  }
+});

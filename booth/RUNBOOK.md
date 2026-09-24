@@ -268,6 +268,16 @@ The store uses `ledger.json` and `ledger.lock`, with atomic fsynced ledger write
 
 If ownership is uncertain, leave the lock in place and escalate. If JSON is corrupt or storage is full/unwritable, preserve evidence and restore only through a reviewed backup/reconciliation procedure. Do not replace it with an empty ledger to make the error disappear.
 
+## Event leaderboard submission
+
+The booth is local-first. A drink is committed to this booth's menu before anything is sent anywhere, so an unreachable event leaderboard cannot fail an attendee's submission or lose a name they earned. If submission fails, the attendee still sees their drink, their score, and their booth standing; only the event place is missing, and the canvas says so rather than inventing a rank.
+
+No leaderboard client ships, because no destination is deployed. `leaderboardClient` is null by default and the canvas then shows no event line at all. A client implements `publish(submission)` and must own its own timeout; a booth must never wait on a slow service.
+
+A failed submission retries on the next refresh, so a brief network outage recovers without staff. A receipt whose handle, name, or score does not match what was sent is recorded as a failure, not displayed: a service answering about a different entry must never be shown as this attendee's rank. Check the extension log if entries stay unconfirmed.
+
+Read ranks carefully when helping an attendee. "Rank 1 of 1 at this booth" is this booth's own menu and nothing more. Only a confirmed event line reflects the wider competition.
+
 ## Leaderboard and QR readiness
 
 There is no approved deployment/public URL yet. This private repository and a local `127.0.0.1` renderer cannot host an attendee phone experience. Never use credential-bearing GitHub URLs to make private images appear public.

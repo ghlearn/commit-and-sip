@@ -93,9 +93,16 @@
     $("served-name").textContent = state.submission.name;
     $("served-score").textContent = String(state.submission.score);
     $("served-handle").textContent = state.handle;
+    // Say "at this booth" explicitly. One booth cannot see what was invented
+    // elsewhere, so an unqualified rank would read as an event-wide placing.
     $("served-standing").textContent = state.standing
-      ? `rank ${state.standing.rank} of ${state.standing.entries}`
+      ? `rank ${state.standing.rank} of ${state.standing.entries} at this booth`
       : "rank pending";
+
+    // The event standing is only ever what the leaderboard service confirmed.
+    const event = $("served-event");
+    event.textContent = state.sync?.message ?? "";
+    event.hidden = !state.sync?.message;
 
     const list = $("served-breakdown");
     list.replaceChildren();
@@ -182,6 +189,7 @@
   $("name-form").addEventListener("submit", async event => {
     event.preventDefault();
     if (busy || !$("name-form").reportValidity()) return;
+    const mascot = $("pick-mascot").value;
     const placement = $("pick-placement").value;
     $("name-problem").hidden = true;
     busy = true;
@@ -189,7 +197,13 @@
     try {
       render(await request("/api/action", {
         action: "submit_name",
-        input: { name: $("pick-name").value, mascot: $("pick-mascot").value, ...(placement ? { placement } : {}) }
+        // Both pickers are claims the attendee opted into. Sending a default
+      // would reject a typed ducky name for a mona the attendee never chose.
+      input: {
+        name: $("pick-name").value,
+        ...(mascot ? { mascot } : {}),
+        ...(placement ? { placement } : {})
+      }
       }));
     } catch (error) {
       // A refused name costs the attendee nothing, so keep them on this screen
