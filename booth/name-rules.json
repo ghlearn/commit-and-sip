@@ -9,10 +9,6 @@
   },
   "prices": [4, 4.25, 4.5, 4.75, 5, 5.25, 5.5, 5.75, 6, 6.25],
   "servings": ["hot", "cold"],
-  "proposal": {
-    "flawRate": 0.5,
-    "flawFields": ["price", "serving"]
-  },
   "blockedTerms": [
     "blocked-example-term"
   ]

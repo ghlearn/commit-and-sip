@@ -32,12 +32,6 @@ export function validateNameRules(rules) {
   requireValue(Array.isArray(rules.servings) && rules.servings.length > 0 &&
     rules.servings.every(serving => ["hot", "cold"].includes(serving)) && new Set(rules.servings).size === rules.servings.length,
   "invalid_name_rules", "Booth servings must be unique hot/cold values.", 400);
-  requireValue(rules.proposal && typeof rules.proposal === "object" &&
-    Number.isFinite(rules.proposal.flawRate) && rules.proposal.flawRate >= 0 && rules.proposal.flawRate <= 1 &&
-    Array.isArray(rules.proposal.flawFields) && rules.proposal.flawFields.length > 0 &&
-    rules.proposal.flawFields.every(field => ["price", "serving"].includes(field)) &&
-    new Set(rules.proposal.flawFields).size === rules.proposal.flawFields.length,
-  "invalid_name_rules", "Proposal flaw settings must use a 0-1 rate and unique supported fields.", 400);
   requireValue(Array.isArray(rules.blockedTerms) &&
     rules.blockedTerms.every(term => typeof term === "string" && term.trim().length > 0 && term === term.toLowerCase()),
   "invalid_name_rules", "Blocked terms must be nonempty lowercase strings.", 400);
@@ -67,8 +61,10 @@ export function validateCoffeeName(raw, rules) {
   for (const fragment of FORBIDDEN_SUBSTRINGS) {
     if (lower.includes(fragment)) reject("Remove links, mentions, and repeated punctuation from the name.");
   }
-  const mascot = rules.mascots.find(token => lower.includes(token));
-  if (!mascot) reject(`Include ${rules.mascots.join(", ")} in the name.`);
+  // Every menu item must be prefixed with a mascot, so the house menu reads as
+  // one family. A blend such as "Monachino" still starts with the token.
+  const mascot = rules.mascots.find(token => lower.startsWith(token));
+  if (!mascot) reject(`Start the name with ${rules.mascots.join(", ")}.`);
   for (const term of rules.blockedTerms) {
     if (lower.includes(term)) reject("That name is not available. Try another.");
   }
@@ -96,48 +92,5 @@ export function buildAttendeeOrder(raw, rules, runId) {
     name,
     price: pick(rules.prices, bytes, 0),
     serving: pick(rules.servings, bytes, 4),
-  };
-}
-
-function formatPrice(price) {
-  return `$${price.toFixed(2)}`;
-}
-
-// The booth bot always commits the ordered drink unchanged, so the diff is
-// truthful and the append-only menu gate still passes. On a seeded run the
-// pull-request description misstates exactly one field, and the attendee is
-// expected to trust the diff over the prose during review.
-export function proposePullRequestCopy(order, rules, runId) {
-  validateNameRules(rules);
-  requireValue(typeof runId === "string" && runId.length > 0, "invalid_run", "A run ID is required to propose pull-request copy.", 400);
-  const { flawRate, flawFields } = rules.proposal;
-  const bytes = digest("proposal", runId, order.id);
-  const claim = { price: order.price, serving: order.serving };
-  let flaw = null;
-  if (bytes.readUInt32BE(0) / 0x100000000 < flawRate) {
-    const field = pick(flawFields, bytes, 4);
-    if (field === "serving") {
-      claim.serving = order.serving === "hot" ? "cold" : "hot";
-    } else {
-      const alternatives = rules.prices.filter(price => price !== order.price);
-      requireValue(alternatives.length > 0, "invalid_name_rules", "Price flaws need at least two configured prices.", 400);
-      claim.price = pick(alternatives, bytes, 8);
-    }
-    flaw = { field, actual: order[field], claimed: claim[field] };
-  }
-  return {
-    claim,
-    flaw,
-    body: [
-      `Adds **${order.name}** to the Level Up Lounge menu.`,
-      "",
-      `- Price: ${formatPrice(claim.price)}`,
-      `- Serving: ${claim.serving}`,
-      `- Artwork: ${order.artwork}`,
-      "",
-      "Review the diff against the order card before approving.",
-    ].join("\n"),
-    entry: { ...order },
-    title: `Add ${order.name} to the menu`,
   };
 }
