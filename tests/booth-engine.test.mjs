@@ -218,3 +218,86 @@ test("the QR destination is only offered once staff configure a real one", async
       { code: "invalid_leaderboard_url" }, `${bad} must not become something attendees are told to scan`);
   }
 });
+
+test("staff can take a drink down, and the name does not come straight back", async t => {
+  const { engine } = await booth(t);
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Regrettable" });
+  assert.equal(served.submission.id, "mona-regrettable");
+  assert.ok(served.leaderboard.some(row => row.name === "Mona Regrettable"));
+
+  const record = await engine.removeDrink({
+    id: "mona-regrettable", removedBy: "booth lead", reason: "reported at the counter",
+  });
+  assert.equal(record.name, "Mona Regrettable");
+  assert.equal(record.handle, served.handle, "the audit record keeps who entered it");
+  assert.ok(Date.parse(record.removedAt), "and when it was taken down");
+
+  const after = await engine.house();
+  assert.ok(!after.houseMenu.some(drink => drink.id === "mona-regrettable"), "it leaves the published menu");
+  assert.deepEqual(after.leaderboard, [], "and the standings it was ranked in");
+
+  // The point of a tombstone: the next person cannot simply retype it.
+  await engine.open({ runId: "booth-2" });
+  await assert.rejects(() => engine.dispatch("booth-2", "submit_name", { name: "mona   REGRETTABLE " }),
+    { code: "unavailable_drink" }, "normalization must not be a way back in");
+  const fresh = await engine.dispatch("booth-2", "submit_name", { name: "Mona Meridian" });
+  assert.equal(fresh.submission.name, "Mona Meridian", "unrelated names are unaffected");
+});
+
+test("a removed drink tells the attendee the truth rather than a pending rank", async t => {
+  const { engine } = await booth(t, { leaderboardUrl: "https://sip.example.com/board" });
+  const open = await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Ducky Regrettable" });
+  assert.equal(served.removed, null);
+  assert.equal(served.attendeeUrl, `https://sip.example.com/board?handle=${open.handle}`);
+
+  await engine.removeDrink({ id: "ducky-regrettable", removedBy: "booth lead", reason: "reported" });
+  const view = await engine.get("booth-1");
+  assert.ok(view.removed, "the run says plainly that it was taken down");
+  assert.equal(view.standing, null);
+  assert.equal(view.attendeeUrl, null, "no QR to a leaderboard place that no longer exists");
+  assert.equal(view.removed.at, (await engine.store.read()).removals[0].removedAt);
+  assert.ok(!("removedBy" in view.removed) && !("reason" in view.removed),
+    "who decided and why stays off the attendee screen");
+});
+
+test("takedown is staff-only and always accountable", async t => {
+  const { engine } = await booth(t);
+  await engine.open({ runId: "booth-1" });
+  await engine.dispatch("booth-1", "submit_name", { name: "Copilot Regrettable" });
+
+  // The attendee-facing surface must not reach it.
+  await assert.rejects(() => engine.dispatch("booth-1", "remove_drink", { id: "copilot-regrettable" }),
+    { code: "unknown_action" }, "the canvas queue cannot delete a rival's entry");
+
+  for (const bad of [
+    { id: "copilot-regrettable", removedBy: "", reason: "reported" },
+    { id: "copilot-regrettable", removedBy: "booth lead", reason: "  " },
+  ]) {
+    await assert.rejects(() => engine.removeDrink(bad), { code: "invalid_removal" },
+      "an unattributed or unexplained removal is not recorded");
+  }
+  await assert.rejects(() => engine.removeDrink({ id: "mona-latte", removedBy: "lead", reason: "x" }),
+    { code: "example_drink" }, "house examples are configuration, not moderation");
+  await assert.rejects(() => engine.removeDrink({ id: "never-existed", removedBy: "lead", reason: "x" }),
+    { code: "drink_missing" });
+  assert.deepEqual((await engine.store.read()).removals, [], "nothing was logged for a refused removal");
+});
+
+test("the staff takedown command refuses to act on a half-given instruction", async () => {
+  const { parseArguments } = await import("../scripts/remove-drink.mjs");
+  assert.deepEqual(parseArguments(["--id", "mona-x", "--by", "lead", "--reason", "reported"]),
+    { by: "lead", id: "mona-x", list: false, reason: "reported" });
+  assert.equal(parseArguments(["--list"]).list, true);
+  for (const argv of [
+    [], ["--id", "mona-x"], ["--id", "mona-x", "--by", "lead"],
+    ["--id", "mona-x", "--reason", "reported"],
+    // A flag swallowing the next flag as its value is how "--by --reason x"
+    // silently attributes a removal to "--reason".
+    ["--id", "mona-x", "--by", "--reason", "reported"],
+    ["--wat", "1"],
+  ]) {
+    assert.throws(() => parseArguments(argv), /needs a value|Usage|Unknown option/);
+  }
+});

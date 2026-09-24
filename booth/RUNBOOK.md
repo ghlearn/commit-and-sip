@@ -69,7 +69,32 @@ Scores run from 1 to 5,000. Speed, retries, and accessibility assistance never r
 
 Hand-over is the reset. The attendee chooses **I'm done — hand over to the next barista** and the counter returns to idle for the next person. There is no reset command and none is needed.
 
-Hand-over deliberately keeps the served drink on the house menu and the entry in the booth standings. That is the point of the station: the menu grows through the event. If an attendee asks to remove their drink, that is a moderation decision for staff, not a self-service action.
+Hand-over deliberately keeps the served drink on the house menu and the entry in the booth standings. That is the point of the station: the menu grows through the event. If an attendee asks to remove their drink, that is a moderation decision for staff, not a self-service action. See [taking a drink down](#taking-a-drink-down).
+
+## Taking a drink down
+
+A blocklist is a guess about what someone will type. This is the control that works after the fact, and it is why an imperfect list is survivable.
+
+Removal is a command, not a canvas button. The booth screen faces a queue, so a takedown control on it would let anyone delete a rival's entry. It writes through the same ledger lock as the booth, so it is safe to run while a station is live.
+
+Find the ID, then remove it, recording who you are and why:
+
+```
+npm run remove -- --list
+npm run remove -- --id mona-something --by "your name" --reason "reported at the counter"
+```
+
+Both `--by` and `--reason` are required and the removal is refused without them. The record is kept in the ledger with the original name, the barista handle, and the time. That is deliberate: whoever answers for the decision later needs to see what was actually taken down.
+
+What removal does:
+
+- The drink leaves the house menu and the booth standings, and the remaining ranks close up.
+- The name stays reserved. The next attendee retyping it is refused with the same "not available" wording as a blocklist hit, so the counter cannot tell the two apart and start speculating aloud about what somebody else typed.
+- If the attendee is still at the station, their screen stops congratulating them and says the drink was removed. It shows no QR and no rank. Staff identity and your stated reason are never shown to the attendee.
+
+What removal does **not** do: it cannot retract an entry a leaderboard service already accepted. The booth publishes; it has no retraction path. If a leaderboard is deployed and the entry was confirmed, remove it there too. The command says so every time.
+
+House examples cannot be removed this way. They are booth configuration, so edit `booth/orders.json` instead.
 
 If a panel is closed or the extension reloads mid-run, reopen the canvas. Saved state persists; the attendee resumes where they were.
 

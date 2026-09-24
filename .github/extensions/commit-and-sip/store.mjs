@@ -1,7 +1,18 @@
 import { mkdir, readFile, rename, open, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DomainError } from "./domain.mjs";
+
+// The booth and the staff scripts must resolve the same ledger. Working this
+// out in two places invites drift, and the failure mode is silent: a removal
+// that appears to succeed against a directory the running booth never reads.
+export function dataDirectory(env = process.env) {
+  const directory = env.COMMIT_AND_SIP_DATA_DIR ??
+    join(env.COPILOT_HOME ?? join(homedir(), ".copilot"), "extensions", "commit-and-sip", "artifacts");
+  if (!isAbsolute(directory)) throw new Error("COMMIT_AND_SIP_DATA_DIR must be an absolute staff-owned directory.");
+  return directory;
+}
 
 export class RunStore {
   constructor(directory) {

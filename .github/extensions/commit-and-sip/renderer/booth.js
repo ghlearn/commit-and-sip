@@ -90,19 +90,28 @@
   }
 
   function fillServed(state) {
+    // The heading is the largest text on the screen. Left alone it would
+    // congratulate someone on being on a menu their drink was just taken off.
+    $("served-heading").textContent = state.removed ? "This drink was removed." : "You're on the menu.";
     $("served-name").textContent = state.submission.name;
     $("served-score").textContent = String(state.submission.score);
     $("served-handle").textContent = state.handle;
     // Say "at this booth" explicitly. One booth cannot see what was invented
     // elsewhere, so an unqualified rank would read as an event-wide placing.
-    $("served-standing").textContent = state.standing
-      ? `rank ${state.standing.rank} of ${state.standing.entries} at this booth`
-      : "rank pending";
+    $("served-standing").textContent = state.removed
+      ? "removed from the menu by booth staff"
+      : state.standing
+        ? `rank ${state.standing.rank} of ${state.standing.entries} at this booth`
+        : "rank pending";
 
     // The event standing is only ever what the leaderboard service confirmed.
+    // A removed drink may still have a confirmed receipt from before staff
+    // acted, and this booth cannot retract a published entry, so keep quiet
+    // rather than keep advertising a rank the booth has repudiated. Getting it
+    // out of the service is a staff job the takedown command spells out.
     const event = $("served-event");
-    event.textContent = state.sync?.message ?? "";
-    event.hidden = !state.sync?.message;
+    event.textContent = state.removed ? "" : state.sync?.message ?? "";
+    event.hidden = !event.textContent;
 
     const list = $("served-breakdown");
     list.replaceChildren();
@@ -130,7 +139,10 @@
       $("served-qr-anchor").href = state.attendeeUrl;
       $("served-qr-anchor").textContent = state.attendeeUrl;
     }
-    $("served-qr-none").hidden = Boolean(state.attendeeUrl);
+    // A removed drink has no leaderboard place, which is a different fact from
+    // the event having no leaderboard at all. Do not let it read as the latter.
+    $("served-qr-removed").hidden = !state.removed;
+    $("served-qr-none").hidden = Boolean(state.attendeeUrl) || Boolean(state.removed);
   }
 
   function render(state) {

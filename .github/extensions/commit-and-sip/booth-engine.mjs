@@ -1,7 +1,7 @@
 import { DomainError, requireValue, exactInput, validRunId, generateHandle } from "./domain.mjs";
 import { PLACEMENTS } from "./services/coffee-name.mjs";
 import { validateLeaderboardUrl } from "./services/public-url.mjs";
-import { addDrink, leaderboard, seedMenu, standingFor } from "./services/booth-menu.mjs";
+import { addDrink, leaderboard, removeDrink, seedMenu, standingFor } from "./services/booth-menu.mjs";
 import {
   confirmedSync, failedSync, initialSync, submissionFor, syncView, validateLeaderboardClient, validateReceipt
 } from "./services/leaderboard.mjs";
@@ -30,7 +30,9 @@ export class BoothEngine {
   // leaderboard. With none configured this stays null and the canvas must say
   // so plainly rather than render a placeholder as a working code.
   attendeeUrl(run) {
-    if (!this.leaderboardUrl || run.phase === "naming") return null;
+    // A removed drink has no place to point at. Handing over a code that leads
+    // to an empty leaderboard lookup would be worse than saying nothing.
+    if (!this.leaderboardUrl || run.phase === "naming" || run.removed) return null;
     const url = new URL(this.leaderboardUrl);
     url.searchParams.set("handle", run.handle);
     return url.toString();
@@ -41,6 +43,33 @@ export class BoothEngine {
   houseMenu(data) {
     if (!Array.isArray(data.menu) || data.menu.length === 0) data.menu = seedMenu(this.catalog);
     return data.menu;
+  }
+
+  // Removals live beside the menu in the same ledger, defaulted so a ledger
+  // written before takedown existed still loads.
+  removalLog(data) {
+    if (!Array.isArray(data.removals)) data.removals = [];
+    return data.removals;
+  }
+
+  // Staff-only, and deliberately not routed through `dispatch`: that whitelist
+  // is the attendee's surface, and a booth screen where anyone can delete a
+  // rival's entry is worse than no takedown at all. Reached through the staff
+  // script instead.
+  async removeDrink({ id, removedBy, reason }) {
+    return this.store.transaction(data => {
+      const record = removeDrink(this.houseMenu(data), this.removalLog(data), id, { removedBy, reason });
+      // Whoever entered it may still be at the counter. Mark their run so the
+      // screen says what happened instead of showing a rank that no longer
+      // exists; standingFor would otherwise report "pending" forever.
+      for (const run of Object.values(data.runs)) {
+        if (run.submission?.id !== record.id) continue;
+        run.removed = { at: record.removedAt };
+        run.statusMessage = "Booth staff removed this drink from the house menu.";
+        run.events.push({ type: "removed", at: record.removedAt });
+      }
+      return record;
+    });
   }
 
   // The counter view: what is on the menu and who is winning. It needs no run,
@@ -71,6 +100,10 @@ export class BoothEngine {
       // down and find themselves on the leaderboard later.
       handle: run.handle,
       phase: run.phase,
+      // Staff identity and the stated reason stay out of the attendee screen.
+      // That a drink came down is the attendee's business; who decided it and
+      // on what grounds is not.
+      removed: run.removed ? { at: run.removed.at } : null,
       runId: run.runId,
       statusMessage: run.statusMessage,
       submission: run.submission,
@@ -180,7 +213,8 @@ export class BoothEngine {
 
       const entry = addDrink(this.houseMenu(data), {
         choice: { mascot: input.mascot, placement: input.placement },
-        handle: run.handle, rawName: input.name, rules: this.rules, runId,
+        handle: run.handle, rawName: input.name, removedIds: this.removalLog(data).map(record => record.id),
+        rules: this.rules, runId,
       });
       run.submission = {
         breakdown: entry.breakdown, id: entry.id, name: entry.name, placement: entry.placement,

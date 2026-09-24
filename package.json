@@ -9,7 +9,8 @@
     "test": "node --test --test-timeout=120000 --test-force-exit tests/*.test.mjs",
     "precheck": "node scripts/require-node.mjs",
     "check": "node scripts/check-syntax.mjs",
-    "qr": "node scripts/generate-qr.mjs"
+    "qr": "node scripts/generate-qr.mjs",
+    "remove": "node scripts/remove-drink.mjs"
   },
   "engines": { "node": ">=22" },
   "devDependencies": {

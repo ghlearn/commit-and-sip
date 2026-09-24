@@ -24,7 +24,7 @@ Commit & Sip is a project-local Copilot App canvas extension, registered as `com
 
 It is **not** event-ready. Four things are missing and none of them is code:
 
-- **The moderation blocklist is an unreviewed placeholder.** `booth/blocked-terms.json` ships with no real terms, and the extension logs a warning on every start while that is true. A human must review and approve the list before attendee names go on a public menu.
+- **The moderation blocklist is an unreviewed placeholder.** `booth/blocked-terms.json` ships with no real terms, and the extension logs a warning on every start while that is true. A human must review and approve the list before attendee names go on a public menu. Staff can take a drink down after the fact with `npm run remove`, which is what makes an imperfect list survivable, but that is a response and not a substitute.
 - **No leaderboard service is deployed.** The client seam exists and is local-first, so a missing service never blocks an attendee, but nothing receives submissions.
 - **There is no public QR destination.** Do not publish a placeholder QR as a production link.
 - **Brand, trademark, and privacy review** of the mascot names and artwork has not happened.
@@ -40,6 +40,8 @@ Staff need Node.js 22 or newer and a Copilot App/CLI build supporting project ca
 3. Watch the log on start. A moderation warning means the blocklist is still unreviewed.
 4. Inspect the registered `commit-and-sip` canvas capabilities.
 5. Open the canvas with no input, or `{}`. The counter opens idle and ready for the next attendee.
+
+To take a drink off the menu, see [taking a drink down](booth/RUNBOOK.md#taking-a-drink-down). Removal is a staff command, deliberately not a button on the attendee screen.
 
 An agent driving the host uses `extensions_reload`, `extensions_manage` (`list`/`inspect`), `list_canvas_capabilities`, `open_canvas`, and `invoke_canvas_action`. These are host tools, not shell commands. Discover the loaded extension and provider identifiers instead of inventing them. Choose a panel `instanceId` when opening, then reuse that panel handle for actions.
 

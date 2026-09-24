@@ -14,13 +14,13 @@
 | `renderer/` | The single attendee screen; presentation and controls only |
 | `services/coffee-name.mjs` | Name rules, mascot and placement validation, blocklist lookup |
 | `services/name-score.mjs` | Deterministic rubric scoring out of 5,000 |
-| `services/booth-menu.mjs` | House menu projection, duplicate detection, standings |
+| `services/booth-menu.mjs` | House menu projection, duplicate detection, standings, staff takedown |
 | `services/moderation.mjs` | Evasion-resistant blocklist matching and readiness reporting |
 | `services/leaderboard.mjs` | Client seam for an event leaderboard; no client ships today |
 | `services/qr.mjs` | Server-side QR data URLs, required because CSP forbids remote scripts |
 | `services/public-url.mjs` | Strict public-HTTPS validation and reachability checks for any configured leaderboard |
 | `booth/` | Orders, curated handle words, name rules, blocklist, runbook |
-| `scripts/` and `tests/` | Maintainer validation, Node version guard, approved-URL QR generation |
+| `scripts/` and `tests/` | Maintainer validation, Node version guard, approved-URL QR generation, staff takedown |
 
 The engine owns every authoritative fact. The browser renders a projection and requests actions; it cannot set a score, a handle, or a menu entry.
 
@@ -46,7 +46,9 @@ The rubric lives in code rather than in a data file. `booth/scoring-rubric.json`
 
 `services/moderation.mjs` folds digits to letters, strips separators, and collapses repeats on both sides before matching, so `b4d`, `b a d`, and `baaad` cannot evade a listed term. Word-mode matching joins runs of consecutive tokens for the same reason. The name character set rejects non-ASCII before the blocklist runs, so homoglyph and zero-width evasion is structurally impossible and no confusable table is needed.
 
-`booth/blocked-terms.json` ships as an explicit placeholder. Its content is a human moderation decision, not a generated list. `extension.mjs` logs a warning on every start while the list is unreviewed, so a booth cannot quietly publish attendee names behind an unapproved filter.
+`booth/blocked-terms.json` ships as an explicit placeholder and is the only list. Its content is a human moderation decision, not a generated list. `extension.mjs` logs a warning on every start while the list is unreviewed, so a booth cannot quietly publish attendee names behind an unapproved filter.
+
+A blocklist only catches what someone predicted. `removeDrink` covers the rest: staff run `npm run remove` to take an entry off the menu and the standings, recording who removed it and why. The ID becomes a tombstone rather than a deletion, so the name stays reserved and cannot simply be retyped back onto the menu, and resubmission is refused with the same wording as a blocklist hit. Takedown is not exposed through `dispatch`, because the canvas runs unattended on a screen facing the queue. A removed run's screen withdraws its rank, QR, and menu claim instead of continuing to congratulate the attendee.
 
 ## Leaderboard seam
 
@@ -90,6 +92,7 @@ Keep regression coverage for:
 - Rubric determinism and the 5,000-point total.
 - Phase transitions, including that completing clears the counter without erasing the served result or house menu.
 - Local-first publication, receipt mismatch rejection, and retry on refresh.
+- Staff takedown: name reservation after removal, attendee-facing withdrawal of every success claim, and that removal stays out of the dispatched action set.
 - Loopback action boundaries: capability ticket, exact origin and host, content type, and bounded bodies.
 - Palette contrast, bundled font provenance, and QR decoding of the generated image.
 

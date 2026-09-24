@@ -1,9 +1,7 @@
 import { joinSession, createCanvas, CanvasError } from "@github/copilot-sdk/extension";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
 import { DomainError, loadCatalog, validateStaffConfig } from "./domain.mjs";
-import { RunStore } from "./store.mjs";
+import { dataDirectory, RunStore } from "./store.mjs";
 import { BoothEngine } from "./booth-engine.mjs";
 import { loadNameRules } from "./services/coffee-name.mjs";
 import { blocklistStatus } from "./services/moderation.mjs";
@@ -16,9 +14,7 @@ try {
 } catch (error) {
   if (error.code !== "ENOENT") throw error;
 }
-const directory = process.env.COMMIT_AND_SIP_DATA_DIR ??
-  join(process.env.COPILOT_HOME ?? join(homedir(), ".copilot"), "extensions", "commit-and-sip", "artifacts");
-if (!isAbsolute(directory)) throw new Error("COMMIT_AND_SIP_DATA_DIR must be an absolute staff-owned directory.");
+const directory = dataDirectory();
 const store = new RunStore(directory);
 let session;
 

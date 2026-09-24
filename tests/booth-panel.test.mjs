@@ -245,3 +245,26 @@ test("the optional pickers default to no claim at all", async () => {
     assert.doesNotMatch(select, /\brequired\b/, `${id} is optional and must not be required`);
   }
 });
+
+test("a removed drink never keeps congratulating the attendee", async () => {
+  // The whole served view is written for success. After a takedown it is still
+  // on screen, so every claim on it has to be re-checked against `removed`:
+  // the heading, the standing, the QR, and the event receipt. A confirmed
+  // receipt in particular survives removal, because this booth publishes to a
+  // leaderboard service but cannot retract from one.
+  const js = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/booth.js", import.meta.url), "utf8");
+  const served = js.slice(js.indexOf("function fillServed"), js.indexOf("function render"));
+  assert.ok(served.length > 0, "the served renderer is where these claims are made");
+  for (const claim of ["served-heading", "served-standing", "served-event"]) {
+    const line = served.slice(served.indexOf(claim));
+    assert.match(line.slice(0, 260), /state\.removed/,
+      `${claim} still asserts success without checking whether the drink was removed`);
+  }
+  assert.match(served, /served-qr-removed"\)\.hidden = !state\.removed/);
+  // "No leaderboard is deployed" and "your drink was taken down" are different
+  // facts, and showing both at once tells the attendee neither.
+  assert.match(served, /served-qr-none"\)\.hidden = Boolean\(state\.attendeeUrl\) \|\| Boolean\(state\.removed\)/);
+
+  const html = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/booth.html", import.meta.url), "utf8");
+  assert.match(html, /id="served-qr-removed"[^>]*hidden/, "the removal notice starts hidden");
+});

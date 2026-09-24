@@ -56,6 +56,10 @@ Entries declare `substring` or `word`. Substring mode rejects the fragment anywh
 
 `booth/blocked-terms.json` is an explicit placeholder. `validateBlocklist` enforces structure and provenance, while `blocklistStatus` reports readiness separately, so a placeholder still loads and the booth still runs, but never claims approval. The extension logs a warning naming the gap on every booth start. Nothing here certifies a list as adequate; that remains a human decision recorded in the file's `review` block.
 
+This is the only moderation list. A second flat `blockedTerms` array in `booth/name-rules.json` was removed: it matched by plain substring with no evasion resistance and no word mode, and the runbook's review procedure never mentioned it, so a reviewer could complete that procedure and leave a second list untouched. The key is now rejected at start-up rather than ignored.
+
+A blocklist is a prediction about what someone will type, so it cannot be the only control. `removeDrink` is the one that works after the fact: staff take an entry off the menu and the standings, and the ID becomes a tombstone that refuses resubmission with the same wording as a blocklist hit. It is reached through `npm run remove`, never through `dispatch`, because the canvas runs on a screen facing the queue and a takedown control there would let anyone delete a rival's entry. Every removal records a named person and a reason, and a run whose drink was removed stops claiming a rank, a QR, and a place on the menu.
+
 ### Canvas wiring
 
 The booth canvas is the only canvas. `extension.mjs` constructs one `BoothEngine` and registers `boothCanvasDefinition`; there is no mode branch, because there is no other mode. The canvas takes no open input and exposes four actions: `begin`, `submit_name`, `complete`, and `refresh`.
@@ -76,9 +80,9 @@ API-level tests do not exercise HTML form validation or default-selected `<optio
 
 Four gaps remain, and none of them is code.
 
-The moderation blocklist needs reviewed content. The mechanism is built and the gap is reported at every start, but no list has been approved, and nothing in this repository certifies a list as adequate.
+The moderation blocklist needs reviewed content. The mechanism is built, the gap is reported at every start, and staff can now take a name down after the fact, but no list has been approved, and nothing in this repository certifies a list as adequate.
 
-No leaderboard service is deployed. The client seam exists, is local-first, and defaults to null, so its absence cannot fail an attendee; but nothing receives submissions and no public destination exists. Do not present a placeholder QR as a production link.
+No leaderboard service is deployed. The client seam exists, is local-first, and defaults to null, so its absence cannot fail an attendee; but nothing receives submissions and no public destination exists. Do not present a placeholder QR as a production link. Any service built against this seam must also accept retractions, or staff takedown will stop at the booth boundary.
 
 Brand and trademark review of the mascot names and artwork has not happened. The cup illustration is original work carried over from the retired review page; it depicts a generic cup and no mascot, so nothing about it is approved or unapproved yet.
 
@@ -116,3 +120,5 @@ Cross-booth uniqueness and global ranking belong to the service. One booth is au
 Any configured URL must pass `validateLeaderboardUrl` in `services/public-url.mjs`: HTTPS only, no credentials, fragment, or nonstandard port, and no private, loopback, reserved, or reserved-suffix host. `BoothEngine` refuses a non-conforming URL at construction rather than rendering a code that scans to nothing. `verifyPublicUrl` additionally performs an unauthenticated, non-redirecting HEAD with DNS pinned at socket creation, so a second lookup cannot turn a previously public address into an internal target.
 
 `syncView` keeps two facts apart that are easy to conflate: the booth standing is local and the booth owns it, while an event rank exists only once the service confirms it. Until then the canvas says the place is still being confirmed, and the booth rank is labelled "at this booth" so it cannot be read as an event-wide placing.
+
+**A service must offer retraction.** Staff can take a drink off a booth menu, but the current client interface is publish-only, so an entry the service already accepted stays there. That is a live moderation hole for any deployed leaderboard: the booth can repudiate a name locally while the public board still shows it. An implementation must accept a retraction for a previously published handle and drink ID, and `validateLeaderboardClient` must grow a matching method alongside `publish`. Until it does, the takedown command tells staff to remove the entry at the service by hand, and the canvas stops displaying a confirmed rank for a removed drink rather than advertising one the booth has withdrawn.
