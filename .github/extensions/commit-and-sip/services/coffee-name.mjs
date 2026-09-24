@@ -70,6 +70,9 @@ export function validateCoffeeName(raw, rules) {
   }
   const id = coffeeNameId(name);
   if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(id)) reject("That name cannot become a menu ID. Try another.");
+  // The mascot is the prefix, not the whole drink. A bare mascot leaves nothing
+  // invented and would let the first attendee claim "Mona" outright.
+  if (id === mascot) reject(`Add your own twist after ${mascot}. The name cannot be just the mascot.`);
   return { name, id, mascot };
 }
 

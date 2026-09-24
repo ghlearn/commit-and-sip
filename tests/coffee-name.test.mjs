@@ -52,6 +52,17 @@ test("every name must be prefixed with a mascot, not merely contain one", () => 
   assert.equal(validateCoffeeName("Monastery Blend", rules).mascot, "mona", "a blended prefix is accepted deliberately");
 });
 
+test("the mascot is a prefix to build on, not the whole drink", () => {
+  // Otherwise the first attendee claims "Mona" outright and invents nothing.
+  for (const name of ["Mona", "Ducky", "Copilot", "  copilot  ", "DUCKY"]) {
+    rejects(name, /cannot be just the mascot/);
+  }
+  // Anything they add of their own is enough, including a fused blend.
+  for (const name of ["Monachino", "Mona Mocha", "Ducky Dawn Drip", "Copilot X"]) {
+    assert.ok(validateCoffeeName(name, rules).id.length > validateCoffeeName(name, rules).mascot.length);
+  }
+});
+
 test("attendee text cannot smuggle injection or spoofing into GitHub surfaces", () => {
   rejects("Mona <img src=x>", /only letters, numbers/);
   rejects("Mona [link](http://x)", /only letters, numbers/);
