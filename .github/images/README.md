@@ -39,4 +39,4 @@ Release checks: correct approved destination, sufficient resolution, high contra
 
 ## Branding
 
-The booth screen currently ships no drink artwork. The original cup illustration belonged to the retired review page and was removed with it; any replacement must be original work, not official mascot art. Drink names, product references, event copy, and any future artwork still require brand and trademark review. Do not add unapproved Mona, Copilot, or Ducky artwork to fulfil the historical outline. Retain artwork provenance and record approval before event publication.
+The booth screen carries one illustration: an original cup drawn in the house palette, on the chalkboard above the menu. It depicts a generic cup and no mascot. Any further artwork must also be original work, not official mascot art. Drink names, product references, event copy, and artwork all still require brand and trademark review. Do not add unapproved Mona, Copilot, or Ducky artwork to fulfil the historical outline. Retain artwork provenance and record approval before event publication.

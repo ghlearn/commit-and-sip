@@ -36,7 +36,7 @@ test("green-and-white palette meets AA for text, secondary text, and action stat
   assert.ok(contrast("board-line", "cafe-board") >= 3);
 });
 
-test("the booth screen shares the light palette", async () => {
+test("the booth screen shares the light palette and carries the house cup on the board", async () => {
   const booth = await readFile(new URL("booth.html", renderer), "utf8");
   assert.match(booth, /name="color-scheme" content="light"/);
   assert.match(booth, /href="\/style\.css"/);
@@ -45,9 +45,15 @@ test("the booth screen shares the light palette", async () => {
   assert.match(css, /color-scheme: light/);
   assert.doesNotMatch(css, /var\(--(?:background-color-default|text-color-default|color-focus-outline)/);
   assert.match(css, /@media \(forced-colors: active\)/);
-  // The cup illustration lived on the retired review page. Colour names must
-  // still never leak into alternative text if artwork returns here.
+  assert.match(booth, /fill="var\(--cup-white\)"/);
+  assert.match(booth, /stroke="var\(--board-highlight\)"/);
   assert.doesNotMatch(booth, /cream cup|brass-colored saucer/);
+  // The cup is white on pale green. It is only legible against the dark
+  // board, so it must stay inside the chalkboard rather than on the page.
+  const board = booth.match(/<section class="chalkboard"[\s\S]*?<\/section>/);
+  assert.ok(board, "cup artwork needs a chalkboard section");
+  assert.match(board[0], /class="cup-art"/);
+  assert.ok(contrast("cup-white", "cafe-board") >= 4.5);
 });
 
 test("bundled Mona Sans covers reading and display roles while retaining monospace and tabular results", async () => {

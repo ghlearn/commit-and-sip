@@ -80,7 +80,7 @@ The moderation blocklist needs reviewed content. The mechanism is built and the 
 
 No leaderboard service is deployed. The client seam exists, is local-first, and defaults to null, so its absence cannot fail an attendee; but nothing receives submissions and no public destination exists. Do not present a placeholder QR as a production link.
 
-Brand and trademark review of the mascot names and artwork has not happened. The cup illustration that shipped with the retired review page was removed with it, so the booth screen currently has no artwork.
+Brand and trademark review of the mascot names and artwork has not happened. The cup illustration is original work carried over from the retired review page; it depicts a generic cup and no mascot, so nothing about it is approved or unapproved yet.
 
 Making the repository a public template is a visibility change requiring its own review.
 
