@@ -1,5 +1,6 @@
 import { DomainError, requireValue, exactInput, validRunId, generateHandle } from "./domain.mjs";
 import { PLACEMENTS } from "./services/coffee-name.mjs";
+import { validateLeaderboardUrl } from "./services/completion.mjs";
 import { addDrink, leaderboard, seedMenu, standingFor } from "./services/booth-menu.mjs";
 
 // The booth flow is entirely canvas-driven: the attendee is given a handle,
@@ -11,13 +12,12 @@ const PHASES = ["naming", "served", "complete"];
 
 export class BoothEngine {
   constructor({ store, catalog, rules, leaderboardUrl = null }) {
-    // An unparseable or non-web destination would produce a QR that scans to
-    // nothing, so it is refused at construction rather than shown to attendees.
+    // Reuse the reviewed leaderboard rule rather than inventing a second,
+    // weaker one here: a destination attendees are told to scan must be a
+    // public HTTPS address, and anything else is refused before any QR exists.
     if (leaderboardUrl !== null) {
-      let parsed = null;
-      try { parsed = new URL(leaderboardUrl); } catch { parsed = null; }
-      requireValue(parsed && (parsed.protocol === "https:" || parsed.protocol === "http:"),
-        "invalid_leaderboard_url", "The configured leaderboard URL is not a valid web address.");
+      try { leaderboardUrl = validateLeaderboardUrl(leaderboardUrl); }
+      catch { throw new DomainError("invalid_leaderboard_url", "The configured leaderboard URL is not an approved public HTTPS address."); }
     }
     Object.assign(this, { store, catalog, rules, leaderboardUrl });
   }
@@ -39,26 +39,38 @@ export class BoothEngine {
     return data.menu;
   }
 
-  present(run, data) {
+  // The counter view: what is on the menu and who is winning. It needs no run,
+  // so the booth screen is never blank between attendees.
+  houseView(data) {
     const menu = this.houseMenu(data);
     return {
-      attendeeUrl: this.attendeeUrl(run),
-      completedAt: run.completedAt ?? null,
-      createdAt: run.createdAt,
-      handle: run.handle,
-      // The attendee's handle is shown from the very start so they can note it
-      // down and find themselves on the leaderboard later.
       houseMenu: menu.map(({ artwork, example, id, name, price, serving }) =>
         ({ artwork, example, id, name, price, serving })),
       leaderboard: leaderboard(menu),
       leaderboardUrl: this.leaderboardUrl,
       mascots: this.rules.mascots,
-      phase: run.phase,
       placements: PLACEMENTS,
+    };
+  }
+
+  async house() {
+    return this.houseView(await this.store.read());
+  }
+
+  present(run, data) {
+    return {
+      ...this.houseView(data),
+      attendeeUrl: this.attendeeUrl(run),
+      completedAt: run.completedAt ?? null,
+      createdAt: run.createdAt,
+      // The attendee's handle is shown from the very start so they can note it
+      // down and find themselves on the leaderboard later.
+      handle: run.handle,
+      phase: run.phase,
       runId: run.runId,
       statusMessage: run.statusMessage,
       submission: run.submission,
-      standing: run.phase === "naming" ? null : standingFor(menu, run.runId),
+      standing: run.phase === "naming" ? null : standingFor(this.houseMenu(data), run.runId),
     };
   }
 

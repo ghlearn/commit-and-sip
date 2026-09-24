@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="light">
+  <title>Commit &amp; Sip - Name a drink</title>
+  <link rel="icon" href="data:,">
+  <link rel="preload" href="/fonts/MonaSansVF.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/booth.js" defer></script>
+</head>
+<body>
+  <main class="launcher" id="booth" aria-busy="true">
+    <p class="eyebrow">Commit &amp; Sip - Level Up Lounge</p>
+
+    <section id="booth-error" class="notice error-notice" role="alert" hidden>
+      <h2>Let's get you back to the counter</h2>
+      <p id="booth-error-message"></p>
+      <button id="booth-retry" type="button">Refresh connection</button>
+    </section>
+
+    <!-- Between attendees. -->
+    <section id="view-idle" hidden>
+      <h1>Name a drink. Take a bow.</h1>
+      <p id="idle-welcome" role="status" aria-live="polite">Step up and invent a coffee for the house menu.</p>
+      <section class="notice">
+        <h2>How it works</h2>
+        <p>You get a barista handle, you invent one drink using <strong>mona</strong>, <strong>ducky</strong>, or <strong>copilot</strong>, and a rubric scores it out of 5,000. Your drink joins the house menu for the rest of the event.</p>
+        <p>Everything happens on this screen. There is no terminal, no GitHub sign-in, and nothing to install.</p>
+      </section>
+      <button id="begin" class="primary" type="button">Start my order</button>
+    </section>
+
+    <!-- Inventing a drink. -->
+    <section id="view-naming" hidden>
+      <h1>Invent your drink.</h1>
+      <p class="notice"><strong>Your barista handle:</strong> <span id="naming-handle" class="handle"></span><br>
+        Write this down. It is how you find yourself on the leaderboard later.</p>
+      <form id="name-form">
+        <fieldset id="name-fields">
+          <legend>Your drink</legend>
+
+          <label for="pick-mascot">Mascot</label>
+          <select id="pick-mascot" required></select>
+
+          <label for="pick-placement">Where does the mascot go?</label>
+          <select id="pick-placement">
+            <option value="">Anywhere - I'll just type it</option>
+          </select>
+          <p id="placement-help">Optional. Pick a spot and we'll check your name matches it.</p>
+
+          <label for="pick-name">Drink name</label>
+          <input id="pick-name" type="text" required minlength="3" maxlength="40" autocomplete="off" spellcheck="false" aria-describedby="name-help">
+          <p id="name-help">3 to 40 characters. Letters, numbers, spaces, hyphens, and apostrophes.</p>
+
+          <button id="name-submit" class="primary" type="submit">Add it to the menu</button>
+        </fieldset>
+      </form>
+      <p id="name-problem" class="notice error-notice" role="alert" hidden></p>
+    </section>
+
+    <!-- Scored and on the menu. -->
+    <section id="view-served" hidden>
+      <h1 id="served-heading">You're on the menu.</h1>
+      <p class="notice"><strong id="served-name"></strong> scored <strong id="served-score"></strong> out of 5,000.<br>
+        Barista <span id="served-handle" class="handle"></span> - <span id="served-standing"></span></p>
+
+      <section aria-labelledby="breakdown-heading">
+        <h2 id="breakdown-heading">How it scored</h2>
+        <ul id="served-breakdown"></ul>
+      </section>
+
+      <section aria-labelledby="qr-heading">
+        <h2 id="qr-heading">Your place on the leaderboard</h2>
+        <div id="served-qr"></div>
+        <p id="served-qr-link" hidden><a id="served-qr-anchor" rel="noreferrer noopener" target="_blank"></a></p>
+        <p id="served-qr-none" hidden>No leaderboard has been published for this event yet, so there is nothing to scan. Note your handle down and staff will point you to the results.</p>
+      </section>
+
+      <button id="finish" class="primary" type="button">I'm done - hand over to the next barista</button>
+    </section>
+
+    <section aria-labelledby="menu-heading">
+      <h2 id="menu-heading">House menu</h2>
+      <ul id="house-menu"></ul>
+    </section>
+
+    <section aria-labelledby="board-heading">
+      <h2 id="board-heading">Leaderboard</h2>
+      <p id="board-empty" hidden>No drinks have been invented yet. Be the first.</p>
+      <ol id="leaderboard"></ol>
+    </section>
+
+    <p class="muted">The three house drinks are worked examples. They are not scored and never appear on the leaderboard.</p>
+  </main>
+</body>
+</html>

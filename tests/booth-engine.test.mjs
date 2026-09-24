@@ -111,8 +111,8 @@ test("the booth never invents a leaderboard URL", async t => {
   assert.equal((await plain.engine.open({ runId: "booth-1" })).leaderboardUrl, null,
     "no QR or link is offered until staff configure an approved destination");
 
-  const configured = await booth(t, { leaderboardUrl: "https://example.invalid/board" });
-  assert.equal((await configured.engine.open({ runId: "booth-1" })).leaderboardUrl, "https://example.invalid/board");
+  const configured = await booth(t, { leaderboardUrl: "https://sip.example.com/board" });
+  assert.equal((await configured.engine.open({ runId: "booth-1" })).leaderboardUrl, "https://sip.example.com/board");
 });
 
 test("booth runs and other exercise modes never collide on a run ID", async t => {
@@ -207,12 +207,14 @@ test("the QR destination is only offered once staff configure a real one", async
   assert.equal(served.attendeeUrl, null, "no destination is deployed, so none is invented");
   assert.equal(served.leaderboardUrl, null);
 
-  const live = await booth(t, { leaderboardUrl: "https://example.test/board" });
+  const live = await booth(t, { leaderboardUrl: "https://sip.example.com/board" });
   const open = await live.engine.open({ runId: "booth-2" });
   assert.equal(open.attendeeUrl, null, "there is nothing to scan before they have played");
   const entry = await live.engine.dispatch("booth-2", "submit_name", { name: "Copilot Comet" });
-  assert.equal(entry.attendeeUrl, `https://example.test/board?handle=${open.handle}`);
+  assert.equal(entry.attendeeUrl, `https://sip.example.com/board?handle=${open.handle}`);
 
-  assert.throws(() => new BoothEngine({ store: null, catalog, rules, leaderboardUrl: "not-a-url" }),
-    { code: "invalid_leaderboard_url" }, "a URL that scans to nothing is refused up front");
+  for (const bad of ["not-a-url", "http://sip.example.com/board", "https://localhost/board"]) {
+    assert.throws(() => new BoothEngine({ store: null, catalog, rules, leaderboardUrl: bad }),
+      { code: "invalid_leaderboard_url" }, `${bad} must not become something attendees are told to scan`);
+  }
 });

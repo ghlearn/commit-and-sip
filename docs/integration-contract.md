@@ -42,9 +42,15 @@ One booth is authoritative only for its own menu and cannot know what was invent
 
 The leaderboard destination is unresolved. `leaderboardUrl` stays null unless staff configure an approved destination, and no link or QR is invented. `BoothEngine` refuses a non-web `leaderboardUrl` at construction rather than rendering a code that scans to nothing, exposes `attendeeUrl` only after the attendee has played, and leaves it null when nothing is configured. The existing requirement for an approved publicly reachable HTTPS destination and a real issue-renderable QR asset is unchanged.
 
+### Canvas wiring
+
+The booth canvas is the default canvas. `extension.mjs` selects it unless `config.mode` is an explicit staff mode (`rehearsal`, `live`, or `live-canvas-pilot`), which still opens the older pull-request review canvas. `BoothPanel` is the station: one panel serves attendee after attendee, holding only the current run so `begin` mints a fresh handle and `complete` clears the cursor and returns the counter to idle with the previous drink still on the house menu. QR codes are rendered server-side into a data URL because the server's `script-src 'self'` policy forbids a CDN; `services/qr.mjs` returns null rather than a broken code if rendering fails.
+
+The booth screen was verified in a real browser, which found a defect the whole passing suite had missed: `#pick-placement` carried `required` while its default option had an empty value, so `reportValidity()` silently blocked every submission with no visible error. API-level tests never exercise HTML form validation, so a static check now asserts no required control on the form defaults to an unselectable value. Treat form-bearing canvas UI as unverified until it has been driven through a browser.
+
 ### Not yet built
 
-The canvas UI still presents the pull-request review flow; wiring it to `BoothEngine` is outstanding. The live and canvas-pilot GitHub paths remain in the tree and are untouched, pending a decision on retiring them. The `blockedTerms` list is a placeholder needing moderated content, and brand and trademark review of names and artwork, before any event that publishes attendee text. Making the repository a public template is a visibility change requiring its own review.
+The live and canvas-pilot GitHub paths remain in the tree and are untouched, pending a decision on retiring them. The facilitation skill and the learner step still describe the pull-request review flow and need rewriting for the naming competition. The `blockedTerms` list is a placeholder needing moderated content, and brand and trademark review of names and artwork, before any event that publishes attendee text. Making the repository a public template is a visibility change requiring its own review.
 
 ## Supported canvas boundary
 

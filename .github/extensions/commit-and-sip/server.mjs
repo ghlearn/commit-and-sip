@@ -8,6 +8,7 @@ const assets = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
   ["/launcher.js", ["launcher.js", "text/javascript; charset=utf-8"]],
   ["/app.js", ["app.js", "text/javascript; charset=utf-8"]],
+  ["/booth.js", ["booth.js", "text/javascript; charset=utf-8"]],
   ["/result-links.mjs", ["result-links.mjs", "text/javascript; charset=utf-8"]],
   ["/style.css", ["style.css", "text/css; charset=utf-8"]],
   ["/fonts/MonaSansVF.woff2", ["fonts/MonaSansVF.woff2", "font/woff2"]],
@@ -33,8 +34,7 @@ async function bodyJSON(request) {
   catch { throw new DomainError("invalid_json", "Action input must be valid JSON.", 400); }
 }
 
-export async function startServer({ engine, runId, reportError = () => {} }) {
-  const panel = new PanelRun(engine, runId);
+export async function startServer({ engine, runId, reportError = () => {}, panel = new PanelRun(engine, runId), home = null }) {
   const ticket = randomBytes(32).toString("hex");
   let origin;
   const server = createServer(async (request, response) => {
@@ -53,7 +53,9 @@ export async function startServer({ engine, runId, reportError = () => {} }) {
       const url = new URL(request.url, origin);
       if (request.method === "GET" && assets.has(url.pathname)) {
         let [file, type] = assets.get(url.pathname);
-        if (url.pathname === "/" && !panel.runId) file = "launcher.html";
+        // The booth screen is one page across every phase; the review flow
+        // still swaps its setup page for the run page.
+        if (url.pathname === "/") file = home ?? (panel.runId ? "index.html" : "launcher.html");
         const bytes = await readFile(new URL(`renderer/${file}`, import.meta.url));
         response.writeHead(200, { "Content-Type": type });
         response.end(bytes);
