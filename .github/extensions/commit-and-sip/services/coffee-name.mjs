@@ -3,9 +3,9 @@ import { createHash } from "node:crypto";
 import { DomainError, requireValue } from "../domain.mjs";
 import { findBlockedTerm, loadBlocklist, validateBlocklist } from "./moderation.mjs";
 
-// Attendee text reaches GitHub issue bodies, pull-request titles, and menu data.
-// These rules reject injection and spoofing structurally; blockedTerms is a
-// separate staff-supplied moderation list and is not a substitute for review.
+// Attendee text is published on the house menu and the leaderboard. These rules
+// reject injection and spoofing structurally; booth/blocked-terms.json is a
+// separate staff-reviewed moderation list and is not a substitute for review.
 const ALLOWED = /^[A-Za-z0-9 '-]+$/;
 const OPENING = /^[A-Za-z0-9]/;
 const CLOSING = /[A-Za-z0-9]$/;
@@ -34,9 +34,14 @@ export function validateNameRules(rules) {
   requireValue(Array.isArray(rules.servings) && rules.servings.length > 0 &&
     rules.servings.every(serving => ["hot", "cold"].includes(serving)) && new Set(rules.servings).size === rules.servings.length,
   "invalid_name_rules", "Booth servings must be unique hot/cold values.", 400);
-  requireValue(Array.isArray(rules.blockedTerms) &&
-    rules.blockedTerms.every(term => typeof term === "string" && term.trim().length > 0 && term === term.toLowerCase()),
-  "invalid_name_rules", "Blocked terms must be nonempty lowercase strings.", 400);
+  // One list, not two. A flat `blockedTerms` array used to be checked here with
+  // a plain substring test: no evasion resistance, no word mode, and not
+  // mentioned anywhere in the runbook's review procedure. Anything it could
+  // express is a strictly better `substring` entry in booth/blocked-terms.json.
+  // Reject the key rather than ignore it, so a reviewer cannot add terms to a
+  // file nothing reads and believe the booth is moderated.
+  requireValue(rules.blockedTerms === undefined, "invalid_name_rules",
+    "blockedTerms is retired. Put moderation terms in booth/blocked-terms.json.", 400);
   if (rules.blocklist !== undefined) validateBlocklist(rules.blocklist);
   return rules;
 }
@@ -69,11 +74,8 @@ export function validateCoffeeName(raw, rules) {
   // and the blend "Monachino" are all valid placements of the same token.
   const mascot = rules.mascots.find(token => lower.includes(token));
   if (!mascot) reject(`Include ${rules.mascots.join(", ")} somewhere in the name.`);
-  for (const term of rules.blockedTerms) {
-    if (lower.includes(term)) reject("That name is not available. Try another.");
-  }
-  // The structured list also catches spacing, doubling and digit-swap evasion,
-  // which a plain substring test on the raw name does not.
+  // Matching folds digit swaps, removes separators and collapses repeats, so
+  // spacing or leetspeak does not get a blocked term onto the published menu.
   if (findBlockedTerm(name, rules.blocklist)) reject("That name is not available. Try another.");
   const id = coffeeNameId(name);
   if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(id)) reject("That name cannot become a menu ID. Try another.");

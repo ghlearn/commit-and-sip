@@ -47,6 +47,8 @@ To make it event-ready, replace `entries`, set `review.placeholder` to `false`, 
 
 Choose the match mode deliberately. `substring` rejects every name containing the fragment anywhere, so reserve it for terms that are never part of an innocent word. `word` requires the term to consume whole words, so `grind` does not reject `Grinder`. Getting this wrong is the common failure: an over-broad `substring` entry silently rejects ordinary names at the counter, and attendees see only "That name is not available."
 
+This is the only moderation list. An earlier `blockedTerms` array in `booth/name-rules.json` was removed because it used a plain substring test with no evasion resistance and no word mode, and this procedure never mentioned it — so a reviewer could follow these steps exactly and leave a second list untouched. The key is now rejected at start-up rather than ignored. If a station fails to start citing `blockedTerms`, move those terms into `entries` here and delete the key.
+
 Do not add spaced, doubled, or leetspeak spellings of a term you already list. Matching folds digits to letters, removes spaces, hyphens, and apostrophes, and collapses repeated characters before comparing, and `word` mode also joins runs of consecutive tokens, so `b a d`, `b-a-d`, `baaad`, and `b4d` all reduce to the same entry. Extra variants add false positives without adding coverage.
 
 The blocklist is one layer. The name charset already rejects non-ASCII, so homoglyph and zero-width evasion cannot reach the list, and links, mentions, and repeated punctuation are rejected structurally. None of that substitutes for human moderation of what a list should contain, or for brand and trademark review of names and artwork.

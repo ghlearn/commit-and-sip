@@ -30,7 +30,7 @@ test("booth name rules load and validate", () => {
     { ...rules, artworkByMascot: { ...rules.artworkByMascot, mona: "unapproved-cup" } },
     { ...rules, prices: [] }, { ...rules, prices: [0] }, { ...rules, prices: [5.005] },
     { ...rules, servings: ["warm"] }, { ...rules, servings: ["hot", "hot"] },
-    { ...rules, blockedTerms: ["NotLowercase"] }, { ...rules, blockedTerms: [""] },
+    { ...rules, blockedTerms: ["retired"] }, { ...rules, blockedTerms: [] },
   ]) {
     assert.throws(() => validateNameRules(broken), { code: "invalid_name_rules", status: 400 });
   }
@@ -97,7 +97,12 @@ test("length limits and the staff blocklist are enforced after normalization", (
   assert.equal(validateCoffeeName(`Mona ${"a".repeat(35)}`, rules).name.length, 40);
   rejects("Mona blocked-example-term", /not available/);
   rejects("MONA BLOCKED-EXAMPLE-TERM", /not available/);
-  rejects("Ducky Brew", /not available/, { ...rules, blockedTerms: ["ducky brew"] });
+  // The retired flat list could not have caught this; the structured list folds
+  // the digit swap back to "brew" before comparing.
+  rejects("Ducky Br3w", /not available/, {
+    ...rules,
+    blocklist: { review: { placeholder: true }, entries: [{ term: "ducky brew", match: "substring" }] }
+  });
   for (const raw of [null, undefined, 42, {}, []]) {
     assert.throws(() => validateCoffeeName(raw, rules), { code: "invalid_name", status: 400 });
   }
