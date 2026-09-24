@@ -21,11 +21,19 @@ These are not preferences. Existing code will misbehave against a service that i
 
 A service that appends on each call will accumulate duplicates of one drink and inflate its own entry count. Treat `(handle, id)` as the natural key: re-publication updates in place and returns the current rank.
 
-### The receipt must echo the submission byte-for-byte
+### The receipt must echo `handle`, `name`, and `score` unchanged
 
-`validateReceipt` rejects any receipt whose `handle`, `name`, or `score` differs from what was sent, and the booth then displays no event rank at all.
+`validateReceipt` (`services/leaderboard.mjs:28`) compares exactly three fields against what was sent — `handle`, `name`, and `score` — and the booth displays no event rank at all when any of them differs.
 
-This is the likeliest way a working service still fails in front of an attendee: a backend that trims whitespace, title-cases the drink name, or coerces the score to a float is being helpful and will silently produce a blank rank line at every booth. **Store a normalized form if you want, but reply with exactly what arrived.** `rank` must be a positive integer, and `entries`, if present, must be at least `rank`.
+Be precise about what that does and does not require:
+
+- **`name` and `handle` are compared as strings**, so any rewriting breaks them. A backend that trims whitespace or title-cases the drink name is being helpful and will silently produce a blank rank line at every booth.
+- **`score` is compared as a JavaScript number**, so returning `2050.0` for `2050` is fine. Only a different value fails.
+- **`id` is not checked at all**, even though `submissionFor` sends it. A service that echoed a different entry's `id` alongside the right handle, name, and score would pass validation today.
+
+**Store a normalized form if you want, but reply with exactly what arrived.** `rank` must be a positive integer, and `entries`, if present, must be at least `rank`.
+
+That unchecked `id` is a gap in the client, not a licence for the service. Whoever builds the service should tighten `validateReceipt` to compare `id` in the same change, so the two sides land together rather than leaving the weaker check in place.
 
 ## Decisions needed
 
@@ -51,13 +59,17 @@ The payload deliberately carries no booth identity, so the service cannot tell w
 
 Writes must not be anonymous. An unauthenticated endpoint that accepts a handle and a score is a board anyone can fill.
 
+A key proves *which booth* is publishing, not that the booth is running unmodified code. That is why the service recomputes the score rather than trusting the submitted one — see [the API section](#the-service-must-recompute-the-score-not-trust-it).
+
 ### 3. Retraction
 
 The contract already requires this, and staff takedown is incomplete without it: today a drink can be pulled from a booth menu while the public board still shows it.
 
-**Recommendation: retract as a tombstone, mirroring the booth.** The entry stops being displayed and stops counting toward ranks, but `(handle, id)` stays reserved.
+**Recommendation: retract as a tombstone, mirroring the booth.** The entry stops being displayed and stops counting toward ranks, but the drink **`id` stays reserved globally** — not the `(handle, id)` pair.
 
-A hard delete is the wrong choice for a specific reason: the contract makes cross-booth uniqueness the service's job. If a retracted name is fully forgotten, a name removed at booth A can be re-submitted at booth B, and the service is the only component positioned to refuse it.
+The pair is the right key for *locating and authorizing* a publication, but it is the wrong key for a reservation. `id` is derived from the normalized name (`booth-menu.mjs:36`), and the booth reserves it by `id` alone (`booth-menu.mjs:42`). Reserving `(handle, id)` would let a different attendee at another booth submit the same name under a new handle and walk straight past the tombstone — which is precisely the case retraction exists to stop.
+
+A hard delete is wrong for the same reason: the contract makes cross-booth uniqueness the service's job. If a retracted name is fully forgotten, a name removed at booth A can be re-submitted at booth B, and the service is the only component positioned to refuse it.
 
 **Open:** whether a booth key may retract only its own entries, or any entry. Suggested split — booth keys retract what they published, a separate admin key retracts anything — but the failure case is real: staff at booth B may be the ones who notice something published at booth A.
 
@@ -83,13 +95,22 @@ It is scanned from a phone, in a queue, by someone who has just met it. Show han
 
 ```
 POST /api/entries          # authenticated; idempotent on (handle, id)
-  -> 200 { handle, name, score, rank, entries }   # echoed verbatim
+  -> 200 { handle, id, name, score, rank, entries }   # handle/name/score echoed verbatim
+  -> 422 score_mismatch                               # recomputed score disagrees
 
-POST /api/entries/retract  # authenticated; tombstones (handle, id)
+POST /api/entries/retract  # authenticated; tombstones the drink id globally
   -> 200 { retracted: true }
 
 GET  /                     # public board, the QR destination
 ```
+
+### The service must recompute the score, not trust it
+
+An API key authenticates *a booth*, not the booth's code. Booths run from copies of a template that anyone can edit, so a modified or compromised booth can submit any positive integer and manufacture the top rank. Accepting the submitted score makes the board only as trustworthy as the least-modified clone at the event.
+
+The contract already forecloses this: the score is "a pure function of the submitted name" and "a rank can be recomputed server-side from stored names" ([integration contract](integration-contract.md)). The service should recompute both `id` and `score` from `name` using the same rubric, and reject a mismatch rather than storing it.
+
+The cost is real and should be planned for: the service needs the rubric from `services/name-score.mjs`, and a rubric change in this repository becomes a version skew that rejects live submissions. Vendor the rubric with an explicit version, send that version on the submission, and decide the skew behaviour deliberately — it is the one place where a booth update can take an event down.
 
 `validateLeaderboardClient` currently requires only `publish(submission)`. It needs a matching retraction method before the client side of this is complete — that is a change to this repository, not to the service.
 
