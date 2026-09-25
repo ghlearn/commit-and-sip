@@ -172,6 +172,31 @@ test("the booth screen shares the light palette and carries the house cup on the
   assert.equal(handles.length, 2, "the handle needs an outline pass and a fill pass");
   assert.match(handles[0], /stroke="var\(--cup-line\)" stroke-width="24"/);
   assert.match(handles[1], /stroke="var\(--cup-white\)" stroke-width="14"/);
+
+  // The glyph belongs on the exposed white face. It used to sit high enough to
+  // tuck under the coffee, which reads as a smudge on the crema rather than as
+  // a mark on the cup, and deepening the cup would quietly put it back there.
+  const glyphPath = board[0].match(/<path d="(m188 [^"]*)" stroke="var\(--accent-ink\)"/);
+  assert.ok(glyphPath, "the cup lost its code glyph");
+  let [cx, cy] = [0, 0];
+  let [minX, maxX, minY, maxY] = [Infinity, -Infinity, Infinity, -Infinity];
+  // SVG packs coordinates ("180-10"), so tokenise numbers rather than pairs.
+  const numbers = glyphPath[1].match(/-?\d*\.?\d+/g).map(Number);
+  assert.equal(numbers.length % 2, 0, "glyph path has an odd number of coordinates");
+  for (let i = 0; i < numbers.length; i += 2) {
+    cx += numbers[i]; cy += numbers[i + 1];
+    minX = Math.min(minX, cx); maxX = Math.max(maxX, cx);
+    minY = Math.min(minY, cy); maxY = Math.max(maxY, cy);
+  }
+  const rim = board[0].match(/<ellipse cx="(\d+)" cy="(\d+)" rx="80" ry="(\d+)"/).slice(1).map(Number);
+  assert.equal((minX + maxX) / 2, rim[0], "the glyph is not centred on the cup");
+  assert.ok(minY > rim[1] + rim[2], "the glyph overlaps the coffee instead of sitting on the cup face");
+
+  // A shade arc used to run down the cup, which read as a green line rather
+  // than as shading. It is gone, and its token with it, so the glyph is the
+  // only mark on the white face.
+  assert.doesNotMatch(css, /--cup-shade\b/, "the cup shade token is back");
+  assert.doesNotMatch(board[0], /var\(--cup-shade\)/, "the cup shade arc is back");
 });
 
 test("bundled Mona Sans covers reading and display roles while retaining monospace and tabular results", async () => {
