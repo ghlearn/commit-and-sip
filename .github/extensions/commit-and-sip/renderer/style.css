@@ -20,8 +20,8 @@
  *
  * Green 3 (#5fed83) is the main colour, but it reaches only 1.51:1 on white,
  * below both the 4.5:1 floor for text and the 3:1 floor for controls. So it is
- * a fill, never ink: primary buttons are Green 3 under Gray 6 text (12.32:1)
- * and it is the chalk and the board frame. Where the accent has to be ink on
+ * a fill, never ink: primary buttons are Green 3 under Gray 6 text (12.32:1).
+ * Where the accent has to be ink on
  * white, --accent-ink uses Green 5, nudged 5% toward Green 6 because Green 5
  * as supplied reaches 4.66:1 on the page but only 4.24:1 on the surface. The
  * shift is 5 steps of green and imperceptible; it clears both (4.96 and 4.52).
@@ -32,6 +32,16 @@
  * and the surface (5.06:1 and 4.61:1). For borders, Gray 4 clears white by
  * 0.02 and fails the surface, ticket, and error panel, so --line takes a 15%
  * step toward Gray 5 and clears 3:1 on all four (3.34, 3.04, 3.34, 3.11).
+ *
+ * The menu board is light like the rest of the page: Green 1 panel, Gray 6 ink
+ * (16.32:1), Green 5 rules (4.09:1) and a Green 4 frame, which separates the
+ * panel from the page at 2.46:1 as a 9px band rather than as a hairline. The
+ * cup is drawn in Green 6 line work (14.39:1 on the board) because a white cup
+ * on a light board would otherwise have no edge at all.
+ *
+ * Two colours in the cup are deliberately not from this palette: the coffee
+ * browns, because no palette value reads as coffee, and the mascot, which
+ * carries its own approved brand colours and must not be recoloured.
  */
 :root {
   color-scheme: light;
@@ -49,14 +59,15 @@
   --error-surface: #fff4f5;
   --cafe-paper: #ffffff;
   --cafe-ink: #101411;
-  --cafe-chalk: #ffffff;
-  --cafe-board: #0a241b;
-  --board-muted: #5fed83;
-  --board-line: #8cf2a6;
-  --board-frame: #5fed83;
-  --board-highlight: #bfffd1;
+  --board: #bfffd1;
+  --board-ink: #101411;
+  --board-line: #08872b;
+  --board-frame: #0fbf3e;
   --cup-white: #ffffff;
-  --cup-shade: #8cf2a6;
+  --cup-line: #0a241b;
+  --cup-steam: #08872b;
+  --cup-shade: #0fbf3e;
+  --cup-shadow: #8cf2a6;
   --body-font: "Mona Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --utility-font: var(--font-mono, "SFMono-Regular", Consolas, "Liberation Mono", monospace);
   --label-font: var(--body-font);
@@ -94,7 +105,7 @@ dt { font: 12px/1.5 var(--label-font); text-transform: uppercase; letter-spacing
 dd { margin: 3px 0 0; font-weight: 600; overflow-wrap: anywhere; }
 button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 button.quiet { background: transparent; }
-.chalkboard { background: var(--cafe-board); color: var(--cafe-chalk); border: 9px solid var(--board-frame); outline: 1px solid var(--board-line); outline-offset: -5px; padding: 27px 24px 17px; box-shadow: inset 0 0 0 1px var(--board-line), 0 12px 20px #0a241b18; }
+.menu-board { background: var(--board); color: var(--board-ink); border: 9px solid var(--board-frame); outline: 1px solid var(--board-line); outline-offset: -5px; padding: 27px 24px 17px; box-shadow: inset 0 0 0 1px var(--board-line), 0 12px 20px #0a241b1f; }
 .board-heading { text-align: center; }
 .board-heading h2 { font-family: var(--display-font); font-weight: 500; font-style: italic; font-size: 43px; }
 .board-heading .eyebrow { font-size: 10px; }
@@ -119,14 +130,14 @@ button { transition: border-color 140ms ease, background-color 140ms ease; }
 }
 @media (max-width: 800px) {
   main { padding: 20px 24px 28px; }
-  .chalkboard { padding: 22px 17px 16px; border-width: 7px; }
+  .menu-board { padding: 22px 17px 16px; border-width: 7px; }
 }
 @media (max-width: 640px) {
   main { padding: 16px 18px 24px; }
   .cup-art { max-width: 270px; }
 }
 @media (forced-colors: active) {
-  .ticket, .chalkboard, .result, button.primary { border: 1px solid CanvasText; }
+  .ticket, .menu-board, .result, button.primary { border: 1px solid CanvasText; }
 }
 
 .launcher { max-width: 760px; }
@@ -138,8 +149,8 @@ button { transition: border-color 140ms ease, background-color 140ms ease; }
 .launcher p { overflow-wrap: anywhere; }
 /* The board used to sit in a column that supplied the gap. On the booth
    page it is a sibling in normal flow, so it carries its own spacing. */
-.launcher .chalkboard { margin: 30px 0; }
-.launcher .chalkboard + section { margin-top: 30px; }
+.launcher .menu-board { margin: 30px 0; }
+.launcher .menu-board + section { margin-top: 30px; }
 
 
 /* Scores and counts sit in a column of their own so they can line up. Mona

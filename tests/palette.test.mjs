@@ -26,7 +26,7 @@ test("green-and-white palette meets AA for text, secondary text, and action stat
     ["text", "page"], ["text", "surface"], ["muted", "page"], ["muted", "surface"],
     ["accent-ink", "page"], ["accent-ink", "surface"], ["cafe-ink", "cafe-paper"],
     ["on-accent", "accent"], ["on-accent", "accent-hover"],
-    ["cafe-chalk", "cafe-board"], ["board-muted", "cafe-board"], ["board-highlight", "cafe-board"],
+    ["board-ink", "board"], ["cup-line", "board"], ["cup-line", "cup-white"],
     ["error", "error-surface"]
   ]) {
     const ratio = contrast(foreground, background);
@@ -36,7 +36,8 @@ test("green-and-white palette meets AA for text, secondary text, and action stat
     assert.ok(contrast("focus", background) >= 3, `Focus on ${background} must reach 3:1`);
     assert.ok(contrast("line", background) >= 3, `Control borders on ${background} must reach 3:1`);
   }
-  assert.ok(contrast("board-line", "cafe-board") >= 3);
+  assert.ok(contrast("board-line", "board") >= 3);
+  assert.ok(contrast("cup-steam", "board") >= 3, "steam must read on the board");
   // The ring also lands on the primary button, which is the accent itself.
   assert.ok(contrast("focus", "accent") >= 3, "Focus on a primary button must reach 3:1");
 });
@@ -79,7 +80,7 @@ test("the cup carries the Mona mascot and the booth actually serves it", async t
   const page = await fetch(served.url);
   assert.match(page.headers.get("content-security-policy"), /(?:^|; )img-src [^;]*'self'/);
 
-  const board = boothHtml.match(/<section class="chalkboard"[\s\S]*?<\/section>/)[0];
+  const board = boothHtml.match(/<section class="menu-board"[\s\S]*?<\/section>/)[0];
   assert.match(board, /<image href="\/mona\.png"/, "the cup no longer carries the mascot");
   // The old heart and its brown detail strokes must be gone, not layered under.
   assert.doesNotMatch(board, /#C08A54" stroke-width="2"/, "the old froth heart is still drawn");
@@ -88,31 +89,58 @@ test("the cup carries the Mona mascot and the booth actually serves it", async t
   assert.match(boothHtml, /<desc id="cup-description">[^<]*Mona mascot[^<]*<\/desc>/);
 });
 
-// The latte-art reading depends entirely on the asset being a single-colour
-// cream silhouette. Dropping the full-colour mascot back in would still render
-// and still pass every other test, but it reads as a sticker in the coffee.
-test("the froth asset is a cream silhouette that reads against the coffee", async () => {
+// The mascot is approved brand art, so it may not be recoloured or flattened.
+// That costs legibility: its own mid-tone pinks reach only ~2.1:1 on the
+// coffee, so what makes it read is the cream froth pool drawn behind it, not
+// its own luminance. Guard the froth, and guard that the art is still the
+// approved colours with the sheet background keyed out.
+test("the froth asset is the approved brand mascot, framed by a pool that reads on the coffee", async () => {
   const { PNG } = await import("pngjs");
   const png = PNG.sync.read(await readFile(new URL("mona.png", renderer)));
   const hues = new Set();
   let opaque = 0;
+  let sheetBackground = 0;
   for (let i = 0; i < png.width * png.height; i++) {
-    if (png.data[i * 4 + 3] === 0) continue;
+    if (png.data[i * 4 + 3] < 250) continue;
     opaque++;
-    hues.add(`${png.data[i * 4]},${png.data[i * 4 + 1]},${png.data[i * 4 + 2]}`);
+    const [r, g, b] = [png.data[i * 4], png.data[i * 4 + 1], png.data[i * 4 + 2]];
+    hues.add(`${r},${g},${b}`);
+    if (Math.hypot(r - 0xf2, g - 0xf5, b - 0xf3) < 24) sheetBackground++;
   }
   assert.ok(opaque > 1000, "froth asset is effectively empty");
-  assert.equal(hues.size, 1, `froth must be one colour, found ${hues.size} (full-colour mascot?)`);
+  // A silhouette or a posterised recolour collapses this count.
+  assert.ok(hues.size > 500, `mascot must keep its brand shading, found ${hues.size} colours`);
+  const near = (target, tolerance) => [...hues].some(key => {
+    const [r, g, b] = key.split(",").map(Number);
+    return Math.hypot(r - target[0], g - target[1], b - target[2]) < tolerance;
+  });
+  assert.ok(near([0xff, 0x5c, 0x8a], 60), "the mascot's brand pink is missing");
+  assert.ok(near([0x7a, 0x4d, 0xe8], 70), "the mascot's brand purple is missing");
+  // The sheet it was cut from is Gray 1; any left behind is an unkeyed box.
+  assert.equal(png.data[3], 0, "top-left corner is opaque, so the cutout failed");
+  assert.equal(sheetBackground, 0, `${sheetBackground} pixels of sheet background survived the cutout`);
 
-  const [r, g, b] = [...hues][0].split(",").map(Number);
-  const cream = "#" + [r, g, b].map(v => v.toString(16).padStart(2, "0")).join("");
+  const lum = c => { const l = c.slice(1).match(/../g).map(x => { const v = parseInt(x, 16) / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return l[0] * 0.2126 + l[1] * 0.7152 + l[2] * 0.0722; };
+  const ratio = (a, b) => { const v = [lum(a), lum(b)].sort((x, z) => z - x); return (v[0] + 0.05) / (v[1] + 0.05); };
   const coffee = boothHtml.match(/rx="67"[^>]*fill="(#[0-9A-Fa-f]{6})"/)[1].toLowerCase();
-  const ratio = (() => {
-    const lum = c => { const l = c.slice(1).match(/../g).map(x => { const v = parseInt(x, 16) / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return l[0] * 0.2126 + l[1] * 0.7152 + l[2] * 0.0722; };
-    const v = [lum(cream), lum(coffee)].sort((a, z) => z - a);
-    return (v[0] + 0.05) / (v[1] + 0.05);
-  })();
-  assert.ok(ratio >= 3, `froth ${cream} on coffee ${coffee} is ${ratio.toFixed(2)}:1, too faint to read`);
+  const frothMatch = boothHtml.match(/<ellipse cx="200" cy="115" rx="(\d+)" ry="(\d+)" fill="(#[0-9A-Fa-f]{6})"\/>\s*\n\s*<image href="\/mona\.png"/);
+  assert.ok(frothMatch, "the mascot lost the froth pool that separates it from the coffee");
+  const [poolRx, poolRy] = frothMatch.slice(1, 3).map(Number);
+  const froth = frothMatch[3].toLowerCase();
+  const separation = ratio(froth, coffee);
+  assert.ok(separation >= 3, `froth ${froth} on coffee ${coffee} is ${separation.toFixed(2)}:1, too faint to frame the mascot`);
+
+  // The pool is only a frame if the mascot actually sits inside it.
+  const art = boothHtml.match(/<image href="\/mona\.png" x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/);
+  assert.ok(art, "mascot image needs explicit geometry to be checked against the pool");
+  const [x, y, w, h] = art.slice(1, 5).map(Number);
+  assert.ok(x >= 200 - poolRx && x + w <= 200 + poolRx, "mascot overflows the froth pool horizontally");
+  assert.ok(y >= 115 - poolRy && y + h <= 115 + poolRy, "mascot overflows the froth pool vertically");
+  // A pool that merely contains the mascot can still be a speck in the cup.
+  assert.ok(w * h > 0.55 * (2 * poolRx) * (2 * poolRy), "mascot is too small to read as latte art");
+  // Squashing approved brand art is a brand defect, not a layout choice.
+  assert.match(boothHtml, /href="\/mona\.png"[^>]*preserveAspectRatio="xMidYMid meet"/);
+  assert.ok(Math.abs(w / h - png.width / png.height) < 0.05, "mascot box distorts the approved artwork");
 });
 
 test("the booth screen shares the light palette and carries the house cup on the board", async () => {
@@ -125,14 +153,25 @@ test("the booth screen shares the light palette and carries the house cup on the
   assert.doesNotMatch(css, /var\(--(?:background-color-default|text-color-default|color-focus-outline)/);
   assert.match(css, /@media \(forced-colors: active\)/);
   assert.match(booth, /fill="var\(--cup-white\)"/);
-  assert.match(booth, /stroke="var\(--board-highlight\)"/);
   assert.doesNotMatch(booth, /cream cup|brass-colored saucer/);
-  // The cup is white on pale green. It is only legible against the dark
-  // board, so it must stay inside the chalkboard rather than on the page.
-  const board = booth.match(/<section class="chalkboard"[\s\S]*?<\/section>/);
-  assert.ok(board, "cup artwork needs a chalkboard section");
+  const board = booth.match(/<section class="menu-board"[\s\S]*?<\/section>/);
+  assert.ok(board, "cup artwork needs a menu-board section");
   assert.match(board[0], /class="cup-art"/);
-  assert.ok(contrast("cup-white", "cafe-board") >= 4.5);
+
+  // The board is light now, so the white cup has no edge of its own. It reads
+  // only because it is outlined; a stroke that reverts to --cup-white, as it
+  // was on the old dark board, would leave the cup invisible while every
+  // colour token above still passed.
+  assert.ok(contrast("cup-line", "board") >= 4.5);
+  assert.ok(contrast("cup-white", "board") < 3, "this guard assumes a cup too pale to read unaided");
+  const cupBody = board[0].match(/<path d="M120 115[^>]*>/)[0];
+  assert.match(cupBody, /fill="var\(--cup-white\)"/);
+  assert.match(cupBody, /stroke="var\(--cup-line\)"/, "the cup body lost its outline on the light board");
+  // Every white stroke must have a darker one behind it at greater width.
+  const handles = board[0].match(/<path d="M279 125[^>]*>/g) ?? [];
+  assert.equal(handles.length, 2, "the handle needs an outline pass and a fill pass");
+  assert.match(handles[0], /stroke="var\(--cup-line\)" stroke-width="24"/);
+  assert.match(handles[1], /stroke="var\(--cup-white\)" stroke-width="14"/);
 });
 
 test("bundled Mona Sans covers reading and display roles while retaining monospace and tabular results", async () => {
