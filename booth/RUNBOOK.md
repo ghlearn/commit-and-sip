@@ -17,7 +17,9 @@ Reload extensions after changing extension code or the step document.
 ## Before a session
 
 1. Use Node.js 22+ (`nvm use` reads the pinned `.nvmrc`) and a Copilot host supporting project canvas extensions.
-2. For development validation and QR tooling, run `npm ci`, `npm test`, and `npm run check`. The booth runtime needs no dependency install once its modules are present. The extension SDK is host-resolved; do not install it.
+2. Run `npm ci`, `npm test`, and `npm run check`. The extension SDK is host-resolved; do not install it.
+
+   The booth *runs* without `npm ci` — a fresh clone serves both canvases and the whole attendee flow. What it loses is the **QR code on the served screen**: `qrcode` is a development dependency, so without it `renderQrDataUrl` returns `null` and the panel falls back to the plain link. That fallback is deliberate rather than a broken image, but it is easy to miss, so the extension now logs a warning at start-up when a leaderboard is configured and the encoder is absent. Treat it like the blocklist warning: read the start-up log. Verified by running a booth from a fresh clone both ways.
 3. Keep the data directory writable by the booth operator and inaccessible to unrelated users. Default: `$COPILOT_HOME/extensions/commit-and-sip/artifacts/`, where `COPILOT_HOME` defaults to `~/.copilot`. To isolate a staff device, set `COMMIT_AND_SIP_DATA_DIR` to an approved absolute directory before launching the host. Do not point it into the repository.
 4. Reload extensions in the host. List loaded extensions, then inspect the project `commit-and-sip` entry and its log if it is failed. Reinspect after reload; file existence alone is not evidence the provider is running.
 5. **Read the start-up log.** A moderation warning means the blocklist is still an unreviewed placeholder. Treat it as a release blocker, not noise.
@@ -60,7 +62,7 @@ The blocklist is one layer. The name charset already rejects non-ASCII, so homog
 1. Open the canvas and confirm the counter is idle before the attendee sits down.
 2. Have them choose **Start my order**. The station mints their barista handle; write nothing down for them, the screen holds it.
 3. Let them pick a mascot and where it sits, then type a name. The mascot may appear anywhere in the name; that placement is their choice, not a rule.
-4. If the name is rejected, read the actual message. "That name is not available" means a duplicate or a blocklist hit, and staff should not speculate aloud about which.
+4. If the name is rejected, read the actual message and do not paraphrase it. A duplicate names itself — "Mona Meridian is already on the menu" — because that drink is already visible on the menu in front of them, so there is nothing to protect. The generic "That name is not available. Try another." means something else: a blocklist hit or a drink staff took down. Those two are worded identically on purpose, so never speculate aloud about which, and in particular never guess "someone already had that" — a duplicate would have said so itself.
 5. Read the score breakdown with them. It is a published rubric, not Copilot's opinion, and every component is explainable from the screen.
 6. Point out that "rank 1 of 1 at this booth" is this booth's menu only. Only a confirmed event line reflects the wider competition.
 7. Finish with **I'm done — hand over to the next barista**.
@@ -207,5 +209,13 @@ Keep staff-only daily observations of completion time, staff intervention, rejec
 - Consistent hand-over between attendees.
 
 Those are historical proposed targets, not results already achieved. Measurement tooling is unresolved. Do not invent evidence.
+
+### What has actually been measured
+
+The **system** is not the constraint. Twenty scripted runs on one booth machine, growing the menu from 3 to 23 drinks, put the whole engine path at a **76 ms median and 150 ms worst case** — counter load, minting a handle, scoring and serving, and hand-over combined. It does not slow down as the menu fills.
+
+The **reading burden** is measurable too: roughly 136 words on the counter screen, 177 on the naming screen, and 143 on the served screen. At normal adult silent reading rates that is somewhere under two to about three minutes across the whole flow, and the naming screen is the heaviest.
+
+Nothing here establishes the five-minute median, and it should not be quoted as if it does. The dominant term is an attendee inventing a name, which no scripted run can simulate — one person takes fifteen seconds and the next stares at the field for two minutes. Rejections add a whole further think, and collisions get *more* likely as the menu fills, so a median measured early in an event will understate the end of it. That needs timing real people, including at least one session late in a busy event.
 
 End of day: preserve approved backups, close panels, and stop intake. At the end of the whole event, follow [ending an event](#ending-an-event) and copy the archive off the machine. Event-data retention period, deletion schedule, responsible owner, and access policy still need approval; do not invent a duration or delete records while the event continues. Publish only approved anonymous outputs.
