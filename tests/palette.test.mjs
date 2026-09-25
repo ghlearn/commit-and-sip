@@ -72,3 +72,27 @@ test("bundled Mona Sans covers reading and display roles while retaining monospa
   assert.doesNotMatch(html, /fonts\.googleapis|fonts\.gstatic/);
   assert.match(html, /rel="preload" href="\/fonts\/MonaSansVF\.woff2" as="font" type="font\/woff2" crossorigin/);
 });
+
+// The previous tabular-nums assertion only proved the declaration was present
+// somewhere in the file. Its selectors (.order-specs, .result-details,
+// .menu-price) had been deleted by the naming-competition rewrite, so the rule
+// matched no rendered element and the test still passed. Tie the selectors to
+// the markup so an orphaned rule fails instead of passing quietly.
+test("every selector styling figures still matches an element the booth renders", async () => {
+  const markup = (await Promise.all(
+    ["booth.html", "admin.html"].map(name => readFile(new URL(name, renderer), "utf8")),
+  )).join("\n");
+
+  const rule = css.split("\n").find(line => line.includes("font-variant-numeric: tabular-nums"));
+  assert.ok(rule, "no rule sets tabular figures");
+
+  const selectors = rule.slice(0, rule.indexOf("{")).split(",").map(part => part.trim());
+  assert.ok(selectors.length > 0);
+  for (const selector of selectors) {
+    const token = selector.replace(/^[.#]/, "");
+    assert.ok(
+      markup.includes(`"${token}"`) || markup.includes(`${token} `) || markup.includes(`"${token} `),
+      `${selector} sets tabular figures but nothing in the booth markup uses it`,
+    );
+  }
+});
