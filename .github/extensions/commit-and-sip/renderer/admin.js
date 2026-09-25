@@ -45,15 +45,27 @@
     return item;
   }
 
+  function stat(list, label, value) {
+    const item = document.createElement("li");
+    const text = document.createElement("span");
+    text.textContent = label;
+    const figure = document.createElement("span");
+    figure.className = "total-value";
+    figure.textContent = value;
+    item.append(text, figure);
+    list.append(item);
+    return item;
+  }
+
   function totals(state) {
     const list = $("admin-totals");
     list.replaceChildren();
     const s = state.summary;
-    line(list, `Drinks invented: ${s.invented}`);
-    line(list, `Attendees started: ${s.attendees}`);
-    line(list, `Attendees finished: ${s.completed}`);
-    line(list, `Drinks removed: ${s.removals}`);
-    line(list, `House examples on the menu: ${s.examples}`);
+    stat(list, "Drinks invented", s.invented);
+    stat(list, "Attendees started", s.attendees);
+    stat(list, "Attendees finished", s.completed);
+    stat(list, "Drinks removed", s.removals);
+    stat(list, "House examples on the menu", s.examples);
 
     // Wiping under an attendee would delete the drink on the screen in front of
     // them, so say who is still mid-order rather than only failing later.

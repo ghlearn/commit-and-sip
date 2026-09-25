@@ -77,22 +77,45 @@ test("bundled Mona Sans covers reading and display roles while retaining monospa
 // somewhere in the file. Its selectors (.order-specs, .result-details,
 // .menu-price) had been deleted by the naming-competition rewrite, so the rule
 // matched no rendered element and the test still passed. Tie the selectors to
-// the markup so an orphaned rule fails instead of passing quietly.
+// the markup so an orphaned rule fails instead of passing quietly. The panels
+// build their rows in script, so the scripts count as rendered markup too.
 test("every selector styling figures still matches an element the booth renders", async () => {
   const markup = (await Promise.all(
-    ["booth.html", "admin.html"].map(name => readFile(new URL(name, renderer), "utf8")),
+    ["booth.html", "admin.html", "booth.js", "admin.js"].map(name => readFile(new URL(name, renderer), "utf8")),
   )).join("\n");
 
-  const rule = css.split("\n").find(line => line.includes("font-variant-numeric: tabular-nums"));
-  assert.ok(rule, "no rule sets tabular figures");
+  const rules = css.split("\n").filter(line => line.includes("font-variant-numeric: tabular-nums"));
+  assert.ok(rules.length > 0, "no rule sets tabular figures");
 
-  const selectors = rule.slice(0, rule.indexOf("{")).split(",").map(part => part.trim());
-  assert.ok(selectors.length > 0);
-  for (const selector of selectors) {
-    const token = selector.replace(/^[.#]/, "");
-    assert.ok(
-      markup.includes(`"${token}"`) || markup.includes(`${token} `) || markup.includes(`"${token} `),
-      `${selector} sets tabular figures but nothing in the booth markup uses it`,
-    );
+  for (const rule of rules) {
+    const selectors = rule.slice(0, rule.indexOf("{")).split(",").map(part => part.trim());
+    assert.ok(selectors.length > 0);
+    for (const selector of selectors) {
+      const token = selector.replace(/^[.#]/, "").split(/[\s:>]/)[0];
+      assert.match(
+        markup,
+        new RegExp(`["'\\s]${token}["'\\s]`),
+        `${selector} sets tabular figures but nothing the booth renders uses it`,
+      );
+    }
+  }
+});
+
+// Figures only line up if they are in a column of their own. Both panels build
+// that column in script, so pin the structure rather than only the CSS.
+test("scores and staff counts are rendered as their own column", async () => {
+  const booth = await readFile(new URL("booth.js", renderer), "utf8");
+  const admin = await readFile(new URL("admin.js", renderer), "utf8");
+
+  assert.match(booth, /className = "entry-score"/);
+  assert.match(admin, /className = "total-value"/);
+  // The score must be the last child, or it is not the rightmost column.
+  assert.match(booth, /item\.append\(rank, main, score\)/);
+  assert.match(admin, /item\.append\(text, figure\)/);
+
+  for (const [name, selector] of [["#leaderboard li", "#leaderboard li"], ["#admin-totals li", "#admin-totals li"]]) {
+    const rule = css.split("\n").find(line => line.startsWith(`${selector} {`));
+    assert.ok(rule, `${name} has no layout rule`);
+    assert.match(rule, /display: grid/, `${name} must lay its figures out in a grid column`);
   }
 });

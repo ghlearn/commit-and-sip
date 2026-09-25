@@ -132,10 +132,23 @@ button { transition: border-color 140ms ease, background-color 140ms ease; }
 .launcher .chalkboard + section { margin-top: 30px; }
 
 
-/* Consistent digit widths in the two places figures stack line after line.
-   This used to target .order-specs/.result-details/.menu-price, which the
-   naming-competition rewrite removed, so the rule had stopped applying to any
-   rendered number. It is kept off the score line and the rubric breakdown,
-   where variable-width labels mean digits never align anyway and tabular
-   figures would only introduce slashed zeros into running text. */
-#leaderboard, #admin-totals { font-variant-numeric: tabular-nums; }
+/* Scores and counts sit in a column of their own so they can line up. Mona
+   Sans figures are proportional by default, where a "1" is little over half
+   the width of a "0", so a column of scores reads ragged without tabular
+   figures. The earlier rule set them on .order-specs/.result-details/
+   .menu-price, all removed by the naming-competition rewrite, so it had
+   stopped applying to anything rendered.
+
+   Tabular figures are deliberately confined to these two columns. Elsewhere
+   the digits sit inside sentences, where proportional figures read better and
+   there is nothing to align against. */
+#leaderboard { list-style: none; padding: 0; margin: 0; }
+#leaderboard li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0 14px; align-items: baseline; padding: 9px 0; border-top: 1px solid var(--line); }
+#leaderboard li:first-child { border-top: 0; }
+.entry-rank { font-weight: 700; color: var(--muted); }
+.entry-main { min-width: 0; overflow-wrap: anywhere; }
+.entry-main small { display: block; color: var(--muted); }
+.entry-score { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+#admin-totals { list-style: none; padding: 0; margin: 0; }
+#admin-totals li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 16px; padding: 6px 0; }
+.total-value { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }

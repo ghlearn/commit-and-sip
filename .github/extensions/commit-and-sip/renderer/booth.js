@@ -75,7 +75,21 @@
     $("board-empty").hidden = state.leaderboard.length > 0;
     for (const row of state.leaderboard) {
       const item = document.createElement("li");
-      item.textContent = `#${row.rank} - ${row.name} - ${row.score} - ${row.handle}`;
+      const rank = document.createElement("span");
+      rank.className = "entry-rank";
+      rank.textContent = `#${row.rank}`;
+      const main = document.createElement("span");
+      main.className = "entry-main";
+      const name = document.createElement("strong");
+      name.textContent = row.name;
+      const handle = document.createElement("small");
+      handle.textContent = row.handle;
+      main.append(name, handle);
+      // Kept last so the scores form a column of their own to line up in.
+      const score = document.createElement("span");
+      score.className = "entry-score";
+      score.textContent = row.score;
+      item.append(rank, main, score);
       board.append(item);
     }
   }
