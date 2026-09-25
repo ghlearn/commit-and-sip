@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { startServer } from "../.github/extensions/commit-and-sip/server.mjs";
 
 const renderer = new URL("../.github/extensions/commit-and-sip/renderer/", import.meta.url);
 const css = await readFile(new URL("style.css", renderer), "utf8");
@@ -58,13 +59,25 @@ test("the main colour is never used as ink", () => {
 
 // The froth is the Mona mascot, supplied as a raster asset rather than drawn
 // by hand. It only reaches the page if the server is willing to serve it.
-test("the cup carries the Mona mascot and the booth can actually serve it", async () => {
-  const server = await readFile(new URL("../server.mjs", renderer), "utf8");
-  assert.match(server, /\["\/mona\.png", \["mona\.png", "image\/png"\]\]/,
-    "mona.png is referenced by the cup but not in the static allow-list");
-  const asset = await readFile(new URL("mona.png", renderer));
-  assert.ok(asset.length > 1024, "mona.png is missing or empty");
-  assert.equal(asset.subarray(1, 4).toString("latin1"), "PNG");
+test("the cup carries the Mona mascot and the booth actually serves it", async t => {
+  // Regex-matching the static allow-list would still pass if resolution, the
+  // status, or the content type broke, so drive the same loopback surface the
+  // canvas renderer uses.
+  const served = await startServer({ panel: { runId: "mona-test", get: async () => ({}), dispatch: async () => ({}) } });
+  t.after(() => served.close());
+  const origin = new URL(served.url).origin;
+
+  const response = await fetch(`${origin}/mona.png`);
+  assert.equal(response.status, 200, "the booth does not serve /mona.png");
+  assert.equal(response.headers.get("content-type"), "image/png");
+  const bytes = Buffer.from(await response.arrayBuffer());
+  assert.deepEqual(bytes, await readFile(new URL("mona.png", renderer)), "served bytes differ from the asset on disk");
+  assert.equal(bytes.subarray(1, 4).toString("latin1"), "PNG");
+
+  // A 200 is not enough: the page's own policy has to allow the image, or it
+  // is fetched and still never painted.
+  const page = await fetch(served.url);
+  assert.match(page.headers.get("content-security-policy"), /(?:^|; )img-src [^;]*'self'/);
 
   const board = boothHtml.match(/<section class="chalkboard"[\s\S]*?<\/section>/)[0];
   assert.match(board, /<image href="\/mona\.png"/, "the cup no longer carries the mascot");
