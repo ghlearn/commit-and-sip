@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 
 const renderer = new URL("../.github/extensions/commit-and-sip/renderer/", import.meta.url);
 const css = await readFile(new URL("style.css", renderer), "utf8");
+const boothHtml = await readFile(new URL("booth.html", renderer), "utf8");
+const adminHtml = await readFile(new URL("admin.html", renderer), "utf8");
 const colors = Object.fromEntries([...css.matchAll(/--([a-z-]+):\s*(#[a-f0-9]{6});/g)].map(([, name, value]) => [name, value]));
 function luminance(color) {
   assert.match(color, /^#[a-f0-9]{6}$/);
@@ -21,7 +23,7 @@ function contrast(foreground, background) {
 test("green-and-white palette meets AA for text, secondary text, and action states", () => {
   for (const [foreground, background] of [
     ["text", "page"], ["text", "surface"], ["muted", "page"], ["muted", "surface"],
-    ["accent", "page"], ["accent", "surface"], ["cafe-ink", "cafe-paper"],
+    ["accent-ink", "page"], ["accent-ink", "surface"], ["cafe-ink", "cafe-paper"],
     ["on-accent", "accent"], ["on-accent", "accent-hover"],
     ["cafe-chalk", "cafe-board"], ["board-muted", "cafe-board"], ["board-highlight", "cafe-board"],
     ["error", "error-surface"]
@@ -34,6 +36,70 @@ test("green-and-white palette meets AA for text, secondary text, and action stat
     assert.ok(contrast("line", background) >= 3, `Control borders on ${background} must reach 3:1`);
   }
   assert.ok(contrast("board-line", "cafe-board") >= 3);
+  // The ring also lands on the primary button, which is the accent itself.
+  assert.ok(contrast("focus", "accent") >= 3, "Focus on a primary button must reach 3:1");
+});
+
+// Green 3 is the main colour but only reaches 1.51:1 on white, so the whole
+// scheme rests on it being a fill and never ink. A single `color: var(--accent)`
+// would put unreadable text on the page while every ratio above still passed.
+test("the main colour is never used as ink", () => {
+  assert.ok(contrast("accent", "page") < 3, "this guard assumes an accent too light for text");
+  const offenders = css.split("\n").filter(line =>
+    // Negative lookbehind so border-color and outline-color do not count.
+    /(?<![-\w])color:\s*var\(--accent\)/.test(line));
+  assert.deepEqual(offenders, [], `--accent must be a fill, not ink:\n${offenders.join("\n")}`);
+
+  for (const [name, source] of [["booth.html", boothHtml], ["admin.html", adminHtml]]) {
+    assert.doesNotMatch(source, /stroke="var\(--accent\)"/, `${name} strokes artwork in the fill colour`);
+    assert.doesNotMatch(source, /(?<![-\w])color:\s*var\(--accent\)/, `${name} uses the fill colour as ink`);
+  }
+});
+
+// The froth is the Mona mascot, supplied as a raster asset rather than drawn
+// by hand. It only reaches the page if the server is willing to serve it.
+test("the cup carries the Mona mascot and the booth can actually serve it", async () => {
+  const server = await readFile(new URL("../server.mjs", renderer), "utf8");
+  assert.match(server, /\["\/mona\.png", \["mona\.png", "image\/png"\]\]/,
+    "mona.png is referenced by the cup but not in the static allow-list");
+  const asset = await readFile(new URL("mona.png", renderer));
+  assert.ok(asset.length > 1024, "mona.png is missing or empty");
+  assert.equal(asset.subarray(1, 4).toString("latin1"), "PNG");
+
+  const board = boothHtml.match(/<section class="chalkboard"[\s\S]*?<\/section>/)[0];
+  assert.match(board, /<image href="\/mona\.png"/, "the cup no longer carries the mascot");
+  // The old heart and its brown detail strokes must be gone, not layered under.
+  assert.doesNotMatch(board, /#C08A54" stroke-width="2"/, "the old froth heart is still drawn");
+  // The illustration is no longer wholly original, so it must not say it is.
+  assert.doesNotMatch(boothHtml, /Original café illustration/);
+  assert.match(boothHtml, /<desc id="cup-description">[^<]*Mona mascot[^<]*<\/desc>/);
+});
+
+// The latte-art reading depends entirely on the asset being a single-colour
+// cream silhouette. Dropping the full-colour mascot back in would still render
+// and still pass every other test, but it reads as a sticker in the coffee.
+test("the froth asset is a cream silhouette that reads against the coffee", async () => {
+  const { PNG } = await import("pngjs");
+  const png = PNG.sync.read(await readFile(new URL("mona.png", renderer)));
+  const hues = new Set();
+  let opaque = 0;
+  for (let i = 0; i < png.width * png.height; i++) {
+    if (png.data[i * 4 + 3] === 0) continue;
+    opaque++;
+    hues.add(`${png.data[i * 4]},${png.data[i * 4 + 1]},${png.data[i * 4 + 2]}`);
+  }
+  assert.ok(opaque > 1000, "froth asset is effectively empty");
+  assert.equal(hues.size, 1, `froth must be one colour, found ${hues.size} (full-colour mascot?)`);
+
+  const [r, g, b] = [...hues][0].split(",").map(Number);
+  const cream = "#" + [r, g, b].map(v => v.toString(16).padStart(2, "0")).join("");
+  const coffee = boothHtml.match(/rx="67"[^>]*fill="(#[0-9A-Fa-f]{6})"/)[1].toLowerCase();
+  const ratio = (() => {
+    const lum = c => { const l = c.slice(1).match(/../g).map(x => { const v = parseInt(x, 16) / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return l[0] * 0.2126 + l[1] * 0.7152 + l[2] * 0.0722; };
+    const v = [lum(cream), lum(coffee)].sort((a, z) => z - a);
+    return (v[0] + 0.05) / (v[1] + 0.05);
+  })();
+  assert.ok(ratio >= 3, `froth ${cream} on coffee ${coffee} is ${ratio.toFixed(2)}:1, too faint to read`);
 });
 
 test("the booth screen shares the light palette and carries the house cup on the board", async () => {
@@ -41,7 +107,7 @@ test("the booth screen shares the light palette and carries the house cup on the
   assert.match(booth, /name="color-scheme" content="light"/);
   assert.match(booth, /href="\/style\.css"/);
   assert.equal(colors.page, "#ffffff");
-  assert.equal(colors["on-accent"], "#ffffff");
+  assert.equal(colors["on-accent"], "#101411");
   assert.match(css, /color-scheme: light/);
   assert.doesNotMatch(css, /var\(--(?:background-color-default|text-color-default|color-focus-outline)/);
   assert.match(css, /@media \(forced-colors: active\)/);
