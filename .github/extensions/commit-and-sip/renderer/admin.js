@@ -57,6 +57,41 @@
     return item;
   }
 
+  // A house example has no score. The dash keeps the column from looking like
+  // missing data, and is hidden from assistive technology because "house
+  // example, not scored" already says it in the note, where it reads as a
+  // sentence rather than a stray punctuation mark.
+  function drink(list, entry) {
+    const item = document.createElement("li");
+    const main = document.createElement("span");
+    main.className = "entry-main";
+    const name = document.createElement("strong");
+    name.textContent = entry.name;
+    const note = document.createElement("small");
+    note.textContent = entry.example ? "house example, not scored" : `barista ${entry.handle}`;
+    main.append(name, note);
+    const score = document.createElement("span");
+    score.className = "entry-score";
+    if (entry.example) {
+      score.textContent = "\u2014";
+      score.setAttribute("aria-hidden", "true");
+    } else {
+      score.append(String(entry.score), unit(" points"));
+    }
+    item.append(main, score);
+    list.append(item);
+    return item;
+  }
+
+  // The column has no header, so sighted staff read "points" from context. Carry
+  // the word for screen readers rather than dropping it from the row text.
+  function unit(text) {
+    const span = document.createElement("span");
+    span.className = "visually-hidden";
+    span.textContent = text;
+    return span;
+  }
+
   function totals(state) {
     const list = $("admin-totals");
     list.replaceChildren();
@@ -129,9 +164,7 @@
     const invented = state.houseMenu.filter(entry => !entry.example);
     $("admin-menu-empty").hidden = invented.length > 0;
     for (const entry of state.houseMenu) {
-      line(list, entry.example
-        ? `${entry.name} - house example, not scored`
-        : `${entry.name} - ${entry.score} points, barista ${entry.handle}`);
+      drink(list, entry);
       if (entry.example) continue;
       const option = document.createElement("option");
       option.value = entry.id;

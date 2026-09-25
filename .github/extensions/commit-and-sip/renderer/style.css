@@ -152,3 +152,15 @@ button { transition: border-color 140ms ease, background-color 140ms ease; }
 #admin-totals { list-style: none; padding: 0; margin: 0; }
 #admin-totals li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 16px; padding: 6px 0; }
 .total-value { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+/* The staff house menu carries the same figures, without a rank to lead with. */
+#admin-menu li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 14px; align-items: baseline; }
+
+/* Carries a word that the column's layout implies but never states. */
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

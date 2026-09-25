@@ -112,10 +112,34 @@ test("scores and staff counts are rendered as their own column", async () => {
   // The score must be the last child, or it is not the rightmost column.
   assert.match(booth, /item\.append\(rank, main, score\)/);
   assert.match(admin, /item\.append\(text, figure\)/);
+  assert.match(admin, /item\.append\(main, score\)/);
 
-  for (const [name, selector] of [["#leaderboard li", "#leaderboard li"], ["#admin-totals li", "#admin-totals li"]]) {
+  for (const [name, selector] of [
+    ["#leaderboard li", "#leaderboard li"],
+    ["#admin-totals li", "#admin-totals li"],
+    ["#admin-menu li", "#admin-menu li"],
+  ]) {
     const rule = css.split("\n").find(line => line.startsWith(`${selector} {`));
     assert.ok(rule, `${name} has no layout rule`);
     assert.match(rule, /display: grid/, `${name} must lay its figures out in a grid column`);
   }
+});
+
+// Columnising the rows took the word "points" out of the staff menu text, where
+// it used to read "2050 points, barista ...". Nothing on screen replaces it, so
+// the column has to carry it for anyone who cannot see the layout.
+test("the score column still says what its figures are", async () => {
+  const booth = await readFile(new URL("booth.js", renderer), "utf8");
+  const admin = await readFile(new URL("admin.js", renderer), "utf8");
+
+  for (const [name, source] of [["booth.js", booth], ["admin.js", admin]]) {
+    assert.match(source, /"visually-hidden"/, `${name} does not label its score column`);
+    assert.match(source, /" points"/, `${name} does not name the unit of its scores`);
+  }
+
+  const rule = css.slice(css.indexOf(".visually-hidden"));
+  assert.ok(css.includes(".visually-hidden"), "no .visually-hidden rule to hide the label with");
+  // display:none and visibility:hidden would take it from screen readers too.
+  assert.doesNotMatch(rule.slice(0, rule.indexOf("}")), /display: none|visibility: hidden/);
+  assert.match(rule.slice(0, rule.indexOf("}")), /clip-path/);
 });

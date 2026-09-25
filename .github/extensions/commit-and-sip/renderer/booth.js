@@ -85,10 +85,14 @@
       const handle = document.createElement("small");
       handle.textContent = row.handle;
       main.append(name, handle);
-      // Kept last so the scores form a column of their own to line up in.
+      // Kept last so the scores form a column of their own to line up in. The
+      // column has no header, so the word is carried for screen readers.
       const score = document.createElement("span");
       score.className = "entry-score";
-      score.textContent = row.score;
+      const unit = document.createElement("span");
+      unit.className = "visually-hidden";
+      unit.textContent = " points";
+      score.append(String(row.score), unit);
       item.append(rank, main, score);
       board.append(item);
     }
