@@ -49,11 +49,21 @@ Draw from the sources above, but keep only terms that are unambiguous at a famil
 
 Three reasons, in order of weight.
 
-**The matcher already absorbs most of what list size would buy.** Digit folding, separator stripping, and repeat collapsing mean one entry covers `b4d`, `b a d`, `b-a-d`, and `baaad`. Long lists are mostly spelling variants of shorter ones, and those variants are exactly what we already handle.
+**The matcher already absorbs most of what list size would buy.** Digit folding, separator stripping, and repeat collapsing mean one entry covers `b4d`, `b a d`, `b-a-d`, and `baaad`. Long lists are mostly spelling variants of shorter ones, and those variants are exactly what we already handle. The same folding cuts the other way on short terms, so see "Check the list" below before writing one.
 
 **Takedown covers the tail, and the tail is the honest majority.** No list predicts what someone will type. `npm run remove` takes a name off the menu and standings within seconds and reserves it against retyping. Reaching for a longer list is reaching for the weaker of the two controls.
 
 **A reviewable list produces a truthful provenance record.** `blocklistStatus` gates on `reviewedBy` and `reviewedAt`. Those fields are only worth having if they describe something that happened.
+
+## Check the list
+
+Run `npm run blocklist`. It supplies no terms; it reports what your own list does.
+
+The string in the file is not the string that is compared. Folding rewrites `0 1 3 4 5 7 8` to `o i e a s t b` and leaves `2 6 9` alone, then repeated characters collapse. A doubled term therefore reduces to a single character: `88` and `bb` are both compared as `b`, and as a `substring` that refuses every name containing the letter b — including the house drink **Ducky Cold Brew**. Write short codes in `word` mode.
+
+The checker prints the compared form of every entry, flags single-character folds, two-character substrings, digit surprises, and duplicates, then sweeps a few hundred ordinary café names for false positives. It fails if the list would refuse one of the booth's own house drinks, which is wrong in a way that needs no judgement call to settle.
+
+A false positive is worse than the miss the entry was added to prevent: it happens to someone innocent, and it happens in front of the queue. The checker measures breadth only. Nothing in it can tell you whether the list covers what it should.
 
 ## What the reviewer records
 

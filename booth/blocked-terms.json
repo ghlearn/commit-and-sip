@@ -16,7 +16,8 @@
       "Category 6 of 6: anything specific to this event, venue, or sponsor that would embarrass the booth on a public menu.",
       "Choose the match mode per term, not per category. Use substring only where the fragment is never part of an innocent word; several slurs are not, and an over-broad substring entry silently refuses ordinary names at the counter. Use word for anything that appears inside ordinary words, so Classic Mona Cold Brew is not rejected by an entry for a shorter word inside it.",
       "Do not add spaced, doubled or leetspeak spellings of a term you already list. Matching folds digits to letters, removes spaces, hyphens and apostrophes, and collapses repeated characters, so those variants are already covered and only add false positives.",
-      "Numeric hate codes must be listed in their folded letter form, not as digits, because digit folding rewrites them before comparison.",
+      "Numeric hate codes are not compared as digits. Folding rewrites 0 1 3 4 5 7 8 to o i e a s t b, while 2, 6 and 9 survive unchanged, so a code may not reduce to the letters you expect.",
+      "Repeated characters then collapse, so a doubled code becomes a single character: 88 and bb are both compared as b. As a substring that refuses every name containing that letter, including the house drink Ducky Cold Brew. Write these in word mode, and run npm run blocklist to see what each entry is actually compared as before trusting it.",
       "Scope the list to the languages the event actually runs in, and re-review per event. One approval is not permanent.",
       "The test suite deliberately does not reference the terms in this file, so replacing them will not break it and you never need to put a moderation term in a test.",
       "A list is a prediction about what someone will type. Staff takedown (npm run remove, see booth/RUNBOOK.md) is what covers everything this file misses."

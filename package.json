@@ -10,7 +10,8 @@
     "precheck": "node scripts/require-node.mjs",
     "check": "node scripts/check-syntax.mjs",
     "qr": "node scripts/generate-qr.mjs",
-    "remove": "node scripts/remove-drink.mjs"
+    "remove": "node scripts/remove-drink.mjs",
+    "blocklist": "node scripts/check-blocklist.mjs"
   },
   "engines": { "node": ">=22" },
   "devDependencies": {
