@@ -70,9 +70,19 @@
         `${drink.example ? " - house example" : ""} - ${drink.serving}`));
       menu.append(item);
     }
+    // Both lists are windowed by the engine. Say so where it is trimmed rather
+    // than let the board imply the booth has served fewer people than it has.
+    const shown = state.houseMenu.filter(drink => !drink.example).length;
+    $("menu-note").textContent = shown < state.houseMenuTotal
+      ? `The ${shown} most recent of ${state.houseMenuTotal} drinks invented at this booth.`
+      : "Every drink invented at this booth.";
     const board = $("leaderboard");
     board.replaceChildren();
     $("board-empty").hidden = state.leaderboard.length > 0;
+    const note = $("board-note");
+    note.hidden = state.leaderboard.length >= state.leaderboardTotal;
+    note.textContent = note.hidden ? ""
+      : `Top ${state.leaderboard.length} of ${state.leaderboardTotal} scored drinks. Every drink is ranked against all of them.`;
     for (const row of state.leaderboard) {
       const item = document.createElement("li");
       const rank = document.createElement("span");
