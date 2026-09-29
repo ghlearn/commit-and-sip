@@ -51,7 +51,7 @@ So unapproved official mascot art is on the attendee screen today. That makes br
 
 ### `mona.png` provenance
 
-- **Supplied by:** the booth owner, from a brand asset sheet, during development. Added in commit `e957c44`.
+- **Supplied by:** the booth owner, from a brand asset sheet, during development. The path was added with a cream silhouette in commit `e957c44`; the current full-colour asset replaced it in commit `81ddf8e`.
 - **Upstream source and licence:** not recorded. Establish and record both before publication. A file being handed to us is not a licence to publish it on a public menu.
 - **Modifications:** cropped to the mascot, with the Gray 1 (`#f2f5f3`) sheet background keyed to transparency. No recolouring. `tests/palette.test.mjs` asserts the brand pink and purple survive, and rejects silhouetting, posterising, and aspect distortion.
 - **Approved by:** nobody. No decision has been recorded on placing Mona in a coffee cup.
