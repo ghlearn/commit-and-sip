@@ -39,4 +39,27 @@ Release checks: correct approved destination, sufficient resolution, high contra
 
 ## Branding
 
-The booth screen carries one illustration: an original cup drawn in the house palette, on the chalkboard above the menu. It depicts a generic cup and no mascot. Any further artwork must also be original work, not official mascot art. Drink names, product references, event copy, and artwork all still require brand and trademark review. Do not add unapproved Mona, Copilot, or Ducky artwork to fulfil the historical outline. Retain artwork provenance and record approval before event publication.
+The chalkboard above the menu carries one illustration: a cup drawn in the house palette, with the official Mona mascot sitting in the froth as latte art. The cup is original work for this booth. The mascot is not — it is official GitHub brand art, unaltered apart from cropping and background removal.
+
+So unapproved official mascot art is on the attendee screen today. That makes brand and trademark review a gate on publication rather than a formality, and it is the only outstanding release item where this repository already ships something review might require us to undo rather than merely withhold.
+
+| Served asset | Origin | Status |
+| --- | --- | --- |
+| Cup, saucer, steam, chalkboard — inline SVG in `renderer/booth.html` | Original work for this booth | No third-party rights involved. Event copy still needs review |
+| `renderer/mona.png` | Official Mona mascot, from a GitHub brand asset sheet | **Unapproved for this use** |
+| `renderer/fonts/MonaSansVF*.woff2` | Mona Sans upstream release | Licensed: SIL OFL 1.1, bundled as `fonts/OFL.txt` |
+
+### `mona.png` provenance
+
+- **Supplied by:** the booth owner, from a brand asset sheet, during development. The path was added with a cream silhouette in commit `e957c44`; the current full-colour asset replaced it in commit `81ddf8e`.
+- **Upstream source and licence:** not recorded. Establish and record both before publication. A file being handed to us is not a licence to publish it on a public menu.
+- **Modifications:** cropped to the mascot, with the Gray 1 (`#f2f5f3`) sheet background keyed to transparency. No recolouring. `tests/palette.test.mjs` asserts the brand pink and purple survive, and rejects silhouetting, posterising, and aspect distortion.
+- **Approved by:** nobody. No decision has been recorded on placing Mona in a coffee cup.
+
+Contrast this with the bundled font, which ships its upstream licence and has a test asserting the licence matches the unmodified release. The mascot has no equivalent record. Closing that is a human task, not a code one.
+
+### If review says no
+
+The froth reverts to a plain cream pour. Replace the mascot assertions in `tests/palette.test.mjs` rather than deleting them, so whatever takes its place still has to read against the coffee — those guards exist because mid-tone art on mid-tone coffee disappears.
+
+Any further artwork must be original work unless it is separately approved the same way. Drink names, product references, and event copy still require brand and trademark review.

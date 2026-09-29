@@ -27,7 +27,7 @@ It is **not** event-ready. Four things are missing and none of them is code:
 - **The moderation blocklist is an unreviewed placeholder.** `booth/blocked-terms.json` ships with no real terms, and the extension logs a warning on every start while that is true. A human must review and approve the list before attendee names go on a public menu. Staff can take a drink down after the fact with `npm run remove`, which is what makes an imperfect list survivable, but that is a response and not a substitute.
 - **No leaderboard service is deployed.** The client seam exists and is local-first, so a missing service never blocks an attendee, but nothing receives submissions.
 - **There is no public QR destination.** Do not publish a placeholder QR as a production link.
-- **Brand, trademark, and privacy review** of the mascot names and artwork has not happened.
+- **Brand, trademark, and privacy review** of the mascot names and artwork has not happened, and the attendee screen already carries the official Mona mascot in the cup. See [the asset checklist](.github/images/README.md) for its provenance and what happens if review says no.
 
 The earlier pull-request review flow, its live and canvas-pilot modes, and its provisioning scripts have been removed. No code path in this repository reads or writes GitHub.
 

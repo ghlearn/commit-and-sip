@@ -317,3 +317,38 @@ test("the hand-over button stays on screen on a short booth panel", async () => 
     "the hand-over button is not pinned, so a short panel can hide it");
   assert.match(rule, /bottom:/, "a sticky button with no bottom offset does not pin");
 });
+
+// The mascot shipped with a code guard but no matching correction to the prose,
+// and two documents went on saying the cup carried no mascot and that official
+// mascot art must not be added. Both read as "nothing here needs approval"
+// while unapproved brand art was on screen. Tie the branding checklist to the
+// assets actually served so that cannot drift again.
+test("the branding checklist accounts for every image the booth serves", async () => {
+  const serverSource = await readFile(new URL("../.github/extensions/commit-and-sip/server.mjs", import.meta.url), "utf8");
+  const checklist = await readFile(new URL("../.github/images/README.md", import.meta.url), "utf8");
+
+  const images = [...serverSource.matchAll(/\["\/([\w./-]+\.(?:png|jpg|jpeg|webp|gif|svg))"/g)].map(match => match[1]);
+  assert.ok(images.includes("mona.png"), "expected the mascot in the shared asset list; this guard is reading the wrong thing");
+  for (const asset of images) {
+    assert.ok(checklist.includes(asset),
+      `${asset} is served to attendees but is not named in .github/images/README.md`);
+  }
+});
+
+// Approval is the thing a reader most needs to be told the truth about, and the
+// cheapest error to make is describing the outstanding decision as settled.
+test("the branding checklist does not claim the mascot is approved or absent", async () => {
+  const checklist = await readFile(new URL("../.github/images/README.md", import.meta.url), "utf8");
+  const contract = await readFile(new URL("../docs/integration-contract.md", import.meta.url), "utf8");
+
+  for (const [name, text] of [["the asset checklist", checklist], ["the integration contract", contract]]) {
+    assert.doesNotMatch(text, /(?:depicts|carries|shows|showing)[^.]{0,60}no mascot/i,
+      `${name} still says the cup carries no mascot`);
+    assert.doesNotMatch(text, /mascot[^.]{0,80}\bis approved\b/i, `${name} claims the mascot is approved`);
+  }
+  // State the gap, do not merely avoid denying it.
+  assert.match(checklist, /\*\*Unapproved for this use\*\*/,
+    "the checklist no longer records that the mascot is unapproved");
+  assert.match(checklist, /Approved by:\*\* nobody/i,
+    "the checklist no longer records that nobody has approved the mascot");
+});
