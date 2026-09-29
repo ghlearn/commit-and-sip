@@ -135,6 +135,11 @@ button { transition: border-color 140ms ease, background-color 140ms ease; }
   main { padding: 16px 18px 24px; }
   .cup-art { max-width: 270px; }
 }
+/* A booth panel is often short. The hand-over button is the last step of the
+   flow, so if it falls below the fold the next attendee inherits a served
+   screen. Pin it to the bottom of the viewport while the served block
+   overflows; once it is scrolled to, it settles back into normal flow. */
+#view-served > button.primary { position: sticky; bottom: 14px; }
 @media (forced-colors: active) {
   .ticket, .menu-board, .result, button.primary { border: 1px solid CanvasText; }
 }

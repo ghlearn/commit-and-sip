@@ -286,3 +286,34 @@ test("the score column still says what its figures are", async () => {
   assert.doesNotMatch(rule.slice(0, rule.indexOf("}")), /display: none|visibility: hidden/);
   assert.match(rule.slice(0, rule.indexOf("}")), /clip-path/);
 });
+
+// A timed dry run found the QR rendering at its full 320px because the .qr rule
+// was never applied to it, which pushed the hand-over button 119px below the
+// fold on an 1100x800 panel. Styling an element the stylesheet already sizes is
+// easy to drop again, so pin both halves: the class and the rule that sizes it.
+test("the QR is displayed at the size the stylesheet sets for it", async () => {
+  const booth = await readFile(new URL("booth.js", renderer), "utf8");
+
+  assert.match(booth, /image\.className = "qr"/,
+    "the QR image is built without the class that sizes it");
+
+  const rule = css.split("\n").find(line => line.startsWith(".qr {"));
+  assert.ok(rule, "no .qr rule to size the code with");
+  const width = /width: (\d+)px/.exec(rule);
+  assert.ok(width, ".qr does not set a width");
+  // The encoder emits 320px. Displaying it at that size does not fit a short
+  // booth panel; anything near it would put the hand-over button back off it.
+  assert.ok(Number(width[1]) <= 200,
+    `.qr displays the code at ${width[1]}px, which does not leave room for the hand-over button`);
+});
+
+// The hand-over button is the last step of the attendee flow. If it is off the
+// bottom of a short booth panel the attendee can walk away without it, and the
+// next person steps up to somebody else's served screen.
+test("the hand-over button stays on screen on a short booth panel", async () => {
+  const rule = css.split("\n").find(line => line.startsWith("#view-served > button.primary {"));
+  assert.ok(rule, "the hand-over button has no rule keeping it on a short panel");
+  assert.match(rule, /position: sticky/,
+    "the hand-over button is not pinned, so a short panel can hide it");
+  assert.match(rule, /bottom:/, "a sticky button with no bottom offset does not pin");
+});

@@ -147,6 +147,10 @@
     if (state.qrDataUrl) {
       const image = document.createElement("img");
       image.src = state.qrDataUrl;
+      // Intrinsic size of the encoded image; `.qr` scales it down for display.
+      // Without that class the code renders at its full 320px and pushes the
+      // hand-over button off a short booth panel.
+      image.className = "qr";
       image.width = 320;
       image.height = 320;
       image.alt = `QR code linking to the leaderboard place for ${state.handle}`;
