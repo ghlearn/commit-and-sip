@@ -301,3 +301,65 @@ test("the staff takedown command refuses to act on a half-given instruction", as
     assert.throws(() => parseArguments(argv), /needs a value|Usage|Unknown option/);
   }
 });
+
+// A booth day appends one drink per attendee. These cover the windowing that
+// keeps the attendee screen readable, and the three things it must not break:
+// each attendee's true rank, the staff view, and seeing your own drink.
+async function serveMany(engine, count) {
+  const names = [];
+  for (let index = 0; index < count; index += 1) {
+    const runId = `booth-many-${index}`;
+    await engine.open({ runId });
+    const name = `Mona Brew ${index + 1}`;
+    await engine.dispatch(runId, "submit_name", { name });
+    await engine.dispatch(runId, "complete", {});
+    names.push(name);
+  }
+  return names;
+}
+
+test("the attendee menu and leaderboard stay readable on a long booth day", async t => {
+  const { engine } = await booth(t);
+  await serveMany(engine, 20);
+  const house = await engine.house();
+
+  const invented = house.houseMenu.filter(entry => !entry.example);
+  assert.equal(invented.length, 12, "the menu window holds, it does not grow with every attendee");
+  assert.equal(house.houseMenuTotal, 20, "but the screen can still say how many were really invented");
+  assert.equal(house.leaderboard.length, 10, "and the leaderboard is a top ten, not all of them");
+  assert.equal(house.leaderboardTotal, 20);
+  assert.ok(house.houseMenu.some(entry => entry.example), "the worked examples are never windowed out");
+});
+
+test("an attendee outside the shown top ten is still ranked against everyone", async t => {
+  const { engine } = await booth(t);
+  await serveMany(engine, 20);
+  const state = await engine.open({ runId: "booth-many-19" });
+
+  assert.equal(state.standing.entries, 20,
+    "standing counts the whole booth, not the ten rows the board happens to show");
+  assert.ok(state.standing.rank >= 1 && state.standing.rank <= 20);
+  assert.equal(state.leaderboard.length, 10, "even though the board beside it is windowed");
+});
+
+test("booth staff still see every drink they may need to take down", async t => {
+  const { engine } = await booth(t);
+  const names = await serveMany(engine, 20);
+  const overview = await engine.adminOverview();
+
+  const invented = overview.houseMenu.filter(entry => !entry.example);
+  assert.equal(invented.length, 20, "a windowed attendee screen must not hide a drink from moderation");
+  assert.equal(overview.leaderboard.length, 20);
+  assert.ok(names.every(name => invented.some(entry => entry.name === name)));
+});
+
+test("an attendee can see the drink they just invented on the house menu", async t => {
+  const { engine } = await booth(t);
+  await serveMany(engine, 20);
+  await engine.open({ runId: "booth-last" });
+  const served = await engine.dispatch("booth-last", "submit_name", { name: "Ducky Nightcap" });
+
+  const invented = served.houseMenu.filter(entry => !entry.example);
+  assert.equal(invented[0].name, "Ducky Nightcap",
+    "the newest drink leads the menu, so the person who just named it sees it without scrolling");
+});

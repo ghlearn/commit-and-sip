@@ -15,35 +15,58 @@
 
 /* Keep the cafe green and white even when the surrounding host uses a dark theme. */
 /*
- * Greens are sampled from the GitHub brand illustration, not picked by eye.
- * The one adjustment is the accent: the illustration's signature green
- * (#028e29) only reaches 4.28:1 on white, under the 4.5:1 floor for body text,
- * so the accent is that same hue darkened until it clears AA. Decorative
- * surfaces keep the brighter values, which carry no text.
+ * The GitHub primary palette, used as supplied except where a value cannot
+ * carry what it is asked to carry.
+ *
+ * Green 3 (#5fed83) is the main colour, but it reaches only 1.51:1 on white,
+ * below both the 4.5:1 floor for text and the 3:1 floor for controls. So it is
+ * a fill, never ink: primary buttons are Green 3 under Gray 6 text (12.32:1).
+ * Where the accent has to be ink on
+ * white, --accent-ink uses Green 5, nudged 5% toward Green 6 because Green 5
+ * as supplied reaches 4.66:1 on the page but only 4.24:1 on the surface. The
+ * shift is 5 steps of green and imperceptible; it clears both (4.96 and 4.52).
+ *
+ * --muted and --line are the two derived values. No supplied grey works for
+ * either. For text, Gray 4 is 3.02:1 on white and Gray 5 reads as body copy,
+ * so --muted is the lightest step on that ramp clearing 4.5:1 on both the page
+ * and the surface (5.06:1 and 4.61:1). For borders, Gray 4 clears white by
+ * 0.02 and fails the surface, ticket, and error panel, so --line takes a 15%
+ * step toward Gray 5 and clears 3:1 on all four (3.34, 3.04, 3.34, 3.11).
+ *
+ * The menu board is light like the rest of the page: Green 1 panel, Gray 6 ink
+ * (16.32:1), Green 5 rules (4.09:1) and a Green 4 frame, which separates the
+ * panel from the page at 2.46:1 as a 9px band rather than as a hairline. The
+ * cup is drawn in Green 6 line work (14.39:1 on the board) because a white cup
+ * on a light board would otherwise have no edge at all.
+ *
+ * Two colours in the cup are deliberately not from this palette: the coffee
+ * browns, because no palette value reads as coffee, and the mascot, which
+ * carries its own approved brand colours and must not be recoloured.
  */
 :root {
   color-scheme: light;
   --page: #ffffff;
-  --surface: #f0fafc;
-  --text: #172f23;
-  --muted: #466452;
-  --line: #6e8978;
-  --accent: #027221;
-  --accent-hover: #015417;
-  --on-accent: #ffffff;
-  --focus: #027221;
+  --surface: #f2f5f3;
+  --text: #101411;
+  --muted: #6a706c;
+  --line: #888e8a;
+  --accent: #5fed83;
+  --accent-hover: #0fbf3e;
+  --accent-ink: #08822a;
+  --on-accent: #101411;
+  --focus: #08822a;
   --error: #a12635;
   --error-surface: #fff4f5;
   --cafe-paper: #ffffff;
-  --cafe-ink: #172f23;
-  --cafe-chalk: #ffffff;
-  --cafe-board: #143d2a;
-  --board-muted: #beffd0;
-  --board-line: #8bb89e;
-  --board-frame: #027221;
-  --board-highlight: #beffd0;
+  --cafe-ink: #101411;
+  --board: #bfffd1;
+  --board-ink: #101411;
+  --board-line: #08872b;
+  --board-frame: #0fbf3e;
   --cup-white: #ffffff;
-  --cup-shade: #b5fdca;
+  --cup-line: #0a241b;
+  --cup-steam: #08872b;
+  --cup-shadow: #8cf2a6;
   --body-font: "Mona Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --utility-font: var(--font-mono, "SFMono-Regular", Consolas, "Liberation Mono", monospace);
   --label-font: var(--body-font);
@@ -74,14 +97,14 @@ small { font: 12px/1.6 var(--utility-font); overflow-wrap: anywhere; }
 .muted { color: var(--muted); }
 .eyebrow { font: 600 12px/1.5 var(--label-font); text-transform: uppercase; letter-spacing: .14em; margin-bottom: 12px; }
 main { max-width: 1220px; margin: auto; padding: 22px 44px 30px; }
-.ticket { color: var(--cafe-ink); background: var(--cafe-paper); border: 1px solid var(--line); box-shadow: 0 14px 24px #143d2a12; position: relative; }
+.ticket { color: var(--cafe-ink); background: var(--cafe-paper); border: 1px solid var(--line); box-shadow: 0 14px 24px #0a241b12; position: relative; }
 .ticket::before { content: ""; position: absolute; height: 9px; top: -8px; left: 0; right: 0; background: linear-gradient(135deg, transparent 50%, var(--cafe-paper) 50%) 0 0 / 12px 9px repeat-x, linear-gradient(225deg, transparent 50%, var(--cafe-paper) 50%) 0 0 / 12px 9px repeat-x; }
 .ticket h2 { font-family: var(--display-font); font-weight: 500; font-size: clamp(29px, 3.7vw, 42px); margin-bottom: 13px; }
 dt { font: 12px/1.5 var(--label-font); text-transform: uppercase; letter-spacing: .06em; }
 dd { margin: 3px 0 0; font-weight: 600; overflow-wrap: anywhere; }
 button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 button.quiet { background: transparent; }
-.chalkboard { background: var(--cafe-board); color: var(--cafe-chalk); border: 9px solid var(--board-frame); outline: 1px solid var(--board-line); outline-offset: -5px; padding: 27px 24px 17px; box-shadow: inset 0 0 0 1px var(--board-line), 0 12px 20px #143d2a18; }
+.menu-board { background: var(--board); color: var(--board-ink); border: 9px solid var(--board-frame); outline: 1px solid var(--board-line); outline-offset: -5px; padding: 27px 24px 17px; box-shadow: inset 0 0 0 1px var(--board-line), 0 12px 20px #0a241b1f; }
 .board-heading { text-align: center; }
 .board-heading h2 { font-family: var(--display-font); font-weight: 500; font-style: italic; font-size: 43px; }
 .board-heading .eyebrow { font-size: 10px; }
@@ -89,9 +112,6 @@ button.quiet { background: transparent; }
 .cup-art { width: min(100%, 310px); height: auto; display: block; margin: 2px auto -3px; }
 .menu { list-style: none; padding: 0; margin: 0; }
 .menu li { padding: 16px 0; border-top: 1px solid var(--board-line); }
-.menu-heading { display: flex; justify-content: space-between; gap: 14px; align-items: baseline; }
-.menu h3 { font: 500 23px/1.3 var(--display-font); }
-.menu p { font-size: 14px; color: var(--board-muted); margin-top: 7px; }
 figure { margin: 18px 0; }
 figcaption { font-size: 11px; color: var(--muted); margin-top: 9px; }
 summary { cursor: pointer; min-height: 44px; padding: 10px 0; font-size: 14px; font-weight: 600; }
@@ -101,7 +121,7 @@ details p { max-width: 70ch; font-size: 15px; margin: 10px 0; }
 .notice p { max-width: 70ch; margin: 9px 0; font-size: 15px; }
 .notice ul { margin-bottom: 0; padding-left: 20px; overflow-wrap: anywhere; }
 .error-notice { background: var(--error-surface); color: var(--error); border-color: var(--error); }
-.result { background: var(--surface); margin-top: 30px; padding: 26px; border: 1px solid var(--line); border-top: 4px solid var(--accent); }
+.result { background: var(--surface); margin-top: 30px; padding: 26px; border: 1px solid var(--line); border-top: 4px solid var(--accent-ink); }
 .result > p { margin-top: 12px; font-size: 14px; }
 .qr { display: block; width: 148px; height: 148px; margin-top: 20px; background: white; padding: 8px; }
 @media (prefers-reduced-motion: no-preference) {
@@ -109,18 +129,23 @@ button { transition: border-color 140ms ease, background-color 140ms ease; }
 }
 @media (max-width: 800px) {
   main { padding: 20px 24px 28px; }
-  .chalkboard { padding: 22px 17px 16px; border-width: 7px; }
+  .menu-board { padding: 22px 17px 16px; border-width: 7px; }
 }
 @media (max-width: 640px) {
   main { padding: 16px 18px 24px; }
   .cup-art { max-width: 270px; }
 }
+/* A booth panel is often short. The hand-over button is the last step of the
+   flow, so if it falls below the fold the next attendee inherits a served
+   screen. Pin it to the bottom of the viewport while the served block
+   overflows; once it is scrolled to, it settles back into normal flow. */
+#view-served > button.primary { position: sticky; bottom: 14px; }
 @media (forced-colors: active) {
-  .ticket, .chalkboard, .result, button.primary { border: 1px solid CanvasText; }
+  .ticket, .menu-board, .result, button.primary { border: 1px solid CanvasText; }
 }
 
 .launcher { max-width: 760px; }
-.launcher h1 { color: var(--accent); font-size: clamp(36px, 6vw, 58px); }
+.launcher h1 { color: var(--accent-ink); font-size: clamp(36px, 6vw, 58px); }
 .launcher fieldset { border: 1px solid var(--line); margin: 22px 0; padding: 20px; min-width: 0; }
 .launcher label { display: block; margin: 16px 0 6px; }
 .launcher input, .launcher select { width: 100%; min-width: 0; min-height: 46px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--page); color: var(--text); font: inherit; }
@@ -128,8 +153,8 @@ button { transition: border-color 140ms ease, background-color 140ms ease; }
 .launcher p { overflow-wrap: anywhere; }
 /* The board used to sit in a column that supplied the gap. On the booth
    page it is a sibling in normal flow, so it carries its own spacing. */
-.launcher .chalkboard { margin: 30px 0; }
-.launcher .chalkboard + section { margin-top: 30px; }
+.launcher .menu-board { margin: 30px 0; }
+.launcher .menu-board + section { margin-top: 30px; }
 
 
 /* Scores and counts sit in a column of their own so they can line up. Mona
@@ -152,8 +177,10 @@ button { transition: border-color 140ms ease, background-color 140ms ease; }
 #admin-totals { list-style: none; padding: 0; margin: 0; }
 #admin-totals li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 16px; padding: 6px 0; }
 .total-value { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
-/* The staff house menu carries the same figures, without a rank to lead with. */
-#admin-menu li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 14px; align-items: baseline; }
+/* The staff house menu carries the same figures, without a rank to lead with.
+   Its separator is overridden because .menu li borders in the chalk green,
+   which is a 1.37:1 ghost on this panel's white page. */
+#admin-menu li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 14px; align-items: baseline; border-top-color: var(--line); }
 
 /* Carries a word that the column's layout implies but never states. */
 .visually-hidden {

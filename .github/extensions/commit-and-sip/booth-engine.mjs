@@ -17,6 +17,11 @@ import { blocklistStatus } from "./services/moderation.mjs";
 // than threading a second shape through the reviewed live engine.
 const PHASES = ["naming", "served", "complete"];
 
+// How much of the house menu and leaderboard the attendee screen shows at
+// once. See houseView for why these are bounded and what is unaffected.
+const MENU_WINDOW = 12;
+const BOARD_WINDOW = 10;
+
 export class BoothEngine {
   constructor({ store, catalog, rules, leaderboardUrl = null, leaderboardClient = null }) {
     // Reuse the reviewed leaderboard rule rather than inventing a second,
@@ -172,12 +177,26 @@ export class BoothEngine {
 
   // The counter view: what is on the menu and who is winning. It needs no run,
   // so the booth screen is never blank between attendees.
+  //
+  // Both lists are windowed. A booth day appends one drink per attendee, and
+  // measured across 159 of them the uncapped board grew 122px and 14 words
+  // each time, reaching 18 screens of scrolling. Nobody reads that, and the
+  // drinks worth seeing are the newest and the best. Staff still get the whole
+  // list from adminOverview, and an attendee's own placing comes from
+  // `standing`, which is ranked against the full menu rather than this window.
   houseView(data) {
     const menu = this.houseMenu(data);
+    const invented = menu.filter(entry => !entry.example);
+    const board = leaderboard(menu);
     return {
-      houseMenu: menu.map(({ artwork, example, id, name, price, serving }) =>
-        ({ artwork, example, id, name, price, serving })),
-      leaderboard: leaderboard(menu),
+      // Newest first: the attendee most likely reading this just added the
+      // drink at the top.
+      houseMenu: [...menu.filter(entry => entry.example), ...invented.slice(-MENU_WINDOW).reverse()]
+        .map(({ artwork, example, id, name, price, serving }) =>
+          ({ artwork, example, id, name, price, serving })),
+      houseMenuTotal: invented.length,
+      leaderboard: board.slice(0, BOARD_WINDOW),
+      leaderboardTotal: board.length,
       leaderboardUrl: this.leaderboardUrl,
       mascots: this.rules.mascots,
       placements: PLACEMENTS,
