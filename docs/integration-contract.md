@@ -104,7 +104,7 @@ The moderation blocklist needs reviewed content. The mechanism is built, the gap
 
 No leaderboard service is deployed. The client seam exists, is local-first, and defaults to null, so its absence cannot fail an attendee; but nothing receives submissions and no public destination exists. Do not present a placeholder QR as a production link. Any service built against this seam must also accept retractions, or staff takedown will stop at the booth boundary.
 
-Brand and trademark review of the mascot names and artwork has not happened. The cup illustration is original work carried over from the retired review page; it depicts a generic cup and no mascot, so nothing about it is approved or unapproved yet.
+Brand and trademark review of the mascot names and artwork has not happened. The cup illustration is original work carried over from the retired review page, but the froth now carries the official Mona mascot (`renderer/mona.png`), so unapproved official brand art is on the attendee screen today. Unlike the other three gaps, this one is not something the repository merely withholds: it ships, and a negative review would require removing it. Provenance, modifications, and the outstanding decision are recorded in [the asset checklist](../.github/images/README.md).
 
 Making the repository a public template is a visibility change requiring its own review.
 
