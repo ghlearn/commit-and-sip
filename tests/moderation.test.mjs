@@ -4,6 +4,11 @@ import {
   blocklistStatus, canonicalizeForMatch, findBlockedTerm, loadBlocklist, matchTokens, validateBlocklist
 } from "../.github/extensions/commit-and-sip/services/moderation.mjs";
 import { loadNameRules, validateCoffeeName } from "../.github/extensions/commit-and-sip/services/coffee-name.mjs";
+import { readFileSync } from "node:fs";
+import { inspectEntries, falsePositives } from "../scripts/check-blocklist.mjs";
+
+const shippedNotes = () => JSON.parse(
+  readFileSync(new URL("../booth/blocked-terms.json", import.meta.url), "utf8")).review.notes;
 
 const list = validateBlocklist({
   review: { placeholder: false, reviewedBy: "booth-lead", reviewedAt: "2026-01-01" },
@@ -102,4 +107,38 @@ test("the shipped blocklist is valid, wired to names, and honest about its own r
 test("an absent blocklist is not treated as a match", () => {
   assert.equal(findBlockedTerm("Mona Moonrise", undefined), null);
   assert.equal(findBlockedTerm("Mona Moonrise", { entries: [] }), null);
+});
+
+// The review aid behind `npm run blocklist`. These use shaped placeholders, not
+// moderation terms, for the same reason as the suite above.
+test("the checker rejects an entry that folds to a single character", () => {
+  // Repeat collapsing makes any doubled term one character, so "bb" as a
+  // substring refuses every name containing the letter b. The guidance in
+  // blocked-terms.json once recommended exactly this spelling for numeric
+  // codes, so the rule protects against that advice coming back.
+  const findings = inspectEntries([{ term: "bb", match: "substring" }]);
+  assert.ok(findings.some(finding => finding.level === "error"),
+    "a substring entry folding to one character must be an error");
+  assert.equal(canonicalizeForMatch("88"), canonicalizeForMatch("bb"),
+    "writing a numeric code in letters must not be treated as a fix");
+});
+
+test("the checker fails a list that would refuse a house drink", () => {
+  const houseNames = JSON.parse(
+    readFileSync(new URL("../booth/orders.json", import.meta.url), "utf8")).map(order => order.name);
+  const bad = { entries: [{ term: "bb", match: "substring" }], review: { placeholder: true } };
+  const hits = falsePositives(houseNames, bad, houseNames);
+  assert.ok(hits.some(hit => hit.house), "refusing a seeded drink must be caught");
+  assert.equal(falsePositives(houseNames, list, houseNames).length, 0,
+    "a sensibly scoped list must leave the house drinks alone");
+});
+
+test("the shipped guidance warns about repeat collapsing", () => {
+  const notes = shippedNotes().join(" ");
+  // Tied to the claim, not to a keyword: "collapse" also appears in an
+  // unrelated note, so matching it alone would pass without the warning.
+  assert.ok(/doubled[^.]{0,40}single character/i.test(notes),
+    "the notes must warn that a doubled code is compared as one character");
+  assert.ok(!/must be listed in their folded letter form/i.test(notes),
+    "the notes must not recommend the letter spelling as if it were safe");
 });
