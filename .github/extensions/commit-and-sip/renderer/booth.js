@@ -5,6 +5,9 @@
   const VIEWS = ["idle", "naming", "served"];
   let busy = false;
   let phase = null;
+  // The drink is published in the background, so the served screen keeps
+  // checking until the event leaderboard has answered.
+  let confirming = false;
   let populated = false;
 
   function fail(message) {
@@ -179,6 +182,7 @@
 
   function render(state) {
     phase = state.phase === "complete" ? "served" : state.phase;
+    confirming = state.phase === "served" && state.sync?.state === "pending" && !state.removed;
     for (const view of VIEWS) $(`view-${view}`).hidden = view !== phase;
     fillMenu(state);
     if (phase === "naming") fillNaming(state);
@@ -264,6 +268,6 @@
   window.setInterval(() => {
     // Keep the menu and leaderboard current between attendees without
     // interrupting anyone mid-typing.
-    if (!document.hidden && phase === "idle") void load(false);
+    if (!document.hidden && (phase === "idle" || confirming)) void load(false);
   }, 5000);
 })();

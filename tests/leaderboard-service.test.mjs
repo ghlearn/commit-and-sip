@@ -1728,8 +1728,9 @@ test("the booth screen's refresh retries a publication that failed", async t => 
   const panel = new BoothPanel(engine, { renderQr: async () => null });
   panel.lastSweep = Date.now();                     // keep the background sweep out of this test
   await panel.dispatch("begin", {});
-  const served = await panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" });
-  assert.equal(served.sync.state, "failed");
+  await panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" });
+  await panel.backgroundPublish;
+  assert.equal((await panel.get()).sync.state, "failed");
   online = true;
   const refreshed = await panel.dispatch("refresh", {});
   assert.equal(refreshed.sync.state, "confirmed", "refresh on the real panel reaches the retry");
@@ -1745,6 +1746,7 @@ test("a failed publication is still retried after the attendee has handed over",
   panel.lastSweep = Date.now();
   await panel.dispatch("begin", {});
   await panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" });
+  await panel.backgroundPublish;
   const runId = panel.runId;
   await panel.dispatch("complete", {});
   assert.equal((await store.read()).runs[runId].sync.state, "failed");
@@ -1861,4 +1863,76 @@ test("the dashboard flags an interrupted removal, and never a drink that was not
   const renderer = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/admin.js", import.meta.url), "utf8");
   assert.match(renderer, /return PUBLIC_BOARD\[published\] \?\? PUBLIC_BOARD\.unrecorded;/, "a missing outcome is shown as unresolved");
   assert.match(renderer, /if \(!owed\) return "";/, "and a drink that was never public raises no alarm");
+});
+
+
+// --- Review round 15 ---------------------------------------------------------
+
+test("serving a drink never waits on the leaderboard service", async t => {
+  const { BoothPanel } = await import("../.github/extensions/commit-and-sip/booth-panel.mjs");
+  const stalled = gate();
+  let sends = 0;
+  const client = { async publish(sent) { sends += 1; await stalled.opened; return { ...sent, entries: 1, rank: 1 }; } };
+  const { engine } = await engineWith(t, client);
+  // Count publish requests and the attempts actually started, and know when
+  // the sweep has made its request.
+  let requests = 0;
+  let attempts = 0;
+  const secondRequest = gate();
+  const publish = engine.publish.bind(engine);
+  engine.publish = (...args) => { requests += 1; if (requests === 2) secondRequest.open(); return publish(...args); };
+  const publishOnce = engine.publishOnce.bind(engine);
+  engine.publishOnce = (...args) => { attempts += 1; return publishOnce(...args); };
+  const panel = new BoothPanel(engine, { renderQr: async () => null });
+  panel.lastSweep = 0;                                   // let the poll's sweep run too
+  await panel.dispatch("begin", {});
+  const served = await panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" });
+  assert.equal(served.phase, "served", "the attendee's answer came back while the service is still silent");
+  assert.equal(served.sync.state, "pending");
+  const polled = await panel.get();                      // the screen's poll, which also starts a sweep
+  assert.equal(polled.sync.state, "pending");
+  const sweep = engine.publicationSweep;
+  assert.ok(sweep, "the poll started a sweep");
+  await secondRequest.opened;                             // the sweep has asked to publish this run
+  assert.equal(attempts, 1, "the sweep joined the publish already in flight rather than starting another");
+  assert.equal(sends, 1, "so the drink was sent once");
+  stalled.open();
+  await Promise.all([sweep, panel.backgroundPublish]);
+  assert.equal((await panel.get()).sync.state, "confirmed");
+});
+
+test("the attendee's link is personal from the first screen, before any send", async t => {
+  const stalled = gate();
+  const client = { async publish(sent) { await stalled.opened; return { ...sent, entries: 1, rank: 1 }; } };
+  const directory = await tempDirectory(t);
+  const store = new RunStore(directory);
+  const engine = new BoothEngine({ catalog, rules, store, leaderboardClient: client, leaderboardUrl: "https://sip.example.com/board" });
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const token = (await store.read()).runs["booth-1"].sync.token;
+  assert.match(token, /^[0-9a-f]{32}$/, "minted and saved with the served drink");
+  assert.equal(new URL(served.attendeeUrl).searchParams.get("ref"), publicRef(tokenHashOf(token)));
+  stalled.open();
+});
+
+test("the served screen keeps polling while its drink is being confirmed", async () => {
+  const script = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/booth.js", import.meta.url), "utf8");
+  assert.match(script, /confirming = state\.phase === "served" && state\.sync\?\.state === "pending"/);
+  assert.match(script, /phase === "idle" \|\| confirming\)\) void load\(false\)/);
+});
+
+test("the template accepts exactly the event IDs the service can start with", async t => {
+  const main = await readFile(new URL("../infra/main.bicep", import.meta.url), "utf8");
+  const allowed = /var eventIdAllowed = '([^']+)'/.exec(main)[1];
+  assert.match(main, /fail\('eventId may contain only/);
+  assert.match(main, /eventId: checkedEventId/, "the checked value is what reaches the app");
+  const directory = await tempDirectory(t);
+  for (let code = 32; code < 127; code += 1) {
+    const character = String.fromCharCode(code);
+    let starts = true;
+    try { await FileStore.open({ directory, event: `a${character}` }); } catch { starts = false; }
+    assert.equal(allowed.includes(character), starts, `template and service disagree about ${JSON.stringify(character)}`);
+  }
+  const committed = JSON.parse(await readFile(new URL("../infra/main.parameters.json", import.meta.url), "utf8")).parameters.eventId.value;
+  assert.match(committed, /^[a-z0-9-]{1,63}$/);
 });

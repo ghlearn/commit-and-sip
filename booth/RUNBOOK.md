@@ -200,6 +200,8 @@ Read ranks carefully when helping an attendee. "Rank 1 of 1 at this booth" is th
 
 ## Leaderboard service operations
 
+> ⚠️ **Redeploy before first use.** The live service runs a build from before this branch's review fixes, and it refuses the current booth client: the client sends a publication token and retracts through `POST /api/retractions`. Run the code-deploy steps below from an identity with Contributor before configuring any booth.
+
 The service lives in `leaderboard-service/`, and its design and decisions are in [docs/leaderboard-service.md](../docs/leaderboard-service.md). It runs at <https://commit-and-sip-leaderboard.azurewebsites.net> as one App Service B1 instance in subscription **GitHub - NonProd - skills**, region `westus2`, resource group `rg-commit-and-sip-lb-westus2`. Every submission is re-checked there with this repository's own rubric and blocklist, so **redeploy the service whenever `booth/blocked-terms.json` or the rubric changes**. Otherwise booths and service disagree and submissions fail with `score_mismatch`.
 
 Deploy it from a staff machine with Contributor on the subscription. The Azure CLI's default subscription on a shared machine may be a different one, so every command names the subscription explicitly.

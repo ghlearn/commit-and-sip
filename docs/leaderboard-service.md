@@ -2,6 +2,8 @@
 
 **Status: deployed at <https://commit-and-sip-leaderboard.azurewebsites.net> and verified end to end with a staff test entry (2026-09-30). No attendee-facing QR code points at it, and none may until the blocklist is reviewed.**
 
+> ⚠️ **The live service predates most of this document.** It runs the build verified on 2026-09-30, from before the review fixes (commit e7259b9 and later): atomic admission, canonical handles, publication tokens, the cross-instance lease, fail-closed reservation keys, and `POST /api/retractions`. Those could not be deployed, because the deployer's access dropped to Reader. **The current booth client does not work against the live build:** it sends a `token` and retracts through `POST /api/retractions`, which that build refuses. So **redeploy before configuring any booth** with `leaderboardApi`: `npm run leaderboard:package`, then the `az webapp deploy … --async true` command in the runbook, from an identity with Contributor.
+
 This document began as a proposal. It now records what was built, the decisions taken, and where the build departs from the proposal and why. The booth-side contract is still `services/leaderboard.mjs`. The service is constrained by it, not the other way round.
 
 ## What the booth guarantees

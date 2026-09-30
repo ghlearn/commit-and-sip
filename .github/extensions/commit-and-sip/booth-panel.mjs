@@ -93,10 +93,12 @@ export class BoothPanel {
     requireValue(this.runId, "not_started", "Start an order at this station first.", 409);
     const state = await this.engine.dispatch(this.runId, action, input);
     // Serving commits locally first; publishing to the event leaderboard is a
-    // separate step that must not be able to fail the attendee's submission.
+    // separate step that must not be able to fail or slow the attendee's
+    // submission. It runs in the background: the screen answers at once with
+    // the drink "still being confirmed", and polls until the service answers.
     if (action === "submit_name") {
-      await this.engine.publish(this.runId).catch(() => {});
-      return this.decorate(await this.engine.get(this.runId));
+      this.backgroundPublish = this.engine.publish(this.runId).catch(() => {});
+      return this.decorate(state);
     }
     // Completing hands the station to the next attendee. The run itself stays
     // finished in the store; only this panel's cursor is released.

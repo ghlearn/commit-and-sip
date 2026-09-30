@@ -19,7 +19,7 @@ param resourceGroupName string = 'rg-commit-and-sip-lb-westus2'
 @maxLength(60)
 param appName string
 
-@description('Board partition. Change it to start a fresh board for a new event; the old one stays on disk.')
+@description('Board partition: 1-63 lowercase letters, digits or hyphens. Change it to start a fresh board for a new event; the old one stays on disk.')
 @minLength(1)
 @maxLength(63)
 param eventId string = 'default'
@@ -36,6 +36,15 @@ param boothKey string
 @minLength(32)
 @description('Retracts entries. Supplied from booth/local-config.json at deploy time; never committed.')
 param staffKey string
+
+// The service refuses to start with any other character in EVENT_ID, because
+// the ID names the board's file (FileStore.open). Checked here too, so a bad
+// ID fails the deployment instead of producing an app that crashes on start.
+var eventIdAllowed = 'abcdefghijklmnopqrstuvwxyz0123456789-'
+var eventIdInvalid = filter(map(range(0, length(eventId)), i => substring(eventId, i, 1)), c => !contains(eventIdAllowed, c))
+var checkedEventId = empty(eventIdInvalid)
+  ? eventId
+  : fail('eventId may contain only lowercase letters, digits and hyphens, because it names the board file.')
 
 var tags = {
   owner: owner
@@ -57,7 +66,7 @@ module app 'modules/app.bicep' = {
   params: {
     location: location
     appName: appName
-    eventId: eventId
+    eventId: checkedEventId
     tags: tags
     boothKey: boothKey
     staffKey: staffKey

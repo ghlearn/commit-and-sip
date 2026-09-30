@@ -440,7 +440,20 @@ export class BoothEngine {
   // Publishing happens after the local commit and outside the store lock, so a
   // slow or unreachable service never holds up the booth or the next attendee.
   // The entry is already durable; only the receipt is still missing.
-  async publish(runId, { again = false } = {}) {
+  // One ordinary publish per run at a time: the background publish after
+  // serving and a retry sweep started by the screen's poll would otherwise
+  // both send it. A forced resend (`again`) is never merged, because a
+  // rebuild must report its own attempt.
+  publish(runId, options = {}) {
+    if (options.again) return this.publishOnce(runId, options);
+    this.publishing ??= new Map();
+    if (!this.publishing.has(runId)) {
+      this.publishing.set(runId, this.publishOnce(runId, options).finally(() => this.publishing.delete(runId)));
+    }
+    return this.publishing.get(runId);
+  }
+
+  async publishOnce(runId, { again = false } = {}) {
     if (!this.leaderboardClient) return;
     const data = await this.store.read();
     const run = data.runs[runId];
@@ -534,6 +547,9 @@ export class BoothEngine {
       };
       run.phase = "served";
       run.sync = initialSync(Boolean(this.leaderboardClient));
+      // Minted with the served drink, in the same transaction, so the QR link
+      // is personal from the first screen and every later send reuses it.
+      if (this.leaderboardClient) run.sync.token = newPublicationToken();
       run.events.push({ type: "served", at: entry.createdAt });
       run.statusMessage = `${entry.name} is on the menu and scored ${entry.score} out of 5000.`;
       return this.present(run, data);
