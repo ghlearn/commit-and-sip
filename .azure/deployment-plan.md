@@ -256,7 +256,7 @@ The tenant-root **MFA enforcement for resource write actions** cannot be evaluat
 
 **Lesson recorded:** the provisioning check in §6 confirmed quota and SKU listing. Neither detects physical capacity, which only the deployment itself revealed.
 
-**Left behind:** two **empty** resource groups in westus3 (`rg-commit-and-sip-leaderboard`, `rg-commit-and-sip-lb-westus3`). They contain nothing and cost nothing, and are kept until the user approves deleting them.
+**Cleaned up:** the two empty resource groups the failed westus3 attempts left behind (`rg-commit-and-sip-leaderboard`, `rg-commit-and-sip-lb-westus3`) were deleted on 2026-09-30 at the user's request, after confirming each held 0 resources and 0 locks. The live group was untouched.
 
 ### Functional verification (live)
 
