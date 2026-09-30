@@ -99,6 +99,27 @@ export class MemoryStore {
 
 const EVENT = /^[a-z0-9-]{1,63}$/;
 const STORED_ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
+const STORED_HANDLE = /^[a-z]+-[a-z]+-[a-z]+(?:-[0-9a-f]{8})?$/;
+const TOKEN_HASH = /^[0-9a-f]{64}$/;
+
+// What is wrong with a stored row, or null. Every field the board serves or
+// compares must be present and of its type, or a corrupted row would load,
+// pass /healthz, and break every reader of /api/board. `tokenHash` is the one
+// optional field: rows written before publication tokens have none, and are
+// only ever matched by it when it is there.
+function storedEntryProblem(entry) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return "an entry that is not an object";
+  if (typeof entry.id !== "string" || !STORED_ID.test(entry.id)) return "an entry without a valid ID";
+  const where = `entry ${entry.id}`;
+  if (typeof entry.handle !== "string" || !STORED_HANDLE.test(entry.handle)) return `${where} has no valid handle`;
+  if (typeof entry.name !== "string" || !entry.name.trim() || entry.name.length > 80) return `${where} has no valid name`;
+  if (!Number.isSafeInteger(entry.score) || entry.score < 0) return `${where} has no valid score`;
+  if (typeof entry.createdAt !== "string" || Number.isNaN(Date.parse(entry.createdAt))) return `${where} has no valid createdAt`;
+  if (entry.tokenHash !== undefined && (typeof entry.tokenHash !== "string" || !TOKEN_HASH.test(entry.tokenHash))) {
+    return `${where} has a malformed tokenHash`;
+  }
+  return null;
+}
 // Longest pause between two looks at a malformed lease that still counts as
 // watching it continuously. Waiters poll every 20-50ms.
 const MALFORMED_WATCH_GAP_MS = 250;
@@ -181,7 +202,8 @@ export class FileStore extends MemoryStore {
     // "successfully" as one, and the next write would drop the other for good.
     const entries = new Map();
     for (const entry of saved.entries) {
-      if (typeof entry?.id !== "string" || !STORED_ID.test(entry.id)) throw unreadable("an entry without a valid ID");
+      const problem = storedEntryProblem(entry);
+      if (problem) throw unreadable(problem);
       if (entries.has(entry.id)) throw unreadable(`two entries with ID ${entry.id}`);
       entries.set(entry.id, entry);
     }

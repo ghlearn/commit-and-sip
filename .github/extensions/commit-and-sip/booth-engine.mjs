@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { DomainError, requireValue, exactInput, validRunId, generateHandle } from "./domain.mjs";
 import { PLACEMENTS } from "./services/coffee-name.mjs";
 import { validateLeaderboardUrl } from "./services/public-url.mjs";
@@ -26,6 +27,12 @@ const BOARD_WINDOW = 10;
 // Takedown outcomes that need no retry: removed from the public board, or it
 // was never there. Anything else is still owed a retraction.
 const SETTLED = ["retracted", "absent"];
+// How long a claimed send blocks an event wipe. Far longer than a request can
+// take (the client times out in seconds), so a live send is always seen, and
+// short enough that a claim left by a crash stops blocking on its own.
+const SEND_CLAIM_MS = 60_000;
+const liveClaims = (sync, at = Date.now()) =>
+  Object.values(sync?.sending ?? {}).filter(since => at - Date.parse(since) < SEND_CLAIM_MS).length;
 
 // Whether a removed drink may be on the public board: its run published, or
 // may have (a failed publish can land with its response lost). A drink served
@@ -314,8 +321,10 @@ export class BoothEngine {
     await this.drainPublications();
     await this.retryRetractions().catch(() => {});
     return this.store.transaction(async data => {
-      // ...and refuse if a publish started in the meantime.
-      requireValue(!this.inFlight?.size, "publications_in_flight",
+      // ...and refuse if a publish started in the meantime, here or in another
+      // process. Its claim is in this ledger, under this lock.
+      const claimed = Object.values(data.runs).some(run => liveClaims(run.sync));
+      requireValue(!this.inFlight?.size && !claimed, "publications_in_flight",
         "A drink is still being sent to the public leaderboard. Try again in a few seconds. Nothing was changed.", 409);
       // ...and refuse to wipe while any is still owed.
       const owed = this.removalLog(data).filter(record => !SETTLED.includes(record.published) && mayBePublic(data, record));
@@ -487,17 +496,24 @@ export class BoothEngine {
     if (!run?.sync || run.removed || run.sync.state === "rejected") return;
     const entry = this.houseMenu(data).find(item => !item.example && item.runId === runId);
     if (!entry) return;
-    // Minted and saved before the first send, never after: a token that
-    // changed between a lost response and its retry would make this booth's
-    // own entry look like somebody else's.
-    let token = run.sync.token;
-    if (!token) {
-      token = await this.store.transaction(stored => {
-        const current = stored.runs[runId];
-        current.sync.token ??= newPublicationToken();
-        return current.sync.token;
-      });
-    }
+    // Every send is claimed under the ledger lock first, and an event wipe
+    // checks the claims under the same lock, so the two are ordered even across
+    // processes (the republish command runs its own engine): either the wipe
+    // sees this send coming and refuses, or this send finds the run gone and
+    // never leaves. The token is minted in the same step, before the first
+    // send and never after: a token that changed between a lost response and
+    // its retry would make this booth's own entry look like somebody else's.
+    const attempt = randomUUID();
+    const token = await this.store.transaction(stored => {
+      const current = Object.hasOwn(stored.runs, runId) ? stored.runs[runId] : null;
+      if (!current?.sync || current.removed || current.sync.state === "rejected") return null;
+      current.sync.token ??= newPublicationToken();
+      const now = Date.now();
+      const live = Object.entries(current.sync.sending ?? {}).filter(([, since]) => now - Date.parse(since) < SEND_CLAIM_MS);
+      current.sync.sending = { ...Object.fromEntries(live), [attempt]: new Date(now).toISOString() };
+      return current.sync.token;
+    });
+    if (!token) return;
     const submission = submissionFor(entry, token);
     let outcome;
     try {
@@ -513,6 +529,9 @@ export class BoothEngine {
       const settled = ["confirmed", "rejected"].includes(current.sync.state);
       if (outcome.ok) current.sync = confirmedSync(current.sync, outcome.receipt);
       else if (!settled) current.sync = failedSync(current.sync, outcome.error);
+      const { [attempt]: _done, ...others } = current.sync.sending ?? {};
+      if (Object.keys(others).length) current.sync.sending = others;
+      else delete current.sync.sending;
       return Boolean(current.removed);
     });
     // Staff can take a drink down while its publish is still in flight. The

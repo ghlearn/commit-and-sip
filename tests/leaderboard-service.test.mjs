@@ -1882,7 +1882,8 @@ test("serving a drink never waits on the leaderboard service", async t => {
   const { BoothPanel } = await import("../.github/extensions/commit-and-sip/booth-panel.mjs");
   const stalled = gate();
   let sends = 0;
-  const client = { async publish(sent) { sends += 1; await stalled.opened; return { ...sent, entries: 1, rank: 1 }; } };
+  const onWire = gate();
+  const client = { async publish(sent) { sends += 1; onWire.open(); await stalled.opened; return { ...sent, entries: 1, rank: 1 }; } };
   const { engine } = await engineWith(t, client);
   // Count publish requests and the attempts actually started, and know when
   // the sweep has made its request.
@@ -1904,6 +1905,7 @@ test("serving a drink never waits on the leaderboard service", async t => {
   const sweep = engine.publicationSweep;
   assert.ok(sweep, "the poll started a sweep");
   await secondRequest.opened;                             // the sweep has asked to publish this run
+  await onWire.opened;                                    // and the first attempt is on the wire
   assert.equal(attempts, 1, "the sweep joined the publish already in flight rather than starting another");
   assert.equal(sends, 1, "so the drink was sent once");
   stalled.open();
@@ -1956,16 +1958,17 @@ test("the event cannot be wiped while a publish is on the wire", async t => {
   // The reviewed sequence: hold the publish, remove the drink, complete, wipe,
   // then let the publish land.
   const held = gate();
+  const onWire = gate();
   const retracted = [];
   const client = {
-    async publish(sent) { await held.opened; return { ...sent, entries: 1, rank: 1 }; },
+    async publish(sent) { onWire.open(); await held.opened; return { ...sent, entries: 1, rank: 1 }; },
     async retract(id) { retracted.push(id); return retracted.length === 1 ? "absent" : "retracted"; },
   };
   const { engine, store } = await engineWith(t, client);
   await engine.open({ runId: "booth-1" });
   const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
   const publishing = engine.publish("booth-1");
-  while (!engine.inFlight?.size) await new Promise(resolve => setImmediate(resolve));
+  await onWire.opened;                                    // the send has left, past its claim
   await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
   await engine.dispatch("booth-1", "complete", {});
   const wiping = engine.archiveAndWipe({ archivedBy: "lead", confirm: WIPE_CONFIRMATION });
@@ -1992,17 +1995,18 @@ test("a wipe refuses if a publish starts after the drain", async t => {
 
 test("a publish whose response was lost is still followed by a second retraction", async t => {
   const held = gate();
+  const onWire = gate();
   const retracted = [];
   const client = {
     // The service stores the drink, but the answer never arrives.
-    async publish() { await held.opened; throw new Error("socket hang up"); },
+    async publish() { onWire.open(); await held.opened; throw new Error("socket hang up"); },
     async retract(id) { retracted.push(id); return retracted.length === 1 ? "absent" : "retracted"; },
   };
   const { engine, store } = await engineWith(t, client);
   await engine.open({ runId: "booth-1" });
   const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
   const publishing = engine.publish("booth-1");
-  while (!engine.inFlight?.size) await new Promise(resolve => setImmediate(resolve));
+  await onWire.opened;                                    // the send has left, past its claim
   await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
   held.open();
   await publishing;
@@ -2108,4 +2112,105 @@ test("a rebuild sends no drink until every takedown is reserved again", async t 
   assert.deepEqual(rebuilt.removals, [{ id: removed.submission.id, published: "absent" }]);
   assert.deepEqual(rebuilt.drinks.map(result => result.state), ["confirmed"]);
   assert.equal((await post(replacement.url, submission("Mona Moonrise Mocha", OTHER_HANDLE))).status, 409);
+});
+
+// --- Review round 18 ---------------------------------------------------------
+
+async function servedAndHandedOver(engine, runId = "booth-1") {
+  await engine.open({ runId });
+  const served = await engine.dispatch(runId, "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.dispatch(runId, "complete", {});
+  return served;
+}
+
+test("a retry that starts during the archive never sends a drink the wipe is about to erase", async t => {
+  const { WIPE_CONFIRMATION } = await import("../.github/extensions/commit-and-sip/services/event-archive.mjs");
+  let sends = 0;
+  const client = { async publish(sent) { sends += 1; if (sends === 1) throw new Error("unreachable"); return { ...sent, entries: 1, rank: 1 }; } };
+  const { engine, store } = await engineWith(t, client);
+  await servedAndHandedOver(engine);
+  await engine.publish("booth-1");
+  assert.equal((await store.read()).runs["booth-1"].sync.state, "failed", "owed a retry");
+
+  // The reviewed sequence: the idle poll's sweep starts while the archive is
+  // being written. Reads do not wait on the ledger lock.
+  let sweep;
+  const write = store.writePendingArtifact.bind(store);
+  store.writePendingArtifact = async (...args) => {
+    sweep = engine.retryPublications();
+    await new Promise(resolve => setTimeout(resolve, 100));   // time enough for an unclaimed send to leave
+    return write(...args);
+  };
+  assert.ok((await engine.archiveAndWipe({ archivedBy: "lead", confirm: WIPE_CONFIRMATION })).archive);
+  await sweep;
+  assert.equal(sends, 1, "the send found its run gone at its claim, and never left");
+});
+
+test("a send claimed by another process on this ledger holds off the wipe", async t => {
+  const { WIPE_CONFIRMATION } = await import("../.github/extensions/commit-and-sip/services/event-archive.mjs");
+  const directory = await tempDirectory(t);
+  const held = gate();
+  const onWire = gate();
+  const client = { async publish(sent) { onWire.open(); await held.opened; return { ...sent, entries: 1, rank: 1 }; } };
+  const dashboard = new BoothEngine({ catalog, leaderboardClient: client, rules, store: new RunStore(directory) });
+  const republish = new BoothEngine({ catalog, leaderboardClient: client, rules, store: new RunStore(directory) });
+  await servedAndHandedOver(dashboard);
+  const sending = republish.publish("booth-1", { again: true });
+  await onWire.opened;
+  assert.equal(dashboard.inFlight?.size ?? 0, 0, "nothing in this engine knows about that send");
+  await assert.rejects(() => dashboard.archiveAndWipe({ archivedBy: "lead", confirm: WIPE_CONFIRMATION }),
+    { code: "publications_in_flight" });
+  held.open();
+  await sending;
+  assert.equal((await dashboard.store.read()).runs["booth-1"].sync.sending, undefined, "the claim is released");
+  assert.ok((await dashboard.archiveAndWipe({ archivedBy: "lead", confirm: WIPE_CONFIRMATION })).archive);
+});
+
+test("a claim left behind by a crash stops blocking the wipe on its own", async t => {
+  const { WIPE_CONFIRMATION } = await import("../.github/extensions/commit-and-sip/services/event-archive.mjs");
+  const { engine, store } = await engineWith(t, { async publish(sent) { return { ...sent, entries: 1, rank: 1 }; } });
+  await servedAndHandedOver(engine);
+  await store.transaction(data => {
+    data.runs["booth-1"].sync = { ...data.runs["booth-1"].sync, sending: { crashed: new Date(Date.now() - 61_000).toISOString() } };
+  });
+  assert.ok((await engine.archiveAndWipe({ archivedBy: "lead", confirm: WIPE_CONFIRMATION })).archive);
+});
+
+test("a stored row missing any served field is refused, and the health check says so", async t => {
+  const { id: _id, ...noId } = entry("mona-a");
+  const cases = [["no ID", noId]];
+  for (const field of ["handle", "name", "score", "createdAt"]) {
+    const { [field]: _gone, ...row } = entry("mona-a");
+    cases.push([`no ${field}`, row]);
+  }
+  cases.push(
+    ["a score that is text", { ...entry("mona-a"), score: "1000" }],
+    ["a negative score", { ...entry("mona-a"), score: -1 }],
+    ["an empty name", { ...entry("mona-a"), name: " " }],
+    ["a handle that is not one", { ...entry("mona-a"), handle: "<b>x</b>" }],
+    ["a date that is not one", { ...entry("mona-a"), createdAt: "yesterday" }],
+    ["a malformed tokenHash", { ...entry("mona-a"), tokenHash: "abc" }],
+    ["a row that is not an object", "mona-a"],
+  );
+  for (const [label, row] of cases) {
+    const directory = await tempDirectory(t);
+    const file = join(directory, "default.json");
+    const text = JSON.stringify({ entries: [row], reserved: [], version: 3 });
+    await writeFile(file, text);
+    await assert.rejects(() => FileStore.open({ directory }), /is not a readable board/, label);
+    assert.equal(await readFile(file, "utf8"), text, `${label}: the file is left exactly as found`);
+  }
+
+  // A row written before publication tokens has no tokenHash, and still loads.
+  const directory = await tempDirectory(t);
+  await writeFile(join(directory, "default.json"), JSON.stringify({ entries: [entry("mona-a")], reserved: [], version: 1 }));
+  const store = await FileStore.open({ directory });
+  const { url } = await service(t, { store });
+  assert.equal((await fetch(`${url}/healthz`)).status, 200);
+  assert.equal((await board(url)).entries[0].score, 1000);
+
+  // Corrupted underneath a running instance: the health check fails closed.
+  await writeFile(join(directory, "default.json"), JSON.stringify({ entries: [{ id: "mona-a" }], reserved: [], version: 2 }));
+  assert.equal((await fetch(`${url}/healthz`)).status, 503);
+  assert.equal((await fetch(`${url}/api/board`)).status >= 500, true, "and the board is not served in pieces");
 });
