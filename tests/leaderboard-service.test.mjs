@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { once } from "node:events";
@@ -207,7 +208,7 @@ test("the stored board keeps no readable trace of a removed name", async t => {
   assert.match(JSON.parse(saved).reserved[0], /^[0-9a-f]{64}$/, "only a keyed fingerprint is kept");
   // A plain hash of the ID would be reversible by hashing candidate names, so
   // the fingerprint must depend on the service's secret, not only on the name.
-  const { createHash } = await import("node:crypto");
+
   for (const guess of [removed.id, removed.name, removed.id.toUpperCase()]) {
     assert.notEqual(JSON.parse(saved).reserved[0], createHash("sha256").update(guess).digest("hex"),
       "the fingerprint cannot be recomputed from the name alone");
@@ -377,6 +378,8 @@ async function tempDirectory(t) {
   return directory;
 }
 
+// A reservation as the service stores it: a 64-hex HMAC-SHA256 fingerprint.
+const fp = label => createHash("sha256").update(label).digest("hex");
 const entry = (id, score = 1000) => ({ createdAt: "2026-01-01T00:00:00Z", handle: HANDLE, id, name: id, score });
 
 test("the file store survives a restart and never overwrites on create", async t => {
@@ -385,12 +388,12 @@ test("the file store survives a restart and never overwrites on create", async t
   await store.create(entry("mona-a"));
   await store.create(entry("mona-b"));
   await assert.rejects(() => store.create(entry("mona-a", 9)), ConflictError);
-  assert.equal(await store.retract("mona-b", "fp-b"), true);
-  assert.equal(await store.retract("mona-b", "fp-b"), false);
-  assert.equal(await store.isReserved("fp-b"), true);
+  assert.equal(await store.retract("mona-b", fp("b")), true);
+  assert.equal(await store.retract("mona-b", fp("b")), false);
+  assert.equal(await store.isReserved(fp("b")), true);
   const reopened = await FileStore.open({ directory, event: "event-2026" });
   assert.deepEqual(await reopened.list(), [entry("mona-a")], "what was written is what comes back");
-  assert.equal(await reopened.isReserved("fp-b"), true, "a reservation survives a restart");
+  assert.equal(await reopened.isReserved(fp("b")), true, "a reservation survives a restart");
   assert.deepEqual(await (await FileStore.open({ directory, event: "other" })).list(), [],
     "a new EVENT_ID starts a new board");
 });
@@ -400,10 +403,10 @@ test("concurrent writes are serialised and none is lost", async t => {
   const store = await FileStore.open({ directory });
   const ids = Array.from({ length: 30 }, (_, index) => `mona-${index}`);
   await Promise.all(ids.map(id => store.create(entry(id))));
-  await Promise.all(ids.slice(0, 10).map(id => store.retract(id, `fp-${id}`)));
+  await Promise.all(ids.slice(0, 10).map(id => store.retract(id, fp(id))));
   const reopened = await FileStore.open({ directory });
   assert.deepEqual((await reopened.list()).map(item => item.id).sort(), ids.slice(10).sort());
-  assert.equal((await Promise.all(ids.slice(0, 10).map(id => reopened.isReserved(`fp-${id}`)))).every(Boolean), true);
+  assert.equal((await Promise.all(ids.slice(0, 10).map(id => reopened.isReserved(fp(id))))).every(Boolean), true);
 });
 
 test("an unreadable board is left alone and the service refuses to start", async t => {
@@ -722,10 +725,10 @@ test("a failed write leaves memory exactly as it was on disk", async t => {
   const persist = store.persist.bind(store);
   store.persist = text => (full ? Promise.reject(Object.assign(new Error("disk full"), { code: "ENOSPC" })) : persist(text));
   await assert.rejects(() => store.admit(entry("mona-lost"), { fingerprint: "fp", handles: [OTHER_HANDLE] }), { code: "ENOSPC" });
-  await assert.rejects(() => store.retract("mona-kept", "fp-kept"), { code: "ENOSPC" });
+  await assert.rejects(() => store.retract("mona-kept", fp("kept")), { code: "ENOSPC" });
   const inMemory = await MemoryStore.prototype.list.call(store);
   assert.deepEqual(inMemory.map(item => item.id), ["mona-kept"], "the failed admission is not left in memory");
-  assert.equal(await MemoryStore.prototype.isReserved.call(store, "fp-kept"), false, "nor the failed reservation");
+  assert.equal(await MemoryStore.prototype.isReserved.call(store, fp("kept")), false, "nor the failed reservation");
   assert.deepEqual((await store.list()).map(item => item.id), ["mona-kept"], "and the board served is what the disk holds");
   // Once the disk recovers, a retry is a fresh admission, not a false "already there".
   full = false;
@@ -1048,7 +1051,7 @@ test("two instances writing one board never lose each other's entries", async t 
   const [a, b] = await Promise.all([FileStore.open({ directory }), FileStore.open({ directory })]);
   const ids = Array.from({ length: 24 }, (_, index) => `mona-${index}`);
   await Promise.all(ids.map((id, index) => (index % 2 ? a : b)
-    .admit(entry(id), { fingerprint: `fp-${id}`, handles: [`${HANDLE}-${String(index).padStart(8, "0")}`] })));
+    .admit(entry(id), { fingerprint: fp(id), handles: [`${HANDLE}-${String(index).padStart(8, "0")}`] })));
   const fresh = await FileStore.open({ directory });
   assert.deepEqual((await fresh.list()).map(item => item.id).sort(), [...ids].sort(), "every write from both instances survived");
   assert.equal((await a.list()).length, 24, "each instance reads what the other wrote");
@@ -1058,10 +1061,10 @@ test("two instances writing one board never lose each other's entries", async t 
 test("a takedown on one instance stops a submission arriving at the other", async t => {
   const directory = await tempDirectory(t);
   const [a, b] = await Promise.all([FileStore.open({ directory }), FileStore.open({ directory })]);
-  await a.retract("mona-moonrise-mocha", "fp-moonrise");
+  await a.retract("mona-moonrise-mocha", fp("moonrise"));
   const { ReservedError } = await import("../leaderboard-service/store.mjs");
-  await assert.rejects(() => b.admit(entry("mona-moonrise-mocha"), { fingerprint: "fp-moonrise", handles: [HANDLE] }), ReservedError);
-  assert.equal(await b.isReserved("fp-moonrise"), true);
+  await assert.rejects(() => b.admit(entry("mona-moonrise-mocha"), { fingerprint: fp("moonrise"), handles: [HANDLE] }), ReservedError);
+  assert.equal(await b.isReserved(fp("moonrise")), true);
 });
 
 test("a lock left by a dead instance is taken over; a live one is waited for", async t => {
@@ -1620,7 +1623,7 @@ test("a lost reservation key fails closed while the board holds reservations", a
   const directory = await tempDirectory(t);
   const store = await FileStore.open({ directory });
   const key = await openReservationKey(directory, store);
-  await store.retract("mona-gone", "fp-gone");
+  await store.retract("mona-gone", fp("gone"));
   assert.equal(JSON.parse(await readFile(join(directory, "default.json"), "utf8")).keyId, keyIdOf(key),
     "the board records which key its reservations use");
 
@@ -2270,4 +2273,28 @@ test("binding the key survives a write that had to be retried", async t => {
   const key = await openReservationKey(directory, store);
   assert.equal(calls, 2, "the first write was refused and retried");
   assert.equal(JSON.parse(await readFile(join(directory, "default.json"), "utf8")).keyId, keyIdOf(key));
+});
+
+// --- Review round 20 ---------------------------------------------------------
+
+test("a reservation that is not a fingerprint is refused, never loaded as a no-op", async t => {
+  for (const [label, board] of [
+    ["a readable drink ID", { entries: [], reserved: ["mona-moonrise-mocha"], version: 1 }],
+    ["a truncated fingerprint", { entries: [], reserved: [fp("x").slice(0, 63)], version: 1 }],
+    ["an upper-case fingerprint", { entries: [], reserved: [fp("x").toUpperCase()], version: 1 }],
+    ["a key binding that is not one", { entries: [], keyId: 12, reserved: [fp("x")], version: 1 }],
+    ["a key binding of the wrong length", { entries: [], keyId: "abc", reserved: [fp("x")], version: 1 }],
+  ]) {
+    const directory = await tempDirectory(t);
+    const file = join(directory, "default.json");
+    const text = JSON.stringify(board);
+    await writeFile(file, text);
+    await assert.rejects(() => FileStore.open({ directory }), /is not a readable board/, label);
+    assert.equal(await readFile(file, "utf8"), text, `${label}: the file is left exactly as found`);
+  }
+  // And one is never written in the first place.
+  const store = await FileStore.open({ directory: await tempDirectory(t) });
+  await assert.rejects(() => store.retract("mona-a", "mona-a"), TypeError);
+  await assert.rejects(() => new MemoryStore().retract("mona-a", "fp-a"), TypeError);
+  assert.equal(await store.retract("mona-a", fp("mona-a")), false, "a real fingerprint is accepted");
 });

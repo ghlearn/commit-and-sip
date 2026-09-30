@@ -3,6 +3,9 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path";
 import { MAX_SCORE } from "../.github/extensions/commit-and-sip/services/name-score.mjs";
 
+// Reservations are HMAC-SHA256 fingerprints of drink IDs, in hex.
+const FINGERPRINT = /^[0-9a-f]{64}$/;
+
 // One interface, two backends: memory for the tests, a JSON file for Azure.
 //
 // In App Service the file lives under /home, which is Azure-backed storage that
@@ -93,6 +96,11 @@ export class MemoryStore {
   // Reserves even when nothing was published: staff often catch a name before
   // it syncs, and another booth must still be refused it.
   async retract(id, fingerprint) {
+    // A reservation that is not a fingerprint could never match one, and
+    // would silently release the name it was meant to hold.
+    if (typeof fingerprint !== "string" || !FINGERPRINT.test(fingerprint)) {
+      throw new TypeError("A reservation must be a 64-character hex HMAC-SHA256 fingerprint.");
+    }
     this.reserved.add(fingerprint);
     return this.entries.delete(id);
   }
@@ -102,6 +110,7 @@ const EVENT = /^[a-z0-9-]{1,63}$/;
 const STORED_ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const STORED_HANDLE = /^[a-z]+-[a-z]+-[a-z]+(?:-[0-9a-f]{8})?$/;
 const TOKEN_HASH = /^[0-9a-f]{64}$/;
+const KEY_ID = /^[0-9a-f]{16}$/;
 
 // What is wrong with a stored row, or null. Every field the board serves or
 // compares must be present and of its type, or a corrupted row would load,
@@ -221,13 +230,20 @@ export class FileStore extends MemoryStore {
       if (entries.has(entry.id)) throw unreadable(`two entries with ID ${entry.id}`);
       entries.set(entry.id, entry);
     }
+    // A reservation that is not a fingerprint (a readable ID, a truncated
+    // hash) would load, pass /healthz and match nothing, releasing the name.
     const reserved = new Set(saved.reserved ?? []);
-    if (reserved.size !== (saved.reserved ?? []).length || [...reserved].some(item => typeof item !== "string")) {
+    if (reserved.size !== (saved.reserved ?? []).length
+      || [...reserved].some(item => typeof item !== "string" || !FINGERPRINT.test(item))) {
       throw unreadable("malformed reservations");
+    }
+    // Likewise a mangled key binding must not read as "unbound".
+    if (saved.keyId != null && (typeof saved.keyId !== "string" || !KEY_ID.test(saved.keyId))) {
+      throw unreadable("a malformed reservation key ID");
     }
     return {
       entries,
-      keyId: typeof saved.keyId === "string" ? saved.keyId : null,
+      keyId: saved.keyId ?? null,
       reserved,
       version: Number.isSafeInteger(saved.version) ? saved.version : 0,
     };
