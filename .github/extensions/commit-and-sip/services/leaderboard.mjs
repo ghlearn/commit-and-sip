@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { requireValue } from "../domain.mjs";
 
 // The booth is authoritative for its own menu; the event leaderboard is a
@@ -7,9 +7,18 @@ import { requireValue } from "../domain.mjs";
 // can never cost an attendee the drink they invented or the score they earned.
 export const SYNC_STATES = ["disabled", "pending", "confirmed", "failed"];
 
+// A random value minted once per publication and kept with the run, so every
+// retry of one publication carries the same token. It lets the service tell a
+// retry apart from a different attendee at another booth who drew the same
+// handle and typed the same name: public fields cannot. It identifies the
+// publication only, never the booth, device or run, and the service stores
+// only its hash.
+export const PUBLICATION_TOKEN = /^[0-9a-f]{32}$/;
+export const newPublicationToken = () => randomBytes(16).toString("hex");
+
 // Exactly what is sent. Kept minimal on purpose: no run ID, no device, and no
 // booth identity, because an anonymous handle is all a public board needs.
-export function submissionFor(entry) {
+export function submissionFor(entry, token) {
   requireValue(entry && typeof entry === "object", "invalid_submission", "A menu entry is required to submit a score.", 400);
   requireValue(typeof entry.handle === "string" && entry.handle.length > 0,
     "invalid_submission", "A submitted entry needs a barista handle.", 400);
@@ -17,7 +26,9 @@ export function submissionFor(entry) {
     "invalid_submission", "A submitted entry needs a positive integer score.", 400);
   requireValue(typeof entry.name === "string" && entry.name.length > 0,
     "invalid_submission", "A submitted entry needs a drink name.", 400);
-  return { handle: entry.handle, id: entry.id, name: entry.name, score: entry.score };
+  requireValue(typeof token === "string" && PUBLICATION_TOKEN.test(token),
+    "invalid_submission", "A submitted entry needs its publication token.", 400);
+  return { handle: entry.handle, id: entry.id, name: entry.name, score: entry.score, token };
 }
 
 // Handles are unique at one booth, not across an event: there are 512

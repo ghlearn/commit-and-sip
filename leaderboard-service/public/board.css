@@ -64,6 +64,11 @@ tr.mine { background: var(--board); }
 
 .empty { padding: 2em 0; color: var(--muted); font-size: 1.1em; }
 
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
 footer { max-width: 64rem; margin: 0 auto; padding: 0 clamp(16px, 4vw, 48px) 32px; color: var(--muted); font-size: 0.7em; }
 footer a { color: var(--accent-ink); }
 

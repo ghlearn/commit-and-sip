@@ -3,7 +3,7 @@ import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
-import { dirname, join, relative, resolve } from "node:path";
+import path, { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { guardNodeVersion } from "./require-node.mjs";
 
@@ -29,13 +29,25 @@ const RENDERER_ASSET = /\brenderer\(\s*["']([^"']+)["']\s*\)/g;
 // from App Service settings. Walking the graph would otherwise pack it.
 export const NEVER_PACKAGE = ["booth/local-config.json"];
 
+// Compared as resolved absolute paths, never as relative strings: on Windows
+// `relative()` returns `booth\\local-config.json`, which would not match the
+// entry above and would put both API keys into the zip. `paths` is injectable
+// so the Windows behaviour is tested on any platform.
+export function isNeverPackaged(file, { root: base = root, paths = path } = {}) {
+  const target = paths.resolve(file);
+  return NEVER_PACKAGE.some(entry => paths.resolve(base, ...entry.split("/")) === target);
+}
+
+// Manifest entries are always forward-slash relative paths, whatever the OS.
+const manifestPath = file => relative(root, file).split(path.sep).join("/");
+
 // Every repository file the service needs at runtime.
 export async function packageManifest() {
   const files = new Set();
   const pending = [ENTRY];
   while (pending.length) {
     const file = pending.pop();
-    if (files.has(file) || NEVER_PACKAGE.includes(relative(root, file))) continue;
+    if (files.has(file) || isNeverPackaged(file)) continue;
     if (!existsSync(file)) throw new Error(`The service needs ${relative(root, file)}, which does not exist.`);
     files.add(file);
     if (!file.endsWith(".mjs")) continue;
@@ -47,7 +59,7 @@ export async function packageManifest() {
       pending.push(join(root, ".github", "extensions", "commit-and-sip", "renderer", asset));
     }
   }
-  return [...files].map(file => relative(root, file)).sort();
+  return [...files].map(manifestPath).sort();
 }
 
 const freePort = () => new Promise((done, fail) => {

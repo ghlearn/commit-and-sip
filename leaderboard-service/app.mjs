@@ -2,7 +2,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { DomainError } from "../.github/extensions/commit-and-sip/domain.mjs";
 import { leaderboard } from "../.github/extensions/commit-and-sip/services/booth-menu.mjs";
-import { canonicalHandle } from "../.github/extensions/commit-and-sip/services/leaderboard.mjs";
+import { canonicalHandle, PUBLICATION_TOKEN } from "../.github/extensions/commit-and-sip/services/leaderboard.mjs";
 import { blocklistStatus } from "../.github/extensions/commit-and-sip/services/moderation.mjs";
 import { scoreCoffeeName } from "../.github/extensions/commit-and-sip/services/name-score.mjs";
 import { HandleTakenError, ReservedError } from "./store.mjs";
@@ -21,7 +21,7 @@ const MAX_BODY_BYTES = 2048;
 const BOARD_SIZE = 20;
 const ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const HANDLE = /^([a-z]+)-([a-z]+)-([a-z]+)(?:-[0-9a-f]{8})?$/;
-const SUBMISSION_KEYS = ["handle", "id", "name", "score"];
+const SUBMISSION_KEYS = ["handle", "id", "name", "score", "token"];
 
 const renderer = path => new URL(`../.github/extensions/commit-and-sip/renderer/${path}`, import.meta.url);
 const STATIC = {
@@ -86,7 +86,8 @@ function validateSubmission(body, rules, words) {
   const shaped = body && typeof body === "object" && !Array.isArray(body)
     && Object.keys(body).sort().join() === SUBMISSION_KEYS.join()
     && typeof body.handle === "string" && typeof body.id === "string"
-    && typeof body.name === "string" && Number.isSafeInteger(body.score);
+    && typeof body.name === "string" && Number.isSafeInteger(body.score)
+    && typeof body.token === "string" && PUBLICATION_TOKEN.test(body.token);
   if (!shaped) throw new HttpError(400, "invalid_submission", `Send exactly ${SUBMISSION_KEYS.join(", ")}.`);
   if (!handleIsCurated(body.handle, words)) {
     throw new HttpError(422, "invalid_handle", "The handle was not built from the booth's word lists.");
@@ -104,7 +105,7 @@ function validateSubmission(body, rules, words) {
   if (scored.name !== body.name || scored.id !== body.id || scored.score !== body.score) {
     throw new HttpError(422, "score_mismatch", "The submitted score is not what the rubric awards this name.");
   }
-  return { handle: body.handle, id: scored.id, name: scored.name, score: scored.score };
+  return { handle: body.handle, id: scored.id, name: scored.name, score: scored.score, token: body.token };
 }
 
 function receiptFor(entry, entries) {
@@ -154,11 +155,14 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
       // uses this one, the drink is stored under its canonical handle instead,
       // and the receipt says so.
       const handles = [submission.handle, canonicalHandle(submission.handle, submission.id)];
+      // Only a hash of the publication token is kept; it is compared, never shown.
+      const tokenHash = createHash("sha256").update(submission.token).digest("hex");
+      const { token, ...fields } = submission;
       let admitted;
       try {
         // One store operation, so a retraction cannot land between checking
         // the reservation and writing the entry.
-        admitted = await store.admit({ ...submission, createdAt: now().toISOString() },
+        admitted = await store.admit({ ...fields, createdAt: now().toISOString(), tokenHash },
           { fingerprint: fingerprint(submission.id), handles });
       } catch (error) {
         // Taken down at some booth. Worded exactly as the booth words a
@@ -168,10 +172,12 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
         throw error;
       }
       if (!admitted.created) {
-        // A booth retries after a network blip, so the same entry arriving
-        // twice is a success. Someone else's drink under the same name is not.
+        // A booth retries after a network blip, so the same publication
+        // arriving twice is a success. Matching fields are not enough: another
+        // booth can draw the same handle and its attendee type the same name,
+        // and only the publication token tells the two apart.
         const existing = admitted.entry;
-        const same = handles.includes(existing.handle)
+        const same = existing.tokenHash === tokenHash && handles.includes(existing.handle)
           && existing.name === submission.name && existing.score === submission.score;
         if (!same) throw new HttpError(409, "duplicate_drink", "Another barista already published a drink with this name.");
         return [200, receiptFor(existing, await store.list())];

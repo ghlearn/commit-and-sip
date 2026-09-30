@@ -15,7 +15,7 @@ import { loadNameRules } from "../.github/extensions/commit-and-sip/services/cof
 import { leaderboard } from "../.github/extensions/commit-and-sip/services/booth-menu.mjs";
 import { createLeaderboardClient, leaderboardClientFromConfig, validateLeaderboardApi }
   from "../.github/extensions/commit-and-sip/services/leaderboard-client.mjs";
-import { submissionFor, validateReceipt } from "../.github/extensions/commit-and-sip/services/leaderboard.mjs";
+import { newPublicationToken, submissionFor, validateReceipt } from "../.github/extensions/commit-and-sip/services/leaderboard.mjs";
 import { validateBlocklist } from "../.github/extensions/commit-and-sip/services/moderation.mjs";
 import { scoreCoffeeName } from "../.github/extensions/commit-and-sip/services/name-score.mjs";
 
@@ -41,9 +41,11 @@ async function service(t, { store = new MemoryStore(), serviceRules = rules } = 
   return { store, url: `http://127.0.0.1:${server.address().port}` };
 }
 
+// Each call is a distinct publication, with its own token. Reusing the
+// returned object is what a booth retry looks like.
 function submission(name, handle = HANDLE) {
   const scored = scoreCoffeeName(name, rules);
-  return { handle, id: scored.id, name: scored.name, score: scored.score };
+  return { handle, id: scored.id, name: scored.name, score: scored.score, token: newPublicationToken() };
 }
 
 function post(url, body, key = BOOTH_KEY, headers = {}) {
@@ -126,8 +128,8 @@ test("a leaked booth key still cannot post what the booth would not", async t =>
     [{ ...honest, score: 5000 }, "score_mismatch", "an inflated score"],
     [{ ...honest, id: "other-id" }, "score_mismatch", "an ID that does not belong to the name"],
     // Built by hand: the helper scores with the same blocklist and would refuse it.
-    [{ handle: HANDLE, id: "mona-zzqq-mocha", name: "Mona Zzqq Mocha", score: 3000 }, "rejected_name", "a name the blocklist refuses"],
-    [{ handle: HANDLE, id: "mona-latte", name: "Mona Latte", score: 3000 }, "rejected_name", "a house example"],
+    [{ ...honest, id: "mona-zzqq-mocha", name: "Mona Zzqq Mocha", score: 3000 }, "rejected_name", "a name the blocklist refuses"],
+    [{ ...honest, id: "mona-latte", name: "Mona Latte", score: 3000 }, "rejected_name", "a house example"],
     [{ ...honest, name: "Mona <b>Mocha</b>" }, "rejected_name", "markup in the name"],
     [{ ...honest, handle: "mallory-was-here" }, "invalid_handle", "a handle not built from the word lists"],
     [{ ...honest, handle: `${HANDLE}-<script>` }, "invalid_handle", "a handle carrying markup"],
@@ -547,8 +549,9 @@ test("the booth only publishes to a public HTTPS service with real keys", () => 
 
 test("a booth submission is exactly what the service accepts", () => {
   const entry = { handle: HANDLE, id: "mona-moonrise-mocha", name: "Mona Moonrise Mocha", runId: "r", score: 1 };
-  assert.deepEqual(Object.keys(submissionFor(entry)).sort(), ["handle", "id", "name", "score"],
-    "the booth sends the four fields the service's shape check requires, and no run ID");
+  assert.deepEqual(Object.keys(submissionFor(entry, newPublicationToken())).sort(), ["handle", "id", "name", "score", "token"],
+    "the booth sends the five fields the service's shape check requires, and no run ID");
+  assert.throws(() => submissionFor(entry), { code: "invalid_submission" }, "never without its publication token");
 });
 
 // --- Packaging --------------------------------------------------------------
@@ -654,8 +657,17 @@ test("a takedown queued behind another write still stops a concurrent submission
   const directory = await tempDirectory(t);
   let open;
   const gate = new Promise(resolve => { open = resolve; });
+  // Resolves once the nth write has entered the queue. The test waits on these
+  // events rather than on elapsed time, so a slow machine cannot reorder them.
+  let queued = 0;
+  const waiting = [];
+  const whenQueued = count => new Promise(resolve => waiting.push({ count, resolve }));
   class GatedStore extends FileStore {
-    serialise(change) { return super.serialise(async () => { await gate; return change(); }); }
+    serialise(change) {
+      queued += 1;
+      for (const waiter of waiting.filter(item => item.count <= queued)) waiter.resolve();
+      return super.serialise(async () => { await gate; return change(); });
+    }
   }
   const store = Object.setPrototypeOf(await FileStore.open({ directory }), GatedStore.prototype);
   const app = createApp({ boothKey: BOOTH_KEY, reservationKey: RESERVATION_KEY, rules, staffKey: STAFF_KEY, store, words });
@@ -665,10 +677,12 @@ test("a takedown queued behind another write still stops a concurrent submission
   const url = `http://127.0.0.1:${server.address().port}`;
 
   const sent = submission("Mona Moonrise Mocha");
+  const firstQueued = whenQueued(1);
   const retraction = del(url, sent.id);
-  await new Promise(resolve => setTimeout(resolve, 50));
+  await firstQueued;                         // the retraction is in the queue, not yet applied
+  const secondQueued = whenQueued(2);
   const publication = post(url, submission("Mona Moonrise Mocha", OTHER_HANDLE));
-  await new Promise(resolve => setTimeout(resolve, 50));
+  await secondQueued;                        // and the submission is queued behind it
   open();
   assert.equal((await retraction).status, 404);
   const published = await publication;
@@ -807,4 +821,89 @@ test("rebuilding a lost board restores its reservations before any drink", async
   const boothOnly = new BoothEngine({ catalog, rules, store: runs,
     leaderboardClient: createLeaderboardClient({ boothKey: BOOTH_KEY, url: replacement.url }) });
   assert.deepEqual((await boothOnly.republishAll()).removals, [{ id: removed.submission.id, published: "not-configured" }]);
+});
+
+// --- Review round 2 ----------------------------------------------------------
+
+test("a different attendee with the same handle and the same name is not mistaken for a retry", async t => {
+  const { url } = await service(t);
+  const first = submission("Mona Moonrise Mocha", HANDLE);
+  const lookalike = submission("Mona Moonrise Mocha", HANDLE);    // another booth, another attendee
+  assert.notEqual(first.token, lookalike.token);
+  assert.equal((await post(url, first)).status, 201);
+  const clash = await post(url, lookalike);
+  assert.equal(clash.status, 409, "public fields match, but it is not the same publication");
+  assert.equal((await clash.json()).error, "duplicate_drink");
+  assert.equal((await post(url, first)).status, 200, "a genuine retry still succeeds");
+  const { token, ...noToken } = first;
+  assert.equal((await post(url, noToken)).status, 400, "no token, no submission");
+  assert.equal((await post(url, { ...first, token: "not-a-token" })).status, 400);
+});
+
+test("the token is saved before the first send and reused on every retry", async t => {
+  const sent = [];
+  let attempt = 0;
+  let engine;
+  const client = {
+    async publish(submission) {
+      const saved = (await engine.store.read()).runs["booth-1"].sync.token;
+      sent.push({ saved, token: submission.token });
+      attempt += 1;
+      if (attempt === 1) throw new Error("network dropped the response");
+      return { ...submission, entries: 1, rank: 1 };
+    },
+  };
+  ({ engine } = await engineWith(t, client));
+  await engine.open({ runId: "booth-1" });
+  await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.publish("booth-1");
+  await engine.publish("booth-1");
+  assert.equal(sent[0].saved, sent[0].token, "persisted before it left the booth");
+  assert.equal(sent[1].token, sent[0].token, "the retry is the same publication");
+  assert.equal((await engine.store.read()).runs["booth-1"].sync.state, "confirmed");
+});
+
+test("the stored board keeps only a hash of the publication token", async t => {
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory });
+  const app = createApp({ boothKey: BOOTH_KEY, reservationKey: RESERVATION_KEY, rules, staffKey: STAFF_KEY, store, words });
+  const server = createServer(app).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const sent = submission("Mona Moonrise Mocha");
+  await post(`http://127.0.0.1:${server.address().port}`, sent);
+  const saved = await readFile(join(directory, "default.json"), "utf8");
+  assert.ok(!saved.includes(sent.token), "the raw token is never stored");
+  assert.match(JSON.parse(saved).entries[0].tokenHash, /^[0-9a-f]{64}$/);
+  const row = (await board(`http://127.0.0.1:${server.address().port}`)).entries[0];
+  assert.deepEqual(Object.keys(row).sort(), ["handle", "name", "rank", "score"], "and never shows it");
+});
+
+test("the staff secrets are excluded whatever the platform's path separator", async () => {
+  const { isNeverPackaged } = await import("../scripts/package-leaderboard.mjs");
+  const path = await import("node:path");
+  const windows = { paths: path.win32, root: "C:\\repo" };
+  assert.equal(isNeverPackaged("C:\\repo\\booth\\local-config.json", windows), true);
+  assert.equal(isNeverPackaged("C:\\repo\\booth\\..\\booth\\local-config.json", windows), true);
+  assert.equal(isNeverPackaged("C:\\repo\\booth\\name-rules.json", windows), false);
+  const posix = { paths: path.posix, root: "/repo" };
+  assert.equal(isNeverPackaged("/repo/booth/local-config.json", posix), true);
+  assert.equal(isNeverPackaged("/repo/booth/name-rules.json", posix), false);
+});
+
+test("a stalled network cannot pile up polls on the monitor", async () => {
+  const script = await readFile(new URL("../leaderboard-service/public/board.js", import.meta.url), "utf8");
+  assert.match(script, /AbortSignal\.timeout\(REQUEST_TIMEOUT_MS\)/, "every poll is bounded");
+  assert.doesNotMatch(script, /setInterval\(refresh/, "a fixed interval keeps starting polls while earlier ones hang");
+  assert.match(script, /setTimeout\(refresh, REFRESH_MS\)/, "the next poll is scheduled once this one settles");
+});
+
+test("screen readers hear transitions, not a clock every ten seconds", async () => {
+  const html = await readFile(new URL("../leaderboard-service/public/index.html", import.meta.url), "utf8");
+  const live = [...html.matchAll(/<[^>]+(?:aria-live|role="(?:status|alert|log)")[^>]*>/g)].map(match => match[0]);
+  assert.deepEqual(live, ['<p id="announce" class="visually-hidden" aria-live="polite">'],
+    "one live region, fed only by announce()");
+  const script = await readFile(new URL("../leaderboard-service/public/board.js", import.meta.url), "utf8");
+  assert.match(script, /if \(message === announced\) return;/, "a repeated message is not re-announced");
+  assert.doesNotMatch(script, /announce\(`Updated/, "the routine timestamp is never announced");
 });

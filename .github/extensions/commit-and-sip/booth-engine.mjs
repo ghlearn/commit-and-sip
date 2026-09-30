@@ -3,7 +3,7 @@ import { PLACEMENTS } from "./services/coffee-name.mjs";
 import { validateLeaderboardUrl } from "./services/public-url.mjs";
 import { addDrink, leaderboard, removeDrink, seedMenu, standingFor } from "./services/booth-menu.mjs";
 import {
-  confirmedSync, failedSync, initialSync, submissionFor, syncView, validateLeaderboardClient, validateReceipt
+  confirmedSync, failedSync, initialSync, newPublicationToken, submissionFor, syncView, validateLeaderboardClient, validateReceipt
 } from "./services/leaderboard.mjs";
 import {
   archiveMatches, archivePayload, artifactName, emptyLedger, eventSummary, exportPayload, WIPE_CONFIRMATION
@@ -369,7 +369,18 @@ export class BoothEngine {
     if (!run?.sync || run.removed) return;
     const entry = this.houseMenu(data).find(item => !item.example && item.runId === runId);
     if (!entry) return;
-    const submission = submissionFor(entry);
+    // Minted and saved before the first send, never after: a token that
+    // changed between a lost response and its retry would make this booth's
+    // own entry look like somebody else's.
+    let token = run.sync.token;
+    if (!token) {
+      token = await this.store.transaction(stored => {
+        const current = stored.runs[runId];
+        current.sync.token ??= newPublicationToken();
+        return current.sync.token;
+      });
+    }
+    const submission = submissionFor(entry, token);
     let outcome;
     try {
       outcome = { ok: true, receipt: validateReceipt(await this.leaderboardClient.publish(submission), submission) };

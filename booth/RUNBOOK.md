@@ -31,15 +31,21 @@ Choose a distinct panel `instanceId`. Actions address that instance; persistent 
 
 ## Staff configuration
 
-The booth reads one optional ignored file, `booth/local-config.json`, with a single supported key:
+The booth reads one optional ignored file, `booth/local-config.json`, with two independent settings:
 
 ```json
-{"leaderboardUrl": "https://example-leaderboard-host/board"}
+{
+  "leaderboardApi": {"url": "https://<app>.azurewebsites.net", "boothKey": "<64 hex>", "staffKey": "<64 hex>"},
+  "leaderboardUrl": "https://<app>.azurewebsites.net/"
+}
 ```
 
-The URL must be public HTTPS with no credentials, fragment, or nonstandard port. Retired pull-request keys (`mode`, `runs`, `repo`, `requiredChecks`) are rejected on start with a `retired_config` diagnostic rather than ignored, so a stale config cannot look configured. A valid JSON file containing `null`, an array, or a scalar is not valid staff configuration; correct it using the explicit `invalid_config` diagnostic rather than treating it as a network error.
+- `leaderboardApi` makes the booth publish to the leaderboard service and lets takedowns retract from it. **Write it with `npm run leaderboard:configure`, never by hand** (see [Leaderboard service operations](#leaderboard-service-operations)). Leave out `staffKey` on a machine that should not take drinks down. The file is written readable by its owner only.
+- `leaderboardUrl` puts a QR code in front of attendees. **Leave it unset** until the moderation blocklist is reviewed and brand sign-off is done.
 
-Never put credentials in that file, the renderer, the repository, or a QR URL.
+Both URLs must be public HTTPS with no credentials, fragment, or nonstandard port. Retired pull-request keys (`mode`, `runs`, `repo`, `requiredChecks`) are rejected on start with a `retired_config` diagnostic rather than ignored, so a stale config cannot look configured. A valid JSON file containing `null`, an array, or a scalar is not valid staff configuration; correct it using the explicit `invalid_config` diagnostic rather than treating it as a network error.
+
+The two leaderboard API keys belong in that file and nowhere else. Never put them, or any other credential, in the renderer, the repository, a QR URL, or a chat or issue. The file is never packaged: the deploy packager refuses to include it.
 
 ## Moderation blocklist — review required before publishing attendee names
 

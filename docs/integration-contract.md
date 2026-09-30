@@ -42,7 +42,7 @@ Handles are unique within a booth. `generateHandle` draws from curated word list
 
 `services/leaderboard.mjs` is the client seam. A client implements `publish(submission)` and owns its own timeout, and may implement `retract(id)`. `services/leaderboard-client.mjs` is the HTTP client for [the leaderboard service](leaderboard-service.md); it is built only when staff configure `leaderboardApi`, and `leaderboardClient` is null otherwise. The flow is local-first: `submit_name` commits the drink inside the store transaction, the lock is released, and only then is the entry published. A slow or unreachable service therefore cannot hold up the counter, fail an attendee's submission, or lose a drink that was already earned.
 
-A receipt is accepted only when its handle, ID, name, and score match what was sent (the handle may instead be its canonical form, when another booth used the phrase first); anything else is recorded as a failure rather than shown, so a service answering about a different entry can never rank this attendee. Failures are retried on the next refresh, so a network blip recovers without staff. The submitted payload is deliberately minimal — handle, ID, name, score — carrying no run ID, device, or booth identity, since an anonymous handle is all a public board needs.
+A receipt is accepted only when its handle, ID, name, and score match what was sent (the handle may instead be its canonical form, when another booth used the phrase first); anything else is recorded as a failure rather than shown, so a service answering about a different entry can never rank this attendee. Failures are retried on the next refresh, so a network blip recovers without staff. The submitted payload is deliberately minimal — handle, ID, name, score, and a random per-publication token that stays the same across retries, so the service can tell a retry from another attendee who drew the same handle and name — carrying no run ID, device, or booth identity, since an anonymous handle is all a public board needs.
 
 `syncView` keeps two facts apart that are easy to conflate: the booth standing is local and the booth owns it, while an event rank exists only once the service confirms it. Until then the canvas says the place is still being confirmed, and the booth rank is labelled "at this booth" so it cannot be read as an event-wide placing.
 
@@ -133,7 +133,7 @@ Publication happens after the store transaction commits and the lock is released
 
 A client implements `publish(submission)` and owns its own timeout. The booth must never wait on a slow service.
 
-The submitted payload is deliberately minimal — handle, drink ID, name, and score. It carries no run ID, device, or booth identity, because an anonymous handle is all a public board needs.
+The submitted payload is deliberately minimal — handle, drink ID, name, score, and a random per-publication token that stays the same across retries, so the service can tell a retry from another attendee who drew the same handle and name. The booth saves the token before the first send. It carries no run ID, device, or booth identity, because an anonymous handle is all a public board needs.
 
 A receipt is accepted only when its handle, ID, name, and score match what was sent (the handle may instead be its canonical form, when another booth used the phrase first). Anything else is recorded as a failure and never displayed, so a service answering about a different entry cannot be shown as this attendee's rank. Failed publications retry on the next refresh.
 

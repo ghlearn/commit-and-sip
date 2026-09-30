@@ -7,7 +7,7 @@ This document began as a proposal. It now records what was built, the decisions 
 ## What the booth guarantees
 
 - **It saves first, always.** A failed submission can never cost an attendee their drink or their score.
-- **The payload is `{handle, id, name, score}`** and nothing else. No run ID, no device, no booth identity.
+- **The payload is `{handle, id, name, score, token}`** and nothing else. The `token` is a random per-publication token that stays the same across retries, so the service can tell a retry from another attendee who drew the same handle and name. It identifies the publication, never the booth, device or run, and the service keeps only its hash. No run ID, no device, no booth identity.
 - **The client owns its timeout** (4 seconds). A booth queue never waits on a slow service.
 - **A local booth rank and an event rank are never conflated.** Until a receipt arrives, the canvas says the place is still being confirmed.
 

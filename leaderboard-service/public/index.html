@@ -16,9 +16,11 @@
       <p class="lede">Every drink here was invented at the booth and scored out of 5,000.</p>
     </header>
 
-    <section id="you" class="you" hidden aria-live="polite"></section>
+    <section id="you" class="you" hidden></section>
 
-    <p id="status" class="status" role="status">Loading the board…</p>
+    <p id="status" class="status">Loading the board…</p>
+    <!-- The only live region. It speaks on transitions, never on each poll. -->
+    <p id="announce" class="visually-hidden" aria-live="polite"></p>
 
     <table id="board" hidden>
       <caption id="caption"></caption>

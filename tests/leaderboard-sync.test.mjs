@@ -44,9 +44,11 @@ test("a receipt is rejected unless it is about the entry that was sent", () => {
 
 test("a submission carries the anonymous handle and nothing identifying", () => {
   const entry = { handle: "cheerful-cup", id: "mona-moonrise", name: "Mona Moonrise", score: 2050, runId: "secret-run", breakdown: {} };
-  assert.deepEqual(submissionFor(entry), { handle: "cheerful-cup", id: "mona-moonrise", name: "Mona Moonrise", score: 2050 });
-  assert.throws(() => submissionFor({ ...entry, score: 0 }), { code: "invalid_submission" });
-  assert.throws(() => submissionFor({ ...entry, handle: "" }), { code: "invalid_submission" });
+  const token = "0123456789abcdef0123456789abcdef";
+  assert.deepEqual(submissionFor(entry, token), { handle: "cheerful-cup", id: "mona-moonrise", name: "Mona Moonrise", score: 2050, token });
+  assert.throws(() => submissionFor({ ...entry, score: 0 }, token), { code: "invalid_submission" });
+  assert.throws(() => submissionFor({ ...entry, handle: "" }, token), { code: "invalid_submission" });
+  assert.throws(() => submissionFor(entry, "run-secret-run"), { code: "invalid_submission" }, "the token is a random value, not a run ID");
 });
 
 test("the view never implies an event rank the service has not confirmed", () => {
