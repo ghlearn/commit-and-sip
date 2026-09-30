@@ -277,9 +277,11 @@ test("equal scores share a rank exactly as they do at the booth", async t => {
 
 test("the board shows a window, the true total, and an attendee's own place", async t => {
   const { url, store } = await service(t);
+  let mine;
   for (let index = 0; index < 25; index += 1) {
-    const entry = submission(`Mona Test ${index} Mocha`);
-    await store.create({ ...entry, createdAt: "2026-01-01T00:00:00Z" });
+    const { token, ...entry } = submission(`Mona Test ${index} Mocha`);
+    await store.create({ ...entry, createdAt: "2026-01-01T00:00:00Z", tokenHash: tokenHashOf(token) });
+    if (index === 24) mine = { ref: publicRef(tokenHashOf(token)), name: entry.name };
   }
   const full = await board(url);
   assert.equal(full.entries.length, 20);
@@ -287,8 +289,10 @@ test("the board shows a window, the true total, and an attendee's own place", as
   assert.ok(!Number.isNaN(Date.parse(full.asOf)), "the board says when it was read");
   assert.deepEqual(Object.keys(full.entries[0]).sort(), ["handle", "name", "rank", "score"],
     "no ID, timestamp, or anything else beyond what the board shows");
-  assert.equal((await board(url, `?handle=${HANDLE}`)).you.handle, HANDLE);
-  assert.equal((await board(url, `?handle=${OTHER_HANDLE}`)).you, null, "an unknown handle is said to be absent");
+  const you = (await board(url, `?handle=${HANDLE}&ref=${mine.ref}`)).you;
+  assert.deepEqual([you.handle, you.name], [HANDLE, mine.name], "found by its reference, even outside the top 20");
+  assert.ok(you.rank > 0);
+  assert.equal((await board(url, `?handle=${OTHER_HANDLE}&ref=${mine.ref}`)).you, null, "the wrong handle does not match");
   assert.equal((await board(url, "?handle=<script>")).you, null);
 });
 
@@ -750,6 +754,7 @@ test("two booths that issued the same handle each get a distinct place on the bo
   assert.equal((await board(url, `?handle=${HANDLE}&ref=${refOf(second)}`)).you.name, second.name);
   assert.equal((await board(url, `?handle=${secondReceipt.handle}&ref=${refOf(second)}`)).you.name, second.name);
   assert.equal((await board(url, `?handle=${HANDLE}&ref=0000000000000000`)).you, null);
+  assert.equal((await board(url, `?handle=${HANDLE}`)).you, null, "a handle alone identifies nobody");
 });
 
 test("the attendee is told when the board shows them under a different handle", async () => {
@@ -1235,20 +1240,19 @@ test("no staff guidance sends anyone to another machine to finish this booth's t
 
 test("renewing a lease never refreshes a lease someone else now holds", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory, staleLockMs: 60 });   // renews every 20ms
+  const store = await FileStore.open({ directory, staleLockMs: 60 });   // beats every 20ms
   const lock = join(directory, "default.json.lock");
+  const successor = JSON.stringify({ at: Date.now() - 60_000, owner: "someone-else" });
+  await writeFile(lock, successor);
   const stop = store.renewLease("mine");
-  const age = async () => Date.now() - JSON.parse(await readFile(lock, "utf8")).at;
-
-  await writeFile(lock, JSON.stringify({ at: Date.now() - 60_000, owner: "someone-else" }));
   await new Promise(resolve => setTimeout(resolve, 120));
-  assert.ok(await age() > 30_000, "a lease this instance lost is left to go stale, so a dead holder cannot be kept alive");
-  assert.equal(JSON.parse(await readFile(lock, "utf8")).owner, "someone-else");
-
-  await writeFile(lock, JSON.stringify({ at: Date.now() - 60_000, owner: "mine" }));
-  await new Promise(resolve => setTimeout(resolve, 120));
-  assert.ok(await age() < 1_000, "its own lease is renewed");
+  assert.equal(await readFile(lock, "utf8"), successor, "renewal never writes the lock, so it cannot touch another lease");
+  assert.ok(Date.now() - await store.lastSeen(JSON.parse(successor)) > 30_000,
+    "a lease this instance does not hold is left to go stale, so a dead holder cannot be kept alive");
+  assert.ok(Date.now() - await store.lastSeen({ at: 0, owner: "mine" }) < 1_000, "its own heartbeat is kept fresh");
   await stop();
+  const { readdir } = await import("node:fs/promises");
+  assert.deepEqual((await readdir(directory)).filter(name => name.endsWith(".beat")), [], "a finished holder leaves no heartbeat");
 });
 
 // --- Review round 6 ----------------------------------------------------------
@@ -1297,14 +1301,14 @@ test("taking over a stale lease never removes the live lease that replaced it", 
   // ...but by the time the takeover acts, a live successor holds the lock.
   const successor = JSON.stringify({ at: Date.now(), owner: "successor" });
   await writeFile(lock, successor);
-  await store.takeOver(stale);
+  await store.takeOver({ at: Date.now() - 60_000, owner: "dead", text: stale });
   assert.equal(await readFile(lock, "utf8"), successor, "the successor's live lease is put back exactly");
   const { readdir } = await import("node:fs/promises");
-  assert.deepEqual((await readdir(directory)).filter(name => name.includes(".stale")), [], "nothing is left aside");
+  assert.deepEqual((await readdir(directory)).filter(name => /\.(aside|stale)$/.test(name)), [], "nothing is left aside");
 
   // The lease that really was judged stale is removed.
   await writeFile(lock, stale);
-  await store.takeOver(stale);
+  await store.takeOver({ at: Date.now() - 60_000, owner: "dead", text: stale });
   await assert.rejects(() => readFile(lock, "utf8"), { code: "ENOENT" });
 });
 
@@ -1366,7 +1370,7 @@ test("a lock is never left behind by a renewal that was in flight at release", a
       `no lease survives release ${index}`);
   }
   const { readdir } = await import("node:fs/promises");
-  assert.deepEqual((await readdir(directory)).filter(name => /\.(renew|tmp|stale)$/.test(name)), [], "and no temporary files");
+  assert.deepEqual((await readdir(directory)).filter(name => /\.(aside|renew|tmp|stale)$/.test(name)), [], "and no temporary files");
 });
 
 
@@ -1427,4 +1431,59 @@ test("a failing lease renewal never becomes an unhandled rejection", async t => 
   await stop();
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(unhandled, [], "a transient filesystem error must not be able to stop the service");
+});
+
+
+// --- Review round 9 ----------------------------------------------------------
+
+test("a renewal interleaved with a takeover cannot overwrite the successor", async t => {
+  // The reviewed interleaving: the old holder reads its own lease, a successor
+  // takes over, and only then does the old holder's renewal act.
+  const directory = await tempDirectory(t);
+  const [old, successor] = await Promise.all([
+    FileStore.open({ directory, staleLockMs: 60 }), FileStore.open({ directory, staleLockMs: 60 })]);
+  const lock = join(directory, "default.json.lock");
+  const oldLease = JSON.stringify({ at: Date.now() - 60_000, owner: "old" });
+  await writeFile(lock, oldLease);
+  assert.equal((await old.readLease()).owner, "old", "the old holder has read its own lease");
+  await successor.takeOver({ at: Date.now() - 60_000, owner: "old", text: oldLease });
+  await successor.acquireLock();
+  const successorLease = await readFile(lock, "utf8");
+  assert.equal(await old.renewOnce("old"), true, "the old holder's renewal runs");
+  assert.equal(await readFile(lock, "utf8"), successorLease, "and the successor's lease is untouched");
+  await assert.rejects(() => old.assertOwner("old"), { code: "lock_lost" }, "so the old holder cannot commit");
+});
+
+test("a live holder's heartbeat keeps its lease even when the lease itself is old", async t => {
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory, lockTimeoutMs: 150, staleLockMs: 60 });
+  const lease = JSON.stringify({ at: Date.now() - 60_000, owner: "busy" });
+  await writeFile(join(directory, "default.json.lock"), lease);
+  await writeFile(join(directory, "default.json.lock.busy.beat"), String(Date.now() + 60_000));
+  await assert.rejects(() => store.create(entry("mona-x")), { code: "board_locked" });
+  assert.equal(await readFile(join(directory, "default.json.lock"), "utf8"), lease);
+});
+
+
+test("releasing never deletes a lease that a successor now holds", async t => {
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory });
+  const lock = join(directory, "default.json.lock");
+  const mine = JSON.stringify({ at: Date.now(), owner: "mine" });
+  const successor = JSON.stringify({ at: Date.now(), owner: "successor" });
+  // The holder reads its own lease; by the time it acts, a successor holds it.
+  await writeFile(lock, successor);
+  store.readLease = async () => ({ at: Date.now(), owner: "mine", text: mine });
+  await store.releaseLock("mine");
+  assert.equal(await readFile(lock, "utf8"), successor, "the successor's lease survives the old holder's release");
+});
+
+test("putting a lease back never overwrites one created in the meantime", async t => {
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory });
+  const lock = join(directory, "default.json.lock");
+  const third = JSON.stringify({ at: Date.now(), owner: "third" });
+  await writeFile(lock, third);
+  await store.restoreLease(JSON.stringify({ at: Date.now(), owner: "moved-aside" }));
+  assert.equal(await readFile(lock, "utf8"), third, "the newer lease stands");
 });

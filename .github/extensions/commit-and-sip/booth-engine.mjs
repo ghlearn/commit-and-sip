@@ -61,13 +61,17 @@ export class BoothEngine {
     // and call it "your drink".
     if (run.sync?.state === "rejected") return null;
     const url = new URL(this.leaderboardUrl);
+    // Personalised only with the opaque publication reference. A handle is
+    // unique at one booth, not across the event, so a handle-only link could
+    // open the board on another attendee's row and call it "your drink".
+    // Until this booth has minted the reference (before its first publish, or
+    // on a booth that does not publish at all), the link is the plain board.
+    if (!run.sync?.token) return url.toString();
     // Once the service confirms the drink, the handle it confirmed is the one
-    // on the board: another booth may have used this phrase first. The opaque
-    // publication reference pins the lookup either way, so a shared phrase can
-    // never lead a phone to somebody else's drink, and nothing in the URL
-    // spells out the drink's name.
-    url.searchParams.set("handle", run.sync?.state === "confirmed" ? run.sync.receipt.handle : run.handle);
-    if (run.sync?.token) url.searchParams.set("ref", publicRef(tokenHashOf(run.sync.token)));
+    // on the board: another booth may have used this phrase first. Nothing in
+    // the URL spells out the drink's name.
+    url.searchParams.set("handle", run.sync.state === "confirmed" ? run.sync.receipt.handle : run.handle);
+    url.searchParams.set("ref", publicRef(tokenHashOf(run.sync.token)));
     return url.toString();
   }
 

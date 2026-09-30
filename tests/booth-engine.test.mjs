@@ -211,8 +211,9 @@ test("the QR destination is only offered once staff configure a real one", async
   const open = await live.engine.open({ runId: "booth-2" });
   assert.equal(open.attendeeUrl, null, "there is nothing to scan before they have played");
   const entry = await live.engine.dispatch("booth-2", "submit_name", { name: "Copilot Comet" });
-  // No leaderboard client, so no publication and no reference: the handle alone.
-  assert.equal(entry.attendeeUrl, `https://sip.example.com/board?handle=${open.handle}`);
+  // No leaderboard client, so no publication reference: the plain board, never
+  // a handle-only link another booth's attendee could also match.
+  assert.equal(entry.attendeeUrl, "https://sip.example.com/board");
 
   for (const bad of ["not-a-url", "http://sip.example.com/board", "https://localhost/board"]) {
     assert.throws(() => new BoothEngine({ store: null, catalog, rules, leaderboardUrl: bad }),
@@ -251,7 +252,7 @@ test("a removed drink tells the attendee the truth rather than a pending rank", 
   const open = await engine.open({ runId: "booth-1" });
   const served = await engine.dispatch("booth-1", "submit_name", { name: "Ducky Regrettable" });
   assert.equal(served.removed, null);
-  assert.equal(served.attendeeUrl, `https://sip.example.com/board?handle=${open.handle}`);
+  assert.equal(served.attendeeUrl, "https://sip.example.com/board");
 
   await engine.removeDrink({ id: "ducky-regrettable", removedBy: "booth lead", reason: "reported" });
   const view = await engine.get("booth-1");

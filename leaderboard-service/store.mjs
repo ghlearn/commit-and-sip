@@ -127,9 +127,10 @@ export class ConcurrentWriteError extends Error {
 // moved, and replaces the file atomically. Reads always come from disk.
 //
 // The lock is a lease. An instance that dies holding it would otherwise block
-// the board forever, so a lock not renewed for `staleLockMs` is taken over.
-// A live holder renews it every `staleLockMs / 3`, so only a holder that has
-// stopped making progress for the whole period can lose it. And a holder that
+// the board forever, so a lease whose holder has shown no sign of life for
+// `staleLockMs` is taken over. A live holder beats on its own heartbeat file
+// every `staleLockMs / 3`, so only a holder that has stopped making progress
+// for the whole period can lose it. And a holder that
 // has lost it cannot commit: ownership is checked again immediately before
 // the rename, after the new board is already written aside, and a holder
 // that finds someone else's lease gives up and retries from disk.
@@ -214,8 +215,8 @@ export class FileStore extends MemoryStore {
         if (error.code !== "EEXIST") throw error;
       }
       const held = await this.readLease();
-      if (held && Date.now() - held.at > this.staleLockMs) {
-        await this.takeOver(held.text);
+      if (held && Date.now() - await this.lastSeen(held) > this.staleLockMs) {
+        await this.takeOver(held);
         continue;
       }
       if (held && Date.now() > deadline) {
@@ -225,58 +226,95 @@ export class FileStore extends MemoryStore {
     }
   }
 
-  // Removes the lease judged stale, and only that one. The lock is moved aside
-  // in one atomic rename, and what was moved is compared with what was judged.
-  // If it is anything else (renewed since, or a successor's fresh lease), it is
-  // put back exactly as it was, and nothing is taken over. If a third instance
-  // created a lock in that instant, the displaced holder cannot commit anyway:
-  // its ownership check before the rename will not find its lease.
-  async takeOver(staleText) {
-    const aside = `${this.lockFile}.${randomBytes(6).toString("hex")}.stale`;
+  // Taking a lease over and releasing one are this single step, and neither
+  // ever overwrites a lease. The lock is moved aside in one atomic rename and
+  // what was moved is compared with the lease the caller expected. Only on a
+  // match is it gone for good. On a mismatch (another instance's lease), what
+  // was moved is put back unchanged with an exclusive create, so it cannot
+  // land on top of anyone. A holder that loses its lease this way cannot
+  // commit: the ownership check before its rename fails.
+  async swapLease(expected) {
+    const aside = `${this.lockFile}.${randomBytes(6).toString("hex")}.aside`;
     try {
       await rename(this.lockFile, aside);
     } catch (error) {
-      if (error.code === "ENOENT") return;
+      if (error.code === "ENOENT") return false;
       throw error;
     }
-    const moved = await readFile(aside, "utf8");
-    if (moved !== staleText) {
-      try { await writeFile(this.lockFile, moved, { flag: "wx" }); }
-      catch (error) { if (error.code !== "EEXIST") throw error; }
+    try {
+      const moved = await readFile(aside, "utf8");
+      if (moved === expected) return true;
+      await this.restoreLease(moved);
+      return false;
+    } finally {
+      await rm(aside, { force: true }).catch(() => {});
     }
-    await rm(aside, { force: true });
   }
 
-  // Renews the lease while this instance holds it, and only while it is still
-  // this instance's: a renewal must never refresh a lease someone else took.
-  // The new lease replaces the old through a rename, so it is never half written.
+  // Puts back a lease that was moved aside by mistake. Exclusive create: if a
+  // third instance created a lock in that instant, theirs stands, and the
+  // displaced holder's ownership check stops it from committing.
+  async restoreLease(text) {
+    try { await writeFile(this.lockFile, text, { flag: "wx" }); }
+    catch (error) { if (error.code !== "EEXIST") throw error; }
+  }
+
+  // Renewal never touches the lock file. Each holder beats on its own file,
+  // named for its owner token, which no other instance ever writes. So a
+  // renewal cannot overwrite a successor's lease however it interleaves with
+  // a takeover, and the lock itself is never absent while held.
+  beatFile(owner) { return `${this.lockFile}.${owner}.beat`; }
+
+  // When the holder named in this lease was last known to be working: the
+  // later of the lease's own time and the holder's last heartbeat. Both are
+  // read for that one owner, so the age always belongs to the lease judged.
+  async lastSeen(lease) {
+    if (lease.owner === null) return lease.at;
+    try {
+      const beat = Number(await readFile(this.beatFile(lease.owner), "utf8"));
+      return Number.isFinite(beat) ? Math.max(lease.at, beat) : lease.at;
+    } catch (error) {
+      if (error.code === "ENOENT") return lease.at;
+      throw error;
+    }
+  }
+
+  // Removes the lease judged stale, and only that one, then its heartbeat.
+  async takeOver(lease) {
+    if (await this.swapLease(lease.text)) await rm(this.beatFile(lease.owner), { force: true }).catch(() => {});
+  }
+
+  // One heartbeat. Never throws: a missed beat is simply not a renewal, and
+  // the ownership check before the commit is what decides.
+  async renewOnce(owner) {
+    const temporary = `${this.beatFile(owner)}.${randomBytes(4).toString("hex")}.tmp`;
+    try {
+      await writeFile(temporary, String(Date.now()));
+      await rename(temporary, this.beatFile(owner));
+      return true;
+    } catch {
+      await rm(temporary, { force: true }).catch(() => {});
+      return false;
+    }
+  }
+
+  // Beats on a timer while this instance holds the lock. A rejected promise
+  // parked between ticks would count as unhandled and could stop the service,
+  // so renewOnce never throws.
   renewLease(owner) {
     let stopped = false;
     let inFlight = Promise.resolve();
-    // Never throws. A renewal that fails is simply not a renewal; the
-    // ownership check before the commit decides whether the write may land.
-    // A rejected promise parked between timer ticks would otherwise count as
-    // unhandled and could stop the whole service.
-    const renew = async () => {
-      const temporary = `${this.lockFile}.${randomBytes(6).toString("hex")}.renew`;
-      try {
-        if (stopped || (await this.readLease())?.owner !== owner) return;
-        await writeFile(temporary, FileStore.lease(owner));
-        await rename(temporary, this.lockFile);
-      } catch {
-        await rm(temporary, { force: true }).catch(() => {});
-      }
-    };
-    const timer = setInterval(() => { inFlight = inFlight.then(renew, renew); }, Math.floor(this.staleLockMs / 3));
+    const timer = setInterval(() => {
+      inFlight = inFlight.then(() => (stopped ? false : this.renewOnce(owner)));
+    }, Math.floor(this.staleLockMs / 3));
     timer.unref?.();
-    // Stopping waits for a renewal already under way. Clearing the timer alone
-    // does not: a renewal mid-flight could otherwise recreate the lease after
-    // the lock was released, and every instance would wait out a lease that
-    // nobody holds.
+    // Stopping waits for a beat already under way, then removes the heartbeat,
+    // so a finished holder leaves nothing that could keep a lease looking alive.
     return async () => {
       stopped = true;
       clearInterval(timer);
       await inFlight;
+      await rm(this.beatFile(owner), { force: true }).catch(() => {});
     };
   }
 
@@ -284,8 +322,11 @@ export class FileStore extends MemoryStore {
     if ((await this.readLease())?.owner !== owner) throw new LockLostError();
   }
 
+  // Releases only this instance's own lease, through the swap: a lease a
+  // successor holds is put back, never deleted.
   async releaseLock(owner) {
-    if ((await this.readLease())?.owner === owner) await rm(this.lockFile, { force: true });
+    const held = await this.readLease();
+    if (held?.owner === owner) await this.swapLease(held.text);
   }
 
   // The random suffix matters: process IDs can repeat across instances, and
