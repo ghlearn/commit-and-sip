@@ -1,123 +1,109 @@
-# Leaderboard service design
+# Leaderboard service
 
-**Status: a proposal awaiting decisions. Nothing is deployed, and no client ships.**
+**Status: deployed at <https://commit-and-sip-leaderboard.azurewebsites.net> and verified end to end with a staff test entry (2026-09-30). No attendee-facing QR code points at it, and none may until the blocklist is reviewed.**
 
-The booth already defines the half of this that matters. `services/leaderboard.mjs` fixes the payload, the receipt, and the failure behaviour, and `BoothEngine` fixes when publication is attempted. A service is free in how it stores and ranks, and constrained in how it answers. This document settles what is still open, and flags two requirements that are not optional because existing client behaviour already implies them.
+This document began as a proposal. It now records what was built, the decisions taken, and where the build departs from the proposal and why. The booth-side contract is still `services/leaderboard.mjs`. The service is constrained by it, not the other way round.
 
-## What the booth already guarantees
+## What the booth guarantees
 
 - **It saves first, always.** A failed submission can never cost an attendee their drink or their score.
-- **The payload is `{handle, id, name, score}`** and nothing else. No run ID, no device, no booth identity, because an anonymous handle is all a public board needs.
-- **The client owns its timeout.** A booth queue must not wait on a slow service.
-- **A local booth rank and an event rank are never conflated.** Until a receipt arrives the canvas says the place is still being confirmed.
+- **The payload is `{handle, id, name, score}`** and nothing else. No run ID, no device, no booth identity.
+- **The client owns its timeout** (4 seconds). A booth queue never waits on a slow service.
+- **A local booth rank and an event rank are never conflated.** Until a receipt arrives, the canvas says the place is still being confirmed.
 
-## Two requirements that are already decided
+## Decisions
 
-These are not preferences. Existing code will misbehave against a service that ignores them.
+### Hosting: one App Service B1 instance, board on `/home`
 
-### Publication must be idempotent on `(handle, id)`
-
-`BoothEngine.publish` republishes whenever sync state is `pending` or `failed` (`booth-engine.mjs:163`), and `refresh` calls it (`booth-engine.mjs:186`). An attendee sitting on the served screen through a transient failure will therefore resubmit the same entry repeatedly.
-
-A service that appends on each call will accumulate duplicates of one drink and inflate its own entry count. Treat `(handle, id)` as the natural key: re-publication updates in place and returns the current rank.
-
-### The receipt must echo `handle`, `name`, and `score` unchanged
-
-`validateReceipt` (`services/leaderboard.mjs:28`) compares exactly three fields against what was sent — `handle`, `name`, and `score` — and the booth displays no event rank at all when any of them differs.
-
-Be precise about what that does and does not require:
-
-- **`name` and `handle` are compared as strings**, so any rewriting breaks them. A backend that trims whitespace or title-cases the drink name is being helpful and will silently produce a blank rank line at every booth.
-- **`score` is compared as a JavaScript number**, so returning `2050.0` for `2050` is fine. Only a different value fails.
-- **`id` is not checked at all**, even though `submissionFor` sends it. A service that echoed a different entry's `id` alongside the right handle, name, and score would pass validation today.
-
-**Store a normalized form if you want, but reply with exactly what arrived.** `rank` must be a positive integer, and `entries`, if present, must be at least `rank`.
-
-That unchecked `id` is a gap in the client, not a licence for the service. Whoever builds the service should tighten `validateReceipt` to compare `id` in the same change, so the two sides land together rather than leaving the weaker check in place.
-
-## Decisions needed
-
-### 1. Hosting
-
-The service needs a write API and a public read page on the same HTTPS origin, because the QR target must satisfy `validateLeaderboardUrl`: HTTPS, no credentials, no fragment, no nonstandard port, no private or reserved host.
-
-| Option | Fit |
+| Considered | Outcome |
 | --- | --- |
-| **Azure Static Web Apps + managed Functions** | Public page and API in one resource, HTTPS and custom domain built in, free tier covers booth volume |
-| **Azure Container Apps** | Most control, scale-to-zero, but needs a container build and its own front door |
-| **GitHub Pages + Actions** | Read-only by nature; writes would need a token per booth and a commit per entry, which is slow and racy |
+| Static Web Apps + managed Functions + Table Storage | **Rejected after measuring the subscription.** Managed Functions cannot use managed identity, so Table Storage would need a shared key, which breaches GitHub storage control GH.15.05 from day one. Static Web Apps is also not offered in `westus3`. |
+| App Service + Table Storage via managed identity | **Rejected.** Granting the identity a data role needs `roleAssignments/write`, which the deployer (Contributor) does not have and cannot activate. |
+| **App Service B1, board as a JSON file on `/home`** | **Chosen.** Two resources, no storage account, no key, no role grant. `/home` is Azure-backed and survives restarts and redeploys. |
 
-**Recommendation: Static Web Apps + Functions**, with Table Storage behind it. Booth volume is a few hundred rows per event, so anything heavier is unjustified. GitHub Pages is listed only to record why it was rejected: a board that commits on every publish will lose entries to concurrent booths.
+Hosting is subscription **GitHub - NonProd - skills**, region `westus2`, resource group `rg-commit-and-sip-lb-westus2`, app `commit-and-sip-leaderboard`. West US 3 was chosen first, but at deployment time it had no B1 capacity in either of two resource groups. A quota check does not detect that: it confirms entitlement, not physical capacity. The full reasoning, including the policy findings, is in `.azure/deployment-plan.md`.
 
-**Unknown to the author:** which subscription, org policy, and custom domain this would live under. That is a decision, not a detail — the QR points at it and cannot change mid-event.
+**What the file store costs:** exactly one instance may write. The plan pins capacity to 1, `WEBSITE_DISABLE_OVERLAPPED_RECYCLING=1` prevents a second instance overlapping during a recycle, and every write within the process is serialised and lands atomically through a rename. If the file is unreadable, the service refuses to start rather than start empty and overwrite it.
 
-### 2. Booth authentication
+**Why the board is a projection:** every booth machine keeps the authoritative copy of its own drinks. `npm run leaderboard:republish` rebuilds the board from a booth. Run it on each booth machine after data loss or an `EVENT_ID` change. It also publishes drinks served before the booth was configured, which would otherwise never be sent.
 
-The payload deliberately carries no booth identity, so the service cannot tell who published from the body — and it should not learn it from there, because that would put booth identity into a document the public page renders.
+The service uses Node built-ins only. There are no runtime dependencies to audit, install, or patch.
 
-**Recommendation: a per-booth API key, presented as a request header, mapped server-side to a booth ID that is recorded on the entry and never rendered publicly.** Keys are issued per event, revocable individually, and rotated between events. This keeps the payload anonymous, gives retraction and abuse response something to work with, and lets one compromised booth be cut off without disturbing the others.
+### Booth authentication: two keys, two capabilities
 
-Writes must not be anonymous. An unauthenticated endpoint that accepts a handle and a score is a board anyone can fill.
+| Key | Can | Lives |
+| --- | --- | --- |
+| Booth key | Publish only | `booth/local-config.json` on every booth machine, and an App Service setting |
+| Staff key | Retract only | `booth/local-config.json` on machines allowed to take drinks down, and an App Service setting |
 
-A key proves *which booth* is publishing, not that the booth is running unmodified code. That is why the service recomputes the score rather than trusting the submitted one — see [the API section](#the-service-must-recompute-the-score-not-trust-it).
+Keys are presented as `Authorization: Bearer`, compared in constant time, and must be at least 32 characters and differ from each other. `npm run leaderboard:configure` generates them once and keeps them after that. The same keys go into the deployment as `@secure()` Bicep parameters, so an infrastructure redeploy cannot silently wipe settings that were added by hand.
 
-### 3. Retraction
+**Departure from the proposal:** the proposal suggested per-booth keys mapped to a booth ID. This build uses one shared booth key. The cost is that one compromised booth cannot be cut off without re-keying all of them. For an event with a few booth machines, that was judged acceptable. Per-booth keys would also put a booth identity into storage, and at present everything stored is either shown publicly or unreadable.
 
-The contract already requires this, and staff takedown is incomplete without it: today a drink can be pulled from a booth menu while the public board still shows it.
+### Every submission is re-checked with the booth's own code
 
-**Recommendation: retract as a tombstone, mirroring the booth.** The entry stops being displayed and stops counting toward ranks, but the drink **`id` stays reserved globally** — not the `(handle, id)` pair.
+A key proves which service a request is allowed into, not that the booth code is unmodified. The service therefore imports the booth's modules and applies them itself:
 
-The pair is the right key for *locating and authorizing* a publication, but it is the wrong key for a reservation. `id` is derived from the normalized name (`booth-menu.mjs:36`), and the booth reserves it by `id` alone (`booth-menu.mjs:42`). Reserving `(handle, id)` would let a different attendee at another booth submit the same name under a new handle and walk straight past the tombstone — which is precisely the case retraction exists to stop.
+- `scoreCoffeeName` rechecks the name rules, the blocklist, and the house-example exclusion, and recomputes the score. The request is refused with `422 score_mismatch` if the score or ID differ, and with `422 rejected_name` if the name is refused.
+- The handle must be built from `booth/handle-words.json`, optionally with the eight-hex collision suffix, or the request is refused with `422 invalid_handle`.
+- Ranking is the booth's own `leaderboard()`: competition ranking, where equal scores share a rank and the next rank skips. The booth and the board cannot disagree about a tie.
 
-A hard delete is wrong for the same reason: the contract makes cross-booth uniqueness the service's job. If a retracted name is fully forgotten, a name removed at booth A can be re-submitted at booth B, and the service is the only component positioned to refuse it.
+The service moderates with the blocklist deployed alongside it. Updating the blocklist means redeploying the service. `/healthz` reports `moderation: "placeholder"` until the list is reviewed, and the service logs a warning at start-up.
 
-**Open:** whether a booth key may retract only its own entries, or any entry. Suggested split — booth keys retract what they published, a separate admin key retracts anything — but the failure case is real: staff at booth B may be the ones who notice something published at booth A.
+**Version skew is real.** A rubric change that reaches the service before the booths makes their submissions fail with `score_mismatch`. The booth shows those drinks as still being confirmed, and the reason is in its sync record. Deploy the service from the same commit the booths run.
 
-### 4. Server-side moderation
+### Retraction: delete the entry, reserve the name everywhere
 
-**This is the point most easily missed.** Booths run from *copies* of a template repository, so each booth's blocklist is frozen at whatever the admin cloned. A booth set up a month ago is screening against a month-old list, and nothing propagates an update to it.
+Staff take a drink down from the admin canvas or with `npm run remove`. The booth commits the removal locally first. The network is never on that path. It then asks the service to retract the drink.
 
-The service is the only component that can hold a current list. It must re-screen every submission at publish time rather than trusting that the booth already did. That is defence in depth against stale clones, not distrust of the booth.
+The service deletes the entry and **reserves the drink ID**. That ID is derived from the normalised name, so a name taken down at booth A cannot be republished from booth B, or from booth A again. **Departure from the proposal:** the proposal stored the reservation as a readable tombstone. This build stores only an HMAC fingerprint of the ID. Its key is generated by the service on first start and kept beside the board on the app's private storage, mode 0600. The key is not derived from the staff key, because rotating that key would then silently void every reservation.
 
-A rejected publish must fail the submission, not silently alter it — the receipt rule above means a sanitized name would surface as a blank rank rather than an explanation.
+The stored board therefore holds no name, reason, or record of who removed anything. Those stay in the booth's local ledger. A refused resubmission gets `409 unavailable_drink` with the booth's own blocklist wording, so the counter cannot tell a takedown from a blocklist hit.
 
-### 5. Retention
+A retraction for a drink that never synced returns `404`, and the booth records that as `absent`. It **still reserves the name**, because staff often catch a name before it syncs. A retraction that cannot reach the service is recorded as `failed`, shown in the admin canvas, and retried on its **Refresh** or with `npm run remove -- --retry`. A publish still in flight when staff remove the drink is retracted again once its receipt arrives.
 
-Entries are low-PII by construction: handles are curated anonymous phrases and carry no attendee identity. Drink names are user-generated content.
+### Receipts are checked on every field
 
-**Recommendation: entries live for the event plus a defined window, then are purged or archived; retraction records outlive entries, because they are the audit trail for a moderation decision.** The specific windows are a human decision, like the blocklist content, and should be recorded rather than defaulted.
+The service replies with `{handle, id, name, score, rank, entries}`, echoing exactly what arrived. As the proposal asked, `validateReceipt` now also compares `id`, so a receipt about a different entry that shared the handle, name and score is refused.
 
-### 6. The public page
+### The public page
 
-It is scanned from a phone, in a queue, by someone who has just met it. Show handle, drink name, score, and rank. Do **not** show booth identity, run IDs, or staff attribution. Retracted entries must not appear. It should be legible without JavaScript if practical, and must meet the same accessibility bar as the canvas.
+`GET /` shows rank, drink, barista handle, and score, for the top 20 plus the true total. With `?handle=` it also shows "your drink" wherever it ranks. It shows no booth identity, run IDs, or staff attribution, and **no mascot art**, because `mona.png` is not cleared for publication. It polls every 10 seconds. If polling fails, it keeps the last board and says how old it is, so a dropped connection gives a visibly stale board rather than a silently wrong one.
 
-## Proposed API
+Security measures:
+
+- A strict CSP with no inline script or style.
+- All attendee text is assigned through `textContent`.
+- `nosniff` and `no-referrer` headers.
+- `no-store` on the API.
+
+**Not done:** the page needs JavaScript. The proposal asked for it to be legible without JavaScript "if practical". Server-rendering was judged not worth the second escaping surface for a board read on phones and a monitor.
+
+### Retention: still open
+
+Each `EVENT_ID` is a separate board file, so setting a new ID starts a fresh board and leaves the old one on disk. How long old boards are kept, and when they are deleted, is a human decision that has not been made.
+
+## API
 
 ```
-POST /api/entries          # authenticated; idempotent on (handle, id)
-  -> 200 { handle, id, name, score, rank, entries }   # handle/name/score echoed verbatim
-  -> 422 score_mismatch                               # recomputed score disagrees
-
-POST /api/entries/retract  # authenticated; tombstones the drink id globally
-  -> 200 { retracted: true }
-
-GET  /                     # public board, the QR destination
+GET    /                        public board (the future QR destination)
+GET    /api/board[?handle=]     { asOf, total, entries[<=20], you? }
+POST   /api/entries             booth key. 201 new, 200 same entry again,
+                                409 duplicate_drink | unavailable_drink,
+                                422 score_mismatch | rejected_name | invalid_handle
+DELETE /api/entries/:id         staff key. 204 retracted, 404 absent. Reserves either way
+GET    /healthz                 { ok, moderation: "reviewed" | "placeholder" }
 ```
-
-### The service must recompute the score, not trust it
-
-An API key authenticates *a booth*, not the booth's code. Booths run from copies of a template that anyone can edit, so a modified or compromised booth can submit any positive integer and manufacture the top rank. Accepting the submitted score makes the board only as trustworthy as the least-modified clone at the event.
-
-The contract already forecloses this: the score is "a pure function of the submitted name" and "a rank can be recomputed server-side from stored names" ([integration contract](integration-contract.md)). The service should recompute both `id` and `score` from `name` using the same rubric, and reject a mismatch rather than storing it.
-
-The cost is real and should be planned for: the service needs the rubric from `services/name-score.mjs`, and a rubric change in this repository becomes a version skew that rejects live submissions. Vendor the rubric with an explicit version, send that version on the submission, and decide the skew behaviour deliberately — it is the one place where a booth update can take an event down.
-
-`validateLeaderboardClient` currently requires only `publish(submission)`. It needs a matching retraction method before the client side of this is complete — that is a change to this repository, not to the service.
 
 ## Non-goals
 
-Live-updating displays, per-booth boards, historical events, attendee accounts, and any form of login for attendees. The exercise is five minutes long and anonymous by design.
+Live-updating push displays, per-booth boards, historical events, attendee accounts, and any form of login for attendees.
 
 ## What blocks launch, separately from build
 
-A public board publishes attendee-invented names to the internet, where the booth cannot retract them. **The moderation blocklist is still an unreviewed placeholder** (see [sourcing proposal](blocklist-sourcing.md)). That content decision gates turning a board on, not building one, and it has no engineering dependency — it can be settled in parallel.
+A public board publishes attendee-invented names to the internet. Two gates remain, and neither is engineering:
+
+- **The moderation blocklist is still an unreviewed placeholder** (see the [sourcing proposal](blocklist-sourcing.md)). Until it is reviewed, do not set `leaderboardUrl`, which is the setting that puts a QR code in front of attendees.
+- **Brand review of the mascot art** (see [the asset checklist](../.github/images/README.md)).
+
+The service is configured separately from the QR code: `leaderboardApi` controls publishing, and `leaderboardUrl` controls the QR code. That separation is deliberate. The whole pipeline can be proven with staff test entries while the QR code stays off.

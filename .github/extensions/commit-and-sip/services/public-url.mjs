@@ -54,7 +54,7 @@ async function validatePublicDns(url) {
 
 // The default transport pins the DNS result at socket creation, so a second
 // DNS lookup cannot turn a previously public address into an internal target.
-function publicFetch(url, { method, signal, headers, body }) {
+export function publicFetch(url, { method, signal, headers, body }) {
     validateLeaderboardUrl(url);
     return new Promise((resolve, reject) => {
         const request = httpsRequest(url, {
@@ -77,6 +77,7 @@ function publicFetch(url, { method, signal, headers, body }) {
             response.on('error', reject);
             response.on('end', () => resolve({
                 ok: response.statusCode >= 200 && response.statusCode < 300,
+                status: response.statusCode,
                 headers: { get: (name) => response.headers[name.toLowerCase()] ?? null },
                 json: async () => JSON.parse(Buffer.concat(chunks).toString('utf8')),
             }));

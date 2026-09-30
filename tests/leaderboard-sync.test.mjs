@@ -34,6 +34,8 @@ test("a receipt is rejected unless it is about the entry that was sent", () => {
   rejects({ ...submission, handle: "other-handle", rank: 1 }, "receipt_mismatch");
   rejects({ ...submission, name: "Ducky Dawn", rank: 1 }, "receipt_mismatch");
   rejects({ ...submission, score: 4999, rank: 1 }, "receipt_mismatch");
+  rejects({ ...submission, id: "someone-elses-drink", rank: 1 }, "receipt_mismatch");
+  rejects({ entries: 9, handle: submission.handle, name: submission.name, rank: 3, score: 2050 }, "receipt_mismatch");
   rejects({ ...submission, rank: 0 }, "invalid_receipt");
   rejects({ ...submission, rank: 1.5 }, "invalid_receipt");
   rejects({ ...submission, rank: 5, entries: 2 }, "invalid_receipt");
@@ -62,6 +64,10 @@ test("the view never implies an event rank the service has not confirmed", () =>
 test("a client must expose publish", () => {
   assert.equal(validateLeaderboardClient(null), null);
   assert.throws(() => validateLeaderboardClient({}), { code: "invalid_leaderboard_client" });
+  const publish = async () => ({});
+  assert.ok(validateLeaderboardClient({ publish }), "a booth may publish without being able to retract");
+  assert.ok(validateLeaderboardClient({ publish, retract: async () => "retracted" }));
+  assert.throws(() => validateLeaderboardClient({ publish, retract: "yes" }), { code: "invalid_leaderboard_client" });
   assert.throws(() => new BoothEngine({ store: {}, catalog, rules, leaderboardClient: { publish: 1 } }),
     { code: "invalid_leaderboard_client" });
 });

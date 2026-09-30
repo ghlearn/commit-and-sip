@@ -19,6 +19,9 @@ export class AdminPanel {
   async dispatch(action, input = {}) {
     if (action === "refresh") {
       exactInput(input);
+      // Refresh is when a takedown that missed the public board is retried,
+      // mirroring how the booth retries a publish that did not land.
+      await this.engine.retryRetractions().catch(() => {});
       return this.get();
     }
     if (action === "export_results") {
@@ -31,7 +34,7 @@ export class AdminPanel {
       const record = await this.engine.removeDrink({
         id: input.id, reason: input.reason, removedBy: input.removedBy,
       });
-      return { ...(await this.get()), notice: { kind: "removed", name: record.name } };
+      return { ...(await this.get()), notice: { kind: "removed", name: record.name, published: record.published } };
     }
     if (action === "close_station") {
       exactInput(input, ["runId", "closedBy"]);

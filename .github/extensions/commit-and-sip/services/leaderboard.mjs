@@ -20,12 +20,15 @@ export function submissionFor(entry) {
 }
 
 // A receipt is trusted only when it is about the entry that was actually sent.
-// A service that answers with a different handle, name or score is reporting on
-// someone else, and its rank must never be shown next to this attendee's drink.
+// A service that answers with a different handle, ID, name or score is
+// reporting on someone else, and its rank must never be shown next to this
+// attendee's drink. The ID is compared too: without it, a receipt for another
+// entry that happened to share the handle, name and score would pass.
 export function validateReceipt(receipt, submission) {
   requireValue(receipt && typeof receipt === "object" && !Array.isArray(receipt),
     "invalid_receipt", "The leaderboard service returned an unusable receipt.");
-  requireValue(receipt.handle === submission.handle && receipt.name === submission.name && receipt.score === submission.score,
+  requireValue(receipt.handle === submission.handle && receipt.id === submission.id
+    && receipt.name === submission.name && receipt.score === submission.score,
     "receipt_mismatch", "The leaderboard receipt does not match the submitted entry.");
   requireValue(Number.isSafeInteger(receipt.rank) && receipt.rank > 0,
     "invalid_receipt", "The leaderboard receipt has no usable rank.");
@@ -84,10 +87,14 @@ export function syncView(sync) {
 }
 
 // A client publishes one submission and returns a receipt, or throws. It owns
-// its own timeout: a booth queue must not wait on a slow service. No client is
-// shipped, because no leaderboard destination is deployed.
+// its own timeout: a booth queue must not wait on a slow service. It may also
+// retract(id) a drink staff took down; a client without it is a booth that
+// can publish but not delete, and takedowns there report "not-configured".
+// services/leaderboard-client.mjs is the HTTP client for leaderboard-service/.
 export function validateLeaderboardClient(client) {
   requireValue(client === null || typeof client?.publish === "function",
     "invalid_leaderboard_client", "A leaderboard client must expose publish(submission).");
+  requireValue(client === null || client.retract === undefined || typeof client.retract === "function",
+    "invalid_leaderboard_client", "A leaderboard client's retract must be a function when present.");
   return client;
 }

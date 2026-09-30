@@ -25,7 +25,7 @@ Commit & Sip is a project-local Copilot App canvas extension, registered as `com
 It is **not** event-ready. Four things are missing and none of them is code:
 
 - **The moderation blocklist is an unreviewed placeholder.** `booth/blocked-terms.json` ships with no real terms, and the extension logs a warning on every start while that is true. A human must review and approve the list before attendee names go on a public menu. Staff can take a drink down after the fact with `npm run remove`, which is what makes an imperfect list survivable, but that is a response and not a substitute.
-- **No leaderboard service is deployed.** The client seam exists and is local-first, so a missing service never blocks an attendee, but nothing receives submissions.
+- **The leaderboard service is deployed but not yet advertised.** [It](docs/leaderboard-service.md) runs at <https://commit-and-sip-leaderboard.azurewebsites.net> and was verified end to end with a staff test entry. It moderates with the same placeholder blocklist, so **do not set `leaderboardUrl`**, the setting that shows attendees a QR code, until the list is reviewed. Publishing is local-first, so an unreachable service never blocks an attendee.
 - **There is no public QR destination.** Do not publish a placeholder QR as a production link.
 - **Brand, trademark, and privacy review** of the mascot names and artwork has not happened, and the attendee screen already carries the official Mona mascot in the cup. See [the asset checklist](.github/images/README.md) for its provenance and what happens if review says no.
 
@@ -74,7 +74,7 @@ Scores run from 1 to **5,000** and come from a deterministic rubric in code, not
 | [Learner entry guide](docs/learner-guide.md) | Attendees and facilitators |
 | [Booth runbook](booth/RUNBOOK.md) | Setup, moderation, recovery, reset, and event staff |
 | [Blocklist sourcing proposal](docs/blocklist-sourcing.md) | Whoever owns the moderation decision |
-| [Leaderboard service design](docs/leaderboard-service.md) | Whoever builds the event leaderboard |
+| [Leaderboard service](docs/leaderboard-service.md) | Whoever deploys or operates the event leaderboard |
 | [Integration contract](docs/integration-contract.md) | Leaderboard and service implementers |
 | [Architecture and validation](docs/architecture.md) | Maintainers |
 | [Asset capture checklist](.github/images/README.md) | Authentic screenshots, accessible QR, branding |
@@ -85,13 +85,19 @@ The approved outline is preserved verbatim, including its original proposals and
 
 ## Staff configuration and data
 
-The booth reads one optional ignored file, `booth/local-config.json`. It currently supports a single key:
+The booth reads one optional ignored file, `booth/local-config.json`, with two independent settings:
 
 ```json
-{"leaderboardUrl": "https://example-leaderboard-host/board"}
+{
+  "leaderboardApi": {"url": "https://<app>.azurewebsites.net", "boothKey": "<64 hex>", "staffKey": "<64 hex>"},
+  "leaderboardUrl": "https://<app>.azurewebsites.net/"
+}
 ```
 
-That URL must be public HTTPS with no credentials, fragment, or nonstandard port. Retired pull-request keys such as `mode`, `runs`, `repo`, and `requiredChecks` are rejected on start rather than ignored, so a stale config cannot look configured. Never put credentials in that file, the renderer, the repository, or a QR URL.
+- `leaderboardApi` makes the booth **publish** to the leaderboard service, and lets takedowns retract from it. Write it with `npm run leaderboard:configure`, never by hand. Omit `staffKey` on a machine that should not take drinks down.
+- `leaderboardUrl` puts a **QR code** in front of attendees. Leave it unset until the moderation blocklist is reviewed and the brand review is done.
+
+Both URLs must be public HTTPS with no credentials, fragment, or nonstandard port. The file is readable only by its owner and is never packaged or committed. Retired pull-request keys such as `mode`, `runs`, `repo`, and `requiredChecks` are rejected on start rather than ignored, so a stale config cannot look configured. The two API keys belong in that file and nowhere else: not in the renderer, the repository, or a QR URL.
 
 State persists in `$COPILOT_HOME/extensions/commit-and-sip/artifacts/ledger.json`; `COPILOT_HOME` defaults to `~/.copilot`. Staff may set `COMMIT_AND_SIP_DATA_DIR` to an absolute directory before the host launches. The store uses `ledger.lock` and atomic, fsynced writes. Closing or reloading a panel does not reset the booth, and hand-over does not erase the house menu.
 

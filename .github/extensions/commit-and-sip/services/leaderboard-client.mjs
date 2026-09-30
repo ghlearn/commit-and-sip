@@ -1,0 +1,74 @@
+import { requireValue } from "../domain.mjs";
+import { publicFetch, validateLeaderboardUrl } from "./public-url.mjs";
+
+// The booth's HTTP client for the event leaderboard service in
+// leaderboard-service/. It owns its own timeout, because a booth queue must
+// never wait on conference wifi: the drink is already durable locally, and a
+// failed publish is retried on the next refresh.
+//
+// Two keys, two capabilities. The booth key can only publish. The staff key
+// can only retract, and a booth machine that should not take drinks down is
+// simply configured without one.
+
+const MIN_KEY_LENGTH = 32;
+
+export function validateLeaderboardApi(api) {
+  requireValue(api !== null && typeof api === "object" && !Array.isArray(api),
+    "invalid_config", "leaderboardApi must be an object with url and boothKey.", 400);
+  const allowed = ["boothKey", "staffKey", "url"];
+  const unknown = Object.keys(api).filter(key => !allowed.includes(key));
+  requireValue(unknown.length === 0, "invalid_config", `Unknown leaderboardApi settings: ${unknown.join(", ")}.`, 400);
+  // The same rule the QR destination uses: a genuinely public HTTPS address.
+  try { validateLeaderboardUrl(api.url); }
+  catch { requireValue(false, "invalid_config", "leaderboardApi.url must be a public HTTPS address.", 400); }
+  for (const name of ["boothKey", "staffKey"]) {
+    if (name === "staffKey" && api.staffKey === undefined) continue;
+    requireValue(typeof api[name] === "string" && api[name].length >= MIN_KEY_LENGTH,
+      "invalid_config", `leaderboardApi.${name} must be at least ${MIN_KEY_LENGTH} characters.`, 400);
+  }
+  requireValue(api.staffKey === undefined || api.staffKey !== api.boothKey,
+    "invalid_config", "leaderboardApi.boothKey and staffKey must differ.", 400);
+  return api;
+}
+
+async function failure(response, verb) {
+  let code = "unknown";
+  try { code = (await response.json()).error ?? code; } catch { /* the status is enough */ }
+  return new Error(`The leaderboard ${verb} failed: ${response.status} ${code}.`);
+}
+
+export function createLeaderboardClient({ url, boothKey, staffKey = null, timeoutMs = 4000, fetchImpl = globalThis.fetch }) {
+  const endpoint = path => new URL(path, url.endsWith("/") ? url : `${url}/`).toString();
+  const client = {
+    async publish(submission) {
+      const response = await fetchImpl(endpoint("api/entries"), {
+        body: JSON.stringify(submission),
+        headers: { Authorization: `Bearer ${boothKey}`, "Content-Type": "application/json" },
+        method: "POST", signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!response.ok) throw await failure(response, "submission");
+      return response.json();
+    },
+  };
+  if (staffKey) {
+    // "absent" is a success: the entry was never published, or an earlier
+    // retract already took it down. Either way it is not on the public board.
+    client.retract = async id => {
+      const response = await fetchImpl(endpoint(`api/entries/${encodeURIComponent(id)}`), {
+        headers: { Authorization: `Bearer ${staffKey}` }, method: "DELETE", signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (response.status === 204) return "retracted";
+      if (response.status === 404) return "absent";
+      throw await failure(response, "retraction");
+    };
+  }
+  return client;
+}
+
+// Production traffic goes through publicFetch, which pins DNS to public
+// addresses at socket creation, so a hostile or hijacked record cannot turn
+// the configured service into a request against the booth's own network.
+export function leaderboardClientFromConfig(config) {
+  const api = config?.leaderboardApi;
+  return api ? createLeaderboardClient({ ...validateLeaderboardApi(api), fetchImpl: publicFetch }) : null;
+}

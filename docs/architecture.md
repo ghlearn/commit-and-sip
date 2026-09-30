@@ -19,11 +19,14 @@
 | `services/name-score.mjs` | Deterministic rubric scoring out of 5,000 |
 | `services/booth-menu.mjs` | House menu projection, duplicate detection, standings, staff takedown |
 | `services/moderation.mjs` | Evasion-resistant blocklist matching and readiness reporting |
-| `services/leaderboard.mjs` | Client seam for an event leaderboard; no client ships today |
+| `services/leaderboard.mjs` | Client seam for an event leaderboard: payload, receipt check, sync states |
+| `services/leaderboard-client.mjs` | HTTP client for `leaderboard-service/`: publish and retract, own timeout, DNS-pinned transport |
 | `services/qr.mjs` | Server-side QR data URLs, required because CSP forbids remote scripts |
 | `services/public-url.mjs` | Strict public-HTTPS validation and reachability checks for any configured leaderboard |
 | `booth/` | Orders, curated handle words, name rules, blocklist, runbook |
-| `scripts/` and `tests/` | Maintainer validation, Node version guard, approved-URL QR generation, staff takedown |
+| `scripts/` and `tests/` | Maintainer validation, Node version guard, approved-URL QR generation, staff takedown, leaderboard configure, package and republish |
+| `leaderboard-service/` | The public event leaderboard. Node built-ins only; re-checks every submission with the booth's own modules. See [its design](leaderboard-service.md) |
+| `infra/` | Bicep for the leaderboard: one App Service plan and one web app |
 
 The engine owns every authoritative fact. The browser renders a projection and requests actions; it cannot set a score, a handle, or a menu entry.
 
@@ -57,9 +60,11 @@ A blocklist only catches what someone predicted. `removeDrink` covers the rest: 
 
 Publication is local-first. The engine commits the served result inside the store transaction, releases the lock, and only then attempts a remote publication. A failed publication never blocks or alters the attendee's local result; a refresh retries it.
 
-Receipts are accepted only when the handle, name, and score match what was submitted. A mismatched receipt is recorded as a failure and never displayed. The payload deliberately excludes the run ID, device, and booth identity.
+Receipts are accepted only when the handle, ID, name, and score match what was submitted. A mismatched receipt is recorded as a failure and never displayed. The payload deliberately excludes the run ID, device, and booth identity.
 
-No leaderboard service is deployed and `leaderboardClient` defaults to null. Any configured URL must pass `validateLeaderboardUrl`: HTTPS only, no credentials, fragment, or nonstandard port, and no private, loopback, reserved, or reserved-suffix host. Do not present a placeholder QR as a production destination.
+Takedown reaches the public board: the removal commits locally, then `retract(id)` runs, and its outcome is recorded on the removal and retried if it failed. The client is built only when `leaderboardApi` is configured, and is null otherwise. The service is deployed at <https://commit-and-sip-leaderboard.azurewebsites.net>, and no attendee-facing QR code points at it.
+
+Publishing (`leaderboardApi`) and the attendee QR (`leaderboardUrl`) are separate settings, so the service can be proven end to end while no QR is shown. Any configured URL must pass `validateLeaderboardUrl`: HTTPS only, no credentials, fragment, or nonstandard port, and no private, loopback, reserved, or reserved-suffix host. Do not present a placeholder QR as a production destination.
 
 ## Staff surface and event lifecycle
 

@@ -174,12 +174,21 @@
     if (chosen && invented.some(entry => entry.id === chosen)) select.value = chosen;
   }
 
+  // A takedown that did not reach the public board must not read as done.
+  const PUBLIC_BOARD = {
+    absent: "was not on the public leaderboard",
+    failed: "is NOT yet off the public leaderboard. Refresh to retry",
+    "not-configured": "this booth has no staff key for the public leaderboard, so remove it there separately",
+    retracted: "was taken off the public leaderboard",
+  };
+
   function removals(state) {
     const list = $("admin-removals");
     list.replaceChildren();
     $("admin-removals-empty").hidden = state.removals.length > 0;
     for (const record of state.removals) {
-      line(list, `${record.name} - removed by ${record.removedBy} on ${new Date(record.removedAt).toLocaleString()} - ${record.reason}`);
+      const board = PUBLIC_BOARD[record.published];
+      line(list, `${record.name} - removed by ${record.removedBy} on ${new Date(record.removedAt).toLocaleString()} - ${record.reason}${board ? ` - ${board}` : ""}`);
     }
   }
 
@@ -196,7 +205,10 @@
     if (!state.notice) { box.hidden = true; return; }
     if (state.notice.kind === "closed") box.textContent = `Station ${state.notice.handle} was closed.`;
     else if (state.notice.kind === "exported") box.textContent = `Results exported to ${state.notice.path}`;
-    else if (state.notice.kind === "removed") box.textContent = `${state.notice.name} was removed from the house menu.`;
+    else if (state.notice.kind === "removed") {
+      const board = PUBLIC_BOARD[state.notice.published];
+      box.textContent = `${state.notice.name} was removed from the house menu${board ? ` and ${board}` : ""}.`;
+    }
     else if (state.notice.kind === "wiped") {
       box.textContent = `Event archived to ${state.notice.archive} and the booth was reset. ${state.notice.was.invented} drink(s) and ${state.notice.was.removals} removal(s) are in that file and nowhere else. Copy it off this machine.`;
     }

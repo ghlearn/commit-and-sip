@@ -66,7 +66,7 @@ export class BoothEngine {
   // rival's entry is worse than no takedown at all. Reached through the staff
   // script instead.
   async removeDrink({ id, removedBy, reason }) {
-    return this.store.transaction(data => {
+    const record = await this.store.transaction(data => {
       const record = removeDrink(this.houseMenu(data), this.removalLog(data), id, { removedBy, reason });
       // Whoever entered it may still be at the counter. Mark their run so the
       // screen says what happened instead of showing a rank that no longer
@@ -79,6 +79,60 @@ export class BoothEngine {
       }
       return record;
     });
+    // The local takedown is already committed and never depends on the
+    // network. Reaching the public board is attempted after it, and a failure
+    // is recorded so staff can see it and retry rather than assume it worked.
+    return { ...record, published: await this.retract(record.id) };
+  }
+
+  // Takes a removed drink off the public board and records the outcome on the
+  // removal record: "retracted", "absent" (it was never published there), or
+  // "failed". "not-configured" means this booth has no staff key for the
+  // service, which is a real gap in a takedown and is reported as one.
+  async retract(id) {
+    let published;
+    if (!this.leaderboardClient?.retract) {
+      published = "not-configured";
+    } else {
+      try { published = await this.leaderboardClient.retract(id); }
+      catch { published = "failed"; }
+    }
+    await this.store.transaction(data => {
+      const record = this.removalLog(data).findLast(item => item.id === id);
+      if (record) record.published = published;
+    });
+    return published;
+  }
+
+  // Retries every takedown that did not reach the public board. Safe to call
+  // repeatedly: a retraction that already landed comes back "absent".
+  async retryRetractions() {
+    const data = await this.store.read();
+    const pending = this.removalLog(data).filter(record => record.published === "failed");
+    const results = [];
+    for (const record of pending) results.push({ id: record.id, published: await this.retract(record.id) });
+    return results;
+  }
+
+  // Sends every drink this booth still has on its menu to the public board,
+  // whatever its sync state. The booth is the authoritative copy, so this
+  // rebuilds the board after its data is lost or a new EVENT_ID is set, and it
+  // publishes drinks served before this booth was configured, whose sync is
+  // "disabled" and would otherwise never be sent. Entries already on the board
+  // come back as successes, so running it twice is harmless. Removed drinks are
+  // never republished.
+  async republishAll() {
+    if (!this.leaderboardClient) return [];
+    const data = await this.store.read();
+    const runIds = this.houseMenu(data).filter(entry => !entry.example && data.runs[entry.runId])
+      .map(entry => entry.runId);
+    const results = [];
+    for (const runId of runIds) {
+      await this.publish(runId, { again: true });
+      const run = (await this.store.read()).runs[runId];
+      results.push({ runId, name: run.submission?.name, state: run.sync.state, reason: run.sync.reason });
+    }
+    return results;
   }
 
   // --- Staff operations -----------------------------------------------------
@@ -273,11 +327,12 @@ export class BoothEngine {
   // Publishing happens after the local commit and outside the store lock, so a
   // slow or unreachable service never holds up the booth or the next attendee.
   // The entry is already durable; only the receipt is still missing.
-  async publish(runId) {
+  async publish(runId, { again = false } = {}) {
     if (!this.leaderboardClient) return;
     const data = await this.store.read();
     const run = data.runs[runId];
-    if (run?.sync?.state !== "pending" && run?.sync?.state !== "failed") return;
+    if (!again && run?.sync?.state !== "pending" && run?.sync?.state !== "failed") return;
+    if (!run?.sync || run.removed) return;
     const entry = this.houseMenu(data).find(item => !item.example && item.runId === runId);
     if (!entry) return;
     const submission = submissionFor(entry);
@@ -287,13 +342,19 @@ export class BoothEngine {
     } catch (error) {
       outcome = { ok: false, error };
     }
-    await this.store.transaction(stored => {
+    const removedMeanwhile = await this.store.transaction(stored => {
       const current = stored.runs[runId];
-      if (!current?.sync) return;
+      if (!current?.sync) return false;
       current.sync = outcome.ok
         ? confirmedSync(current.sync, outcome.receipt)
         : failedSync(current.sync, outcome.error);
+      return Boolean(current.removed);
     });
+    // Staff can take a drink down while its publish is still in flight. The
+    // retraction may then reach the service before the submission does, and
+    // the submission would put the drink straight back on the public board.
+    // The receipt is proof it landed, so take it down again.
+    if (outcome.ok && removedMeanwhile) await this.retract(entry.id);
   }
 
   async dispatch(runId, action, input = {}) {

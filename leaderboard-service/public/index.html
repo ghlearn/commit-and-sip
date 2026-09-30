@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Commit &amp; Sip · House leaderboard</title>
+  <link rel="stylesheet" href="/board.css">
+  <script src="/board.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">Commit &amp; Sip</p>
+      <h1>House leaderboard</h1>
+      <p class="lede">Every drink here was invented at the booth and scored out of 5,000.</p>
+    </header>
+
+    <section id="you" class="you" hidden aria-live="polite"></section>
+
+    <p id="status" class="status" role="status">Loading the board…</p>
+
+    <table id="board" hidden>
+      <caption id="caption"></caption>
+      <thead>
+        <tr><th scope="col">Rank</th><th scope="col">Drink</th><th scope="col">Barista</th><th scope="col" class="num">Score</th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+
+    <p id="empty" class="empty" hidden>No drinks yet. Be the first to name one at the booth.</p>
+  </main>
+  <footer>Mona Sans is used under the <a href="/fonts/OFL.txt">SIL Open Font License</a>.</footer>
+</body>
+</html>

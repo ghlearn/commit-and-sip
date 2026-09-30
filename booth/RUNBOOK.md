@@ -2,7 +2,7 @@
 
 **The booth runs entirely in the canvas.** Attendees never open GitHub, a terminal, or an editor. Commands below are staff-only and run from the repository root unless stated otherwise.
 
-**Not event-ready.** The moderation blocklist is an unreviewed placeholder, no leaderboard service is deployed, there is no public QR destination, and brand review has not happened. See those sections before running a public booth.
+**Not event-ready.** The moderation blocklist is an unreviewed placeholder, the leaderboard service is deployed but must not be advertised to attendees yet, there is no public QR destination, and brand review has not happened. See those sections before running a public booth.
 
 ## Exercise shape
 
@@ -140,7 +140,14 @@ What removal does:
 - The name stays reserved. The next attendee retyping it is refused with the same "not available" wording as a blocklist hit, so the counter cannot tell the two apart and start speculating aloud about what somebody else typed.
 - If the attendee is still at the station, their screen stops congratulating them and says the drink was removed. It shows no QR and no rank. Staff identity and your stated reason are never shown to the attendee.
 
-What removal does **not** do: it cannot retract an entry a leaderboard service already accepted. The booth publishes; it has no retraction path. If a leaderboard is deployed and the entry was confirmed, remove it there too. The command says so every time.
+When the booth publishes to the leaderboard service, removal also takes the drink off the public board, and the name is refused if any booth tries to publish it again. The local takedown commits first and never waits on the network. The command and the dashboard report what happened on the public board:
+
+| Reported | Meaning | Action |
+| --- | --- | --- |
+| taken off the public leaderboard | Removed there, and the name is reserved | None |
+| was not on the public leaderboard | It had not synced yet; the name is still reserved there | None |
+| **NOT yet off the public leaderboard** | The service was unreachable | Press **Refresh** on the dashboard, or run `npm run remove -- --retry` once the network is back |
+| no staff key for the public leaderboard | This machine can publish but not delete | Take it down from a staff machine |
 
 House examples cannot be removed this way. They are booth configuration, so edit `booth/orders.json` instead.
 
@@ -152,7 +159,8 @@ If a panel is closed or the extension reloads mid-run, reopen the canvas. Saved 
 | --- | --- |
 | No network | Keep running. The booth is local-first and needs no network. Only the event leaderboard line is unavailable, and the canvas says so rather than inventing a rank. |
 | Name rejected unexpectedly | Check the blocklist for an over-broad `substring` entry. Do not read the matched term aloud or add exceptions mid-session. |
-| Entries stay unconfirmed on the event leaderboard | Expected while no service is deployed. Check the extension log before assuming a fault. |
+| Entries stay unconfirmed on the event leaderboard | Expected while no `leaderboardApi` is configured. Otherwise the sync reason names the refusal: `score_mismatch` means the service and booth run different rubric versions, and `unavailable_drink` means staff took that name down. |
+| Public board lost or a new `EVENT_ID` set | Run `npm run leaderboard:republish` on every booth machine. Each booth holds the authoritative copy of its own drinks. |
 | Panel connection lost | Reopen the canvas. Saved state persists. Do not share loopback URLs or tickets. |
 | Counter stuck on a previous attendee | Use hand-over. If the UI does not respond, inspect the provider log before touching the store. |
 | Unexpected provider error | Inspect the extension's host-reported log. Keep stack traces and internal identifiers off attendee screens and out of public reports. |
@@ -176,11 +184,43 @@ If ownership is uncertain, leave the lock in place and escalate. If JSON is corr
 
 The booth is local-first. A drink is committed to this booth's menu before anything is sent anywhere, so an unreachable event leaderboard cannot fail an attendee's submission or lose a name they earned. If submission fails, the attendee still sees their drink, their score, and their booth standing; only the event place is missing, and the canvas says so rather than inventing a rank.
 
-No leaderboard client ships, because no destination is deployed. `leaderboardClient` is null by default and the canvas then shows no event line at all. A client implements `publish(submission)` and must own its own timeout; a booth must never wait on a slow service.
+The booth publishes only when `leaderboardApi` is configured; otherwise the canvas shows no event line at all. The client owns a 4-second timeout, so a booth never waits on a slow service.
 
-A failed submission retries on the next refresh, so a brief network outage recovers without staff. A receipt whose handle, name, or score does not match what was sent is recorded as a failure, not displayed: a service answering about a different entry must never be shown as this attendee's rank. Check the extension log if entries stay unconfirmed.
+A failed submission retries on the next refresh, so a brief network outage recovers without staff. A receipt whose handle, ID, name, or score does not match what was sent is recorded as a failure, not displayed: a service answering about a different entry must never be shown as this attendee's rank. Check the extension log if entries stay unconfirmed.
 
 Read ranks carefully when helping an attendee. "Rank 1 of 1 at this booth" is this booth's own menu and nothing more. Only a confirmed event line reflects the wider competition.
+
+## Leaderboard service operations
+
+The service lives in `leaderboard-service/`, and its design and decisions are in [docs/leaderboard-service.md](../docs/leaderboard-service.md). It runs at <https://commit-and-sip-leaderboard.azurewebsites.net> as one App Service B1 instance in subscription **GitHub - NonProd - skills**, region `westus2`, resource group `rg-commit-and-sip-lb-westus2`. Every submission is re-checked there with this repository's own rubric and blocklist, so **redeploy the service whenever `booth/blocked-terms.json` or the rubric changes**. Otherwise booths and service disagree and submissions fail with `score_mismatch`.
+
+Deploy it from a staff machine with Contributor on the subscription. The Azure CLI's default subscription on a shared machine may be a different one, so every command names the subscription explicitly.
+
+```sh
+# 1. Keys: generated once into booth/local-config.json and kept after that.
+#    Also writes dist/leaderboard.secure.parameters.json (mode 0600).
+npm run leaderboard:configure -- --url https://commit-and-sip-leaderboard.azurewebsites.net
+
+# 2. Infrastructure. The keys go in as secure parameters and never touch the repository.
+az deployment sub create --subscription 6aab8b26-48c5-4cfd-ac82-6b5efcc2e441 --location westus2 \
+  --name commit-and-sip-leaderboard --template-file infra/main.bicep \
+  --parameters infra/main.parameters.json --parameters @dist/leaderboard.secure.parameters.json
+rm dist/leaderboard.secure.parameters.json
+
+# 3. Code. The packager starts the staged copy and loads every page before zipping.
+npm run leaderboard:package
+az webapp deploy --subscription 6aab8b26-48c5-4cfd-ac82-6b5efcc2e441 \
+  --resource-group rg-commit-and-sip-lb-westus2 --name commit-and-sip-leaderboard \
+  --src-path dist/leaderboard.zip --type zip --async true
+```
+
+`--async true` is deliberate. Without it the CLI polls a deployment-status record that this app never writes, and it hangs even though the upload finished. Verify the result yourself instead: `curl -I` on the site should return 200 with a `content-security-policy` header.
+
+Then open `/healthz`. `moderation: "placeholder"` means the service is running with the unreviewed blocklist. That is fine for staff testing and a reason not to set `leaderboardUrl`.
+
+Every infrastructure deployment needs the keys again (step 1 keeps the existing ones). Copy `booth/local-config.json` to each additional booth machine through a private channel; use `--no-staff-key` on machines that should not take drinks down. To rotate the keys, delete `leaderboardApi` from the file, rerun steps 1 and 2, and copy the new file to every booth.
+
+The board is a JSON file on the app's persistent `/home` storage, so the plan is pinned to **one instance**: never scale it out. To start a fresh board for a new event, change `eventId` in `infra/main.parameters.json` and redeploy the infrastructure. The old board stays on disk.
 
 ## Leaderboard and QR readiness
 

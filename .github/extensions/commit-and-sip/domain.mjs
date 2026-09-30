@@ -57,3 +57,15 @@ export function validateStaffConfig(config) {
     "invalid_config", "A configured leaderboardUrl must be a string.", 400);
   return config;
 }
+
+// Shared by the extension and the staff scripts, so a takedown from the
+// command line reaches the same leaderboard service the booth publishes to.
+// A missing file means an unconfigured booth, which is a supported state.
+export async function loadStaffConfig(file = new URL("../../../booth/local-config.json", import.meta.url)) {
+  try {
+    return validateStaffConfig(JSON.parse(await readFile(file, "utf8")));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return {};
+  }
+}

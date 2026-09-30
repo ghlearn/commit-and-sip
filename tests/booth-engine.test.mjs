@@ -288,8 +288,9 @@ test("takedown is staff-only and always accountable", async t => {
 test("the staff takedown command refuses to act on a half-given instruction", async () => {
   const { parseArguments } = await import("../scripts/remove-drink.mjs");
   assert.deepEqual(parseArguments(["--id", "mona-x", "--by", "lead", "--reason", "reported"]),
-    { by: "lead", id: "mona-x", list: false, reason: "reported" });
+    { by: "lead", id: "mona-x", list: false, reason: "reported", retry: false });
   assert.equal(parseArguments(["--list"]).list, true);
+  assert.equal(parseArguments(["--retry"]).retry, true, "retrying takedowns needs no drink ID");
   for (const argv of [
     [], ["--id", "mona-x"], ["--id", "mona-x", "--by", "lead"],
     ["--id", "mona-x", "--reason", "reported"],

@@ -6,3 +6,4 @@ booth/local-config.json
 coverage/
 .playwright-mcp/
 .impeccable/
+dist/
