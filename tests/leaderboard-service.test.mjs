@@ -1663,3 +1663,119 @@ test("on Windows the key file is restricted with an owner-only ACL before any ke
   await assert.rejects(() => configure({ access: { ...access, env: {} }, configFile: other,
     url: "https://commit-and-sip-leaderboard.azurewebsites.net" }), /Cannot tell which Windows user/);
 });
+
+// --- Review round 13 ---------------------------------------------------------
+
+function gate() {
+  let open;
+  const opened = new Promise(resolve => { open = resolve; });
+  return { open, opened };
+}
+
+test("a late failure from an earlier retraction cannot undo one that landed", async t => {
+  const first = gate();
+  let calls = 0;
+  const client = {
+    async publish(sent) { return { ...sent, entries: 1, rank: 1 }; },
+    async retract() {
+      calls += 1;
+      if (calls === 1) { await first.opened; throw new Error("timed out"); }   // the earlier, slow attempt
+      return "retracted";
+    },
+  };
+  const { engine, store } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const slow = engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
+  while (calls < 1) await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(await engine.retryRetractions(), [{ id: served.submission.id, published: "retracted" }]);
+  first.open();
+  const record = await slow;
+  assert.equal((await store.read()).removals[0].published, "retracted", "the settled outcome stands");
+  assert.deepEqual([record.published, record.owed], ["retracted", false], "and the caller is told what is recorded");
+  assert.deepEqual(await engine.owedPublicTakedowns(), []);
+});
+
+test("a late failure from an earlier publish cannot undo a confirmation", async t => {
+  const first = gate();
+  let calls = 0;
+  const client = {
+    async publish(sent) {
+      calls += 1;
+      if (calls === 1) { await first.opened; throw new Error("timed out"); }
+      return { ...sent, entries: 1, rank: 1 };
+    },
+  };
+  const { engine, store } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const slow = engine.publish("booth-1");
+  while (calls < 1) await new Promise(resolve => setImmediate(resolve));
+  await engine.publish("booth-1", { again: true });
+  assert.equal((await store.read()).runs["booth-1"].sync.state, "confirmed");
+  first.open();
+  await slow;
+  assert.equal((await store.read()).runs["booth-1"].sync.state, "confirmed", "the late failure does not downgrade it");
+});
+
+test("the booth screen's refresh retries a publication that failed", async t => {
+  const { BoothPanel } = await import("../.github/extensions/commit-and-sip/booth-panel.mjs");
+  let online = false;
+  const client = { async publish(sent) { if (!online) throw new Error("offline"); return { ...sent, entries: 1, rank: 1 }; } };
+  const { engine } = await engineWith(t, client);
+  const panel = new BoothPanel(engine, { renderQr: async () => null });
+  panel.lastSweep = Date.now();                     // keep the background sweep out of this test
+  await panel.dispatch("begin", {});
+  const served = await panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" });
+  assert.equal(served.sync.state, "failed");
+  online = true;
+  const refreshed = await panel.dispatch("refresh", {});
+  assert.equal(refreshed.sync.state, "confirmed", "refresh on the real panel reaches the retry");
+});
+
+test("a failed publication is still retried after the attendee has handed over", async t => {
+  const { BoothPanel } = await import("../.github/extensions/commit-and-sip/booth-panel.mjs");
+  const { AdminPanel } = await import("../.github/extensions/commit-and-sip/admin-panel.mjs");
+  let online = false;
+  const client = { async publish(sent) { if (!online) throw new Error("offline"); return { ...sent, entries: 1, rank: 1 }; } };
+  const { engine, store } = await engineWith(t, client);
+  const panel = new BoothPanel(engine, { renderQr: async () => null });
+  panel.lastSweep = Date.now();
+  await panel.dispatch("begin", {});
+  await panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" });
+  const runId = panel.runId;
+  await panel.dispatch("complete", {});
+  assert.equal((await store.read()).runs[runId].sync.state, "failed");
+  online = true;
+
+  // The idle screen's own poll starts the retry once the sweep interval passes.
+  panel.lastSweep = 0;
+  await panel.get();
+  // Wait only for a sweep the poll itself started. Starting one here would
+  // make the test pass whether or not the poll did anything.
+  assert.ok(engine.publicationSweep, "the idle poll started a retry");
+  await engine.publicationSweep;
+  assert.equal((await store.read()).runs[runId].sync.state, "confirmed", "no screen was showing it, and it still landed");
+
+  // And staff refresh does the same for anything still owed.
+  const { engine: other, store: otherStore } = await engineWith(t, client);
+  online = false;
+  await other.open({ runId: "r" });
+  await other.dispatch("r", "submit_name", { name: "Ducky Dawn Drizzle" });
+  await other.publish("r");
+  online = true;
+  await new AdminPanel(other).dispatch("refresh", {});
+  assert.equal((await otherStore.read()).runs.r.sync.state, "confirmed");
+});
+
+test("the idle poll starts at most one retry sweep per interval", async t => {
+  const { BoothPanel } = await import("../.github/extensions/commit-and-sip/booth-panel.mjs");
+  let sweeps = 0;
+  const engine = { house: async () => ({}), retryPublications: async () => { sweeps += 1; } };
+  const panel = new BoothPanel(engine, { renderQr: async () => null });
+  panel.sweepInBackground(1_000_000);
+  panel.sweepInBackground(1_000_000 + 10_000);
+  panel.sweepInBackground(1_000_000 + 29_999);
+  panel.sweepInBackground(1_000_000 + 30_000);
+  assert.equal(sweeps, 2, "the network is not hit on every five-second poll");
+});

@@ -128,11 +128,16 @@ export class BoothEngine {
       try { published = await this.leaderboardClient.retract(id); }
       catch { published = "failed"; }
     }
-    await this.store.transaction(data => {
+    // Attempts can overlap (a dashboard refresh while an earlier try is still
+    // waiting on the network). A settled outcome is never replaced by an
+    // unsettled one, or a late timeout would bring back a takedown that
+    // already landed. What is returned is what is recorded.
+    return this.store.transaction(data => {
       const record = this.removalLog(data).findLast(item => item.id === id);
-      if (record) record.published = published;
+      if (!record) return published;
+      if (!SETTLED.includes(record.published) || SETTLED.includes(published)) record.published = published;
+      return record.published;
     });
-    return published;
   }
 
   // Retries every takedown that has not reached the public board. Only
@@ -161,6 +166,27 @@ export class BoothEngine {
     const results = [];
     for (const record of pending) results.push({ id: record.id, published: await this.retract(record.id) });
     return results;
+  }
+
+  // Retries every publication still owed: pending or failed, including runs
+  // whose attendee has already handed over, which no screen is showing any
+  // more. Refusals ("rejected") are final and not retried. Only one sweep runs
+  // at a time; a second caller shares it.
+  retryPublications() {
+    this.publicationSweep ??= (async () => {
+      try {
+        if (!this.leaderboardClient) return 0;
+        const data = await this.store.read();
+        const owed = Object.entries(data.runs)
+          .filter(([, run]) => ["pending", "failed"].includes(run.sync?.state) && !run.removed)
+          .map(([runId]) => runId);
+        for (const runId of owed) await this.publish(runId).catch(() => {});
+        return owed.length;
+      } finally {
+        this.publicationSweep = null;
+      }
+    })();
+    return this.publicationSweep;
   }
 
   // Sends every drink this booth still has on its menu to the public board,
@@ -436,9 +462,11 @@ export class BoothEngine {
     const removedMeanwhile = await this.store.transaction(stored => {
       const current = stored.runs[runId];
       if (!current?.sync) return false;
-      current.sync = outcome.ok
-        ? confirmedSync(current.sync, outcome.receipt)
-        : failedSync(current.sync, outcome.error);
+      // Overlapping attempts: a late failure from an earlier try must not undo
+      // a confirmation or a final refusal that another try already recorded.
+      const settled = ["confirmed", "rejected"].includes(current.sync.state);
+      if (outcome.ok) current.sync = confirmedSync(current.sync, outcome.receipt);
+      else if (!settled) current.sync = failedSync(current.sync, outcome.error);
       return Boolean(current.removed);
     });
     // Staff can take a drink down while its publish is still in flight. The
@@ -452,7 +480,7 @@ export class BoothEngine {
     requireValue(validRunId(runId), "invalid_run", "Invalid run ID.", 400);
     // A refresh is the natural moment to retry a submission that did not land,
     // so a booth recovers from a network blip without staff intervention.
-    if (action === "refresh") { exactInput(input); await this.publish(runId).catch(() => {}); return this.get(runId); }
+    if (action === "refresh") { exactInput(input); await this.retryPublications().catch(() => {}); return this.get(runId); }
     requireValue(["submit_name", "complete"].includes(action),
       "unknown_action", "That action is not available at this booth.", 400);
     exactInput(input, action === "complete" ? [] : ["name", "mascot", "placement"]);

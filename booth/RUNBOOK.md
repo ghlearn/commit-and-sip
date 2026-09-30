@@ -194,7 +194,7 @@ The booth is local-first. A drink is committed to this booth's menu before anyth
 
 The booth publishes only when `leaderboardApi` is configured; otherwise the canvas shows no event line at all. The client owns a 4-second timeout, so a booth never waits on a slow service.
 
-A failed submission retries on the next refresh, so a brief network outage recovers without staff. A receipt whose handle, ID, name, or score does not match what was sent (the handle may instead be its canonical form, when another booth used the phrase first) is recorded as a failure, not displayed: a service answering about a different entry must never be shown as this attendee's rank. Check the extension log if entries stay unconfirmed.
+A failed submission is retried on the booth screen's refresh, on the staff dashboard's **Refresh**, and automatically from the idle screen at most every 30 seconds. That includes attendees who have already handed over, so a brief network outage recovers without staff. A refusal the service will not change (`rejected`) is never retried. A receipt whose handle, ID, name, or score does not match what was sent (the handle may instead be its canonical form, when another booth used the phrase first) is recorded as a failure, not displayed: a service answering about a different entry must never be shown as this attendee's rank. Check the extension log if entries stay unconfirmed.
 
 Read ranks carefully when helping an attendee. "Rank 1 of 1 at this booth" is this booth's own menu and nothing more. Only a confirmed event line reflects the wider competition.
 

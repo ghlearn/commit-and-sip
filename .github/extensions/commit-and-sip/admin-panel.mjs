@@ -22,6 +22,7 @@ export class AdminPanel {
       // Refresh is when a takedown that missed the public board is retried,
       // mirroring how the booth retries a publish that did not land.
       await this.engine.retryRetractions().catch(() => {});
+      await this.engine.retryPublications().catch(() => {});
       return this.get();
     }
     if (action === "export_results") {

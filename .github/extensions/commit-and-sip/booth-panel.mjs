@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { exactInput, requireValue } from "./domain.mjs";
 import { renderQrDataUrl } from "./services/qr.mjs";
 
+const SWEEP_INTERVAL_MS = 30_000;
+
 // One panel is one booth station, used by attendee after attendee. The panel
 // holds only which run is at the counter right now; every durable fact lives in
 // the run store, so a reopened panel never invents or loses an attendee.
@@ -14,6 +16,7 @@ export class BoothPanel {
   }
 
   async get() {
+    this.sweepInBackground();
     if (!this.runId) return { phase: "idle", ...(await this.engine.house()) };
     const state = await this.currentRun();
     if (!state) return { phase: "idle", ...(await this.engine.house()) };
@@ -42,6 +45,16 @@ export class BoothPanel {
     return state;
   }
 
+  // The idle screen polls every few seconds, and that is the only thing still
+  // running once an attendee has handed over. So it also starts a retry of
+  // any publication still owed, at most every 30 seconds, without waiting for
+  // it: the screen never slows down for the network.
+  sweepInBackground(now = Date.now()) {
+    if (now - (this.lastSweep ?? -Infinity) < SWEEP_INTERVAL_MS) return;
+    this.lastSweep = now;
+    this.engine.retryPublications().catch(() => {});
+  }
+
   // The QR image is derived from the verified destination rather than stored,
   // so it cannot outlive or contradict the configured leaderboard.
   async decorate(state) {
@@ -50,7 +63,13 @@ export class BoothPanel {
   }
 
   async dispatch(action, input = {}) {
-    if (action === "refresh") { exactInput(input); return this.get(); }
+    // Refresh is where a publication that failed is retried, for this attendee
+    // and for earlier ones who have already handed over.
+    if (action === "refresh") {
+      exactInput(input);
+      await this.engine.retryPublications().catch(() => {});
+      return this.get();
+    }
     if (action === "begin") {
       exactInput(input);
       // Release a cursor the ledger has already moved past, so a staff close or
