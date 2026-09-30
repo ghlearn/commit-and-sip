@@ -1487,3 +1487,60 @@ test("putting a lease back never overwrites one created in the meantime", async 
   await store.restoreLease(JSON.stringify({ at: Date.now(), owner: "moved-aside" }));
   assert.equal(await readFile(lock, "utf8"), third, "the newer lease stands");
 });
+
+
+// --- Review round 10 ---------------------------------------------------------
+
+test("a second instance starting at once waits for the whole reservation key", async t => {
+  const directory = await tempDirectory(t);
+  const file = join(directory, "reservation.key");
+  const complete = "a".repeat(64);
+  // The first instance has created the file but not yet written its contents.
+  await writeFile(file, "");
+  setTimeout(() => writeFile(file, "a".repeat(20)), 30);           // partly written
+  setTimeout(() => writeFile(file, `${complete}\n`), 80);         // complete
+  assert.equal(await reservationKey(directory), complete, "never an empty or partial key");
+});
+
+test("a reservation key that never completes is an error, not a new key", async t => {
+  const directory = await tempDirectory(t);
+  const file = join(directory, "reservation.key");
+  await writeFile(file, "abc123");
+  await assert.rejects(() => reservationKey(directory, { waitMs: 100 }), /does not hold a complete reservation key/);
+  assert.equal(await readFile(file, "utf8"), "abc123", "the file is left for someone to restore, not replaced");
+});
+
+test("the docs describe personal board links as handle and ref together", async () => {
+  const design = await readFile(new URL("../docs/leaderboard-service.md", import.meta.url), "utf8");
+  const plan = await readFile(new URL("../.azure/deployment-plan.md", import.meta.url), "utf8");
+  assert.match(design, /\?handle=…&ref=…/);
+  assert.match(plan, /GET \/api\/board\[\?handle=&ref=\]/);
+  for (const text of [design, plan]) {
+    assert.doesNotMatch(text, /With `\?handle=` it also shows|`GET \/api\/board\[\?handle=\]`/, "no handle-only personal link");
+  }
+});
+
+test("an instance that loses the race to create the key waits for the winner's whole key", async t => {
+  // Deterministic version of two instances starting together: the loser has
+  // already seen no key, and the winner has created the file but not yet
+  // written it, when the loser's exclusive create fails.
+  const directory = await tempDirectory(t);
+  const file = join(directory, "reservation.key");
+  const complete = "b".repeat(64);
+  let created;
+  const winnerCreated = new Promise(resolve => { created = resolve; });
+  const winner = reservationKey(directory, {
+    create: async path => {
+      await writeFile(path, "", { flag: "wx" });                     // the file exists, still empty
+      created();
+      await new Promise(resolve => setTimeout(resolve, 60));
+      await writeFile(path, `${complete}\n`);
+    },
+  });
+  const loser = reservationKey(directory, {
+    create: async (path, text) => { await winnerCreated; return writeFile(path, text, { flag: "wx" }); },
+  });
+  const [, lost] = await Promise.all([winner, loser]);
+  assert.equal(lost, complete, "the loser used the winner's complete key, not an empty read");
+  assert.equal((await readFile(file, "utf8")).trim(), complete);
+});

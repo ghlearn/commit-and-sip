@@ -417,20 +417,46 @@ export class FileStore extends MemoryStore {
 // start and kept beside the board, readable by the service only. It is not
 // derived from the staff key, because rotating that key would then silently
 // void every reservation.
-export async function reservationKey(directory) {
+const RESERVATION_KEY = /^[0-9a-f]{64}$/;
+
+// Reads the key, waiting while it is still being written. An exclusive create
+// makes the file before its contents land, so a second instance starting at
+// the same moment can see it empty or partial. Using a partial key would
+// fingerprint names differently from every other instance, so a key that is
+// not a complete 64-hex value is never returned; one that stays incomplete is
+// an error, not something to replace.
+async function readReservationKey(file, deadline) {
+  for (;;) {
+    const text = (await readFile(file, "utf8")).trim();
+    if (RESERVATION_KEY.test(text)) return text;
+    if (Date.now() > deadline) {
+      throw new Error(`${file} does not hold a complete reservation key. Restore it rather than delete it: `
+        + "a new key would release every reserved name.");
+    }
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+}
+
+// `create` writes the new key; it is replaceable so tests can hold a create
+// half-done, the moment another instance must not read.
+export async function reservationKey(directory, {
+  waitMs = 5_000, create = (path, text) => writeFile(path, text, { flag: "wx", mode: 0o600 }),
+} = {}) {
   const file = join(directory, "reservation.key");
+  const deadline = Date.now() + waitMs;
   try {
-    return (await readFile(file, "utf8")).trim();
+    return await readReservationKey(file, deadline);
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
   await mkdir(directory, { recursive: true });
   const key = randomBytes(32).toString("hex");
-  // "wx" fails if another process created it first, rather than replacing it.
+  // "wx" fails if another instance created it first, rather than replacing it.
+  // That instance's key is the one to use, once it is completely written.
   try {
-    await writeFile(file, `${key}\n`, { flag: "wx", mode: 0o600 });
+    await create(file, `${key}\n`);
   } catch (error) {
-    if (error.code === "EEXIST") return (await readFile(file, "utf8")).trim();
+    if (error.code === "EEXIST") return readReservationKey(file, deadline);
     throw error;
   }
   await chmod(file, 0o600);
