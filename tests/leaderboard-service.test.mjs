@@ -57,8 +57,12 @@ function post(url, body, key = BOOTH_KEY, headers = {}) {
   });
 }
 
-const del = (url, id, key = STAFF_KEY) => fetch(`${url}/api/entries/${id}`, {
-  headers: key ? { Authorization: `Bearer ${key}` } : {}, method: "DELETE",
+// Retraction carries the ID in the body of a fixed route, so it never lands
+// in a web-server log line.
+const del = (url, id, key = STAFF_KEY) => fetch(`${url}/api/retractions`, {
+  body: JSON.stringify({ id }),
+  headers: { "Content-Type": "application/json", ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+  method: "POST",
 });
 
 const board = async (url, query = "") => (await fetch(`${url}/api/board${query}`)).json();
@@ -1058,23 +1062,50 @@ test("a lock left by a dead instance is taken over; a live one is waited for", a
   await assert.rejects(() => access(lock), { code: "ENOENT" }, "and the lock is released afterwards");
 });
 
-test("if two instances ever held the lock at once, the version check keeps both writes", async t => {
+test("a holder whose lease was taken over cannot commit over the new holder", async t => {
+  const { utimes } = await import("node:fs/promises");
   const directory = await tempDirectory(t);
-  const [a, b] = await Promise.all([FileStore.open({ directory }), FileStore.open({ directory })]);
-  // B ignores the lock, as a second instance would if a lease were misjudged.
-  b.acquireLock = async () => "rogue";
-  b.releaseLock = async () => {};
-  let interleaved = false;
-  await a.serialise(async () => {
-    if (!interleaved) {
-      interleaved = true;
-      await b.create(entry("mona-from-b"));    // lands on disk while A is mid-write
+  const lock = join(directory, "default.json.lock");
+  const [a, b] = await Promise.all([FileStore.open({ directory, staleLockMs: 60 }), FileStore.open({ directory, staleLockMs: 60 })]);
+  // A stalls long enough to lose its lease: no renewal while it is frozen.
+  a.renewLease = () => () => {};
+  // The exact interleaving from the review: A has passed its version check
+  // and is about to rename when B takes over the stale lease and commits.
+  let stalled = false;
+  const persist = a.persist.bind(a);
+  a.persist = async (text, owner) => {
+    if (!stalled) {
+      stalled = true;
+      const old = new Date(Date.now() - 60_000);
+      await utimes(lock, old, old);
+      await b.create(entry("mona-from-b"));
     }
-    await MemoryStore.prototype.create.call(a, entry("mona-from-a"));
-  });
+    return persist(text, owner);
+  };
+  await a.create(entry("mona-from-a"));
   const fresh = await FileStore.open({ directory });
   assert.deepEqual((await fresh.list()).map(item => item.id).sort(), ["mona-from-a", "mona-from-b"],
-    "A noticed the board moved, re-read it, and wrote both");
+    "A found it no longer held the lease, did not rename, and retried from disk");
+});
+
+test("a live holder renews its lease, so a slow write is never taken over", async t => {
+  const directory = await tempDirectory(t);
+  const [a, b] = await Promise.all([
+    FileStore.open({ directory, staleLockMs: 90 }),
+    FileStore.open({ directory, lockTimeoutMs: 250, staleLockMs: 90 }),
+  ]);
+  let started;
+  const inside = new Promise(resolve => { started = resolve; });
+  const slow = a.serialise(async () => {
+    started();
+    await new Promise(resolve => setTimeout(resolve, 450));   // five times the stale period
+    await MemoryStore.prototype.create.call(a, entry("mona-slow"));
+  });
+  await inside;
+  await assert.rejects(() => b.create(entry("mona-impatient")), { code: "board_locked" },
+    "the other instance waits for a lease that is being renewed");
+  await slow;
+  assert.deepEqual((await (await FileStore.open({ directory })).list()).map(item => item.id), ["mona-slow"]);
 });
 
 test("the event cannot be wiped while a takedown is still owed to the public board", async t => {
@@ -1142,4 +1173,79 @@ test("two writers that ever overlap cannot trample each other's temporary file",
   assert.deepEqual(outcomes.filter(outcome => outcome.status === "rejected").map(outcome => outcome.reason.code), [],
     "no overlapping write failed");
   assert.doesNotThrow(() => JSON.parse(readFileSync(join(directory, "default.json"), "utf8")), "and the board is whole");
+});
+
+
+// --- Review round 5 ----------------------------------------------------------
+
+test("a removed name never appears in a request path the web server logs", async t => {
+  const { url } = await service(t);
+  const sent = submission("Mona Moonrise Mocha");
+  await post(url, sent);
+  assert.equal((await fetch(`${url}/api/entries/${sent.id}`, { method: "DELETE",
+    headers: { Authorization: `Bearer ${STAFF_KEY}` } })).status, 404, "the old path-based route is gone");
+  assert.equal((await del(url, sent.id)).status, 204);
+  assert.equal((await fetch(`${url}/api/retractions`, { method: "POST", body: JSON.stringify({ id: sent.id, extra: 1 }),
+    headers: { Authorization: `Bearer ${STAFF_KEY}`, "Content-Type": "application/json" } })).status, 400, "exactly { id }");
+  const client = await readFile(new URL("../.github/extensions/commit-and-sip/services/leaderboard-client.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(client, /api\/entries\/\$\{/, "the client never puts a drink ID in a URL");
+});
+
+test("a refused publication gets no QR code that would open someone else's row", async t => {
+  const refusing = {
+    async publish() { throw Object.assign(new Error("clash"), { code: "duplicate_drink" }); },
+  };
+  const directory = await tempDirectory(t);
+  const engine = new BoothEngine({ catalog, rules, store: new RunStore(directory),
+    leaderboardClient: refusing, leaderboardUrl: "https://sip.example.com/board" });
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  assert.match(served.attendeeUrl, /drink=mona-moonrise-mocha/, "before the refusal a link is offered");
+  await engine.publish("booth-1");
+  const view = await engine.get("booth-1");
+  assert.equal(view.sync.state, "rejected");
+  assert.equal(view.attendeeUrl, null, "the name belongs to someone else on the board");
+});
+
+test("the configure report says which keys were kept, made, or removed", async t => {
+  const { configure } = await import("../scripts/configure-leaderboard.mjs");
+  const directory = await tempDirectory(t);
+  const configFile = join(directory, "local-config.json");
+  const url = "https://commit-and-sip-leaderboard.azurewebsites.net";
+  await configure({ configFile, url });
+  const demoted = await configure({ configFile, staff: false, url });
+  assert.deepEqual([demoted.generated, demoted.removed], [[], ["staffKey"]],
+    "a copied staff config on a publish-only booth reports the staff key as removed, not kept");
+  const source = await readFile(new URL("../scripts/configure-leaderboard.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /Kept the existing leaderboard keys/, "no blanket claim that every key was kept");
+});
+
+test("no staff guidance sends anyone to another machine to finish this booth's takedowns", async () => {
+  for (const file of ["../scripts/republish-leaderboard.mjs", "../scripts/remove-drink.mjs",
+    "../.github/extensions/commit-and-sip/renderer/admin.js", "../booth/RUNBOOK.md"]) {
+    const text = await readFile(new URL(file, import.meta.url), "utf8");
+    assert.doesNotMatch(text, /(?:Run this|take it down|Remove it there) (?:on|from) (?:a|another) staff machine/i, file);
+    assert.doesNotMatch(text, /remove it there separately/i, file);
+  }
+});
+
+test("renewing a lease never refreshes a lease someone else now holds", async t => {
+  const { stat, utimes } = await import("node:fs/promises");
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory, staleLockMs: 60 });   // renews every 20ms
+  const lock = join(directory, "default.json.lock");
+  const old = new Date(Date.now() - 60_000);
+  const stop = store.renewLease("mine");
+  t.after(stop);
+
+  await writeFile(lock, "someone-else");
+  await utimes(lock, old, old);
+  await new Promise(resolve => setTimeout(resolve, 120));
+  assert.ok(Date.now() - (await stat(lock)).mtimeMs > 30_000,
+    "a lease this instance lost is left to go stale, so a dead holder cannot be kept alive");
+
+  await writeFile(lock, "mine");
+  await utimes(lock, old, old);
+  await new Promise(resolve => setTimeout(resolve, 120));
+  assert.ok(Date.now() - (await stat(lock)).mtimeMs < 1_000, "its own lease is renewed");
 });

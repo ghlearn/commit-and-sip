@@ -56,9 +56,14 @@ export function createLeaderboardClient({ url, boothKey, staffKey = null, timeou
   if (staffKey) {
     // "absent" is a success: the entry was never published, or an earlier
     // retract already took it down. Either way it is not on the public board.
+    // The drink ID travels in the authenticated body on a fixed route, never
+    // in the URL: web-server logs record request paths, and a removed name
+    // must leave no readable trace on the service.
     client.retract = async id => {
-      const response = await fetchImpl(endpoint(`api/entries/${encodeURIComponent(id)}`), {
-        headers: { Authorization: `Bearer ${staffKey}` }, method: "DELETE", signal: AbortSignal.timeout(timeoutMs),
+      const response = await fetchImpl(endpoint("api/retractions"), {
+        body: JSON.stringify({ id }),
+        headers: { Authorization: `Bearer ${staffKey}`, "Content-Type": "application/json" },
+        method: "POST", signal: AbortSignal.timeout(timeoutMs),
       });
       if (response.status === 204) return "retracted";
       if (response.status === 404) return "absent";

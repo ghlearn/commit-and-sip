@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 // One interface, two backends: memory for the tests, a JSON file for Azure.
@@ -95,6 +95,14 @@ export class MemoryStore {
 
 const EVENT = /^[a-z0-9-]{1,63}$/;
 
+export class LockLostError extends Error {
+  constructor() {
+    super("This instance's lock on the board was taken over before the write committed.");
+    this.name = "LockLostError";
+    this.code = "lock_lost";
+  }
+}
+
 export class ConcurrentWriteError extends Error {
   constructor() {
     super("Another instance wrote the board during this write.");
@@ -114,14 +122,24 @@ export class ConcurrentWriteError extends Error {
 // board from disk, applies its change, checks the version on disk has not
 // moved, and replaces the file atomically. Reads always come from disk.
 //
-// The lock is a lease: an instance that dies holding it would otherwise block
-// the board forever, so a lock older than `staleLockMs` is taken over. The
-// version check is the second line: if two instances ever did hold the lock at
-// once, the later write is refused and retried rather than losing the other.
+// The lock is a lease. An instance that dies holding it would otherwise block
+// the board forever, so a lock not renewed for `staleLockMs` is taken over.
+// A live holder renews it every `staleLockMs / 3`, so only a holder that has
+// stopped making progress for the whole period can lose it. And a holder that
+// has lost it cannot commit: ownership is checked again immediately before
+// the rename, after the new board is already written aside, and a holder
+// that finds someone else's lease gives up and retries from disk.
+//
+// The residual risk is a holder that passes that final check and then stalls
+// for more than `staleLockMs` before the rename completes. Plain files offer
+// no compare-and-swap to rule it out entirely. The version check narrows it
+// further, and each booth can rebuild its part of the board with
+// `npm run leaderboard:republish`.
 export class FileStore extends MemoryStore {
   // The event ID names the file, so it is held to a charset that cannot walk
   // out of the data directory.
   static async open({ directory, event = "default", lockTimeoutMs = 10_000, staleLockMs = 15_000 }) {
+    if (!(staleLockMs >= 30)) throw new Error("staleLockMs must be at least 30ms.");
     if (!EVENT.test(event)) throw new Error("EVENT_ID must be 1-63 lowercase letters, digits, or hyphens.");
     await mkdir(directory, { recursive: true });
     const store = new FileStore();
@@ -189,6 +207,28 @@ export class FileStore extends MemoryStore {
     }
   }
 
+  // Renews the lease while this instance holds it, but only while it is still
+  // this instance's: a renewal must never refresh a lease someone else took.
+  renewLease(owner) {
+    const timer = setInterval(async () => {
+      try {
+        if ((await readFile(this.lockFile, "utf8")) === owner) {
+          const now = new Date();
+          await utimes(this.lockFile, now, now);
+        }
+      } catch { /* the commit-time check is what decides */ }
+    }, Math.floor(this.staleLockMs / 3));
+    timer.unref?.();
+    return () => clearInterval(timer);
+  }
+
+  async assertOwner(owner) {
+    let holder = null;
+    try { holder = await readFile(this.lockFile, "utf8"); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+    if (holder !== owner) throw new LockLostError();
+  }
+
   async releaseLock(owner) {
     try {
       if ((await readFile(this.lockFile, "utf8")) === owner) await rm(this.lockFile, { force: true });
@@ -199,10 +239,13 @@ export class FileStore extends MemoryStore {
 
   // The random suffix matters: process IDs can repeat across instances, and
   // two writers sharing a temporary file would corrupt each other's write.
-  async persist(text) {
+  async persist(text, owner = null) {
     const temporary = `${this.file}.${randomBytes(6).toString("hex")}.tmp`;
     await writeFile(temporary, text);
     try {
+      // Fencing: the last thing before the rename. The slow part, writing the
+      // new board, is already done, so the window after this check is short.
+      if (owner !== null) await this.assertOwner(owner);
       await rename(temporary, this.file);
     } catch (error) {
       await rm(temporary, { force: true });
@@ -216,6 +259,7 @@ export class FileStore extends MemoryStore {
   serialise(change) {
     const attempt = async () => {
       const owner = await this.acquireLock();
+      const stopRenewing = this.renewLease(owner);
       try {
         const disk = await this.snapshot();
         this.load(disk);
@@ -224,13 +268,14 @@ export class FileStore extends MemoryStore {
           if ((await this.snapshot()).version !== disk.version) throw new ConcurrentWriteError();
           await this.persist(`${JSON.stringify({
             entries: [...this.entries.values()], reserved: [...this.reserved], version: disk.version + 1,
-          })}\n`);
+          })}\n`, owner);
           return result;
         } catch (error) {
           this.load(disk);
           throw error;
         }
       } finally {
+        stopRenewing();
         await this.releaseLock(owner);
       }
     };
@@ -238,7 +283,8 @@ export class FileStore extends MemoryStore {
       for (let tries = 1; ; tries += 1) {
         try { return await attempt(); }
         catch (error) {
-          if (!(error instanceof ConcurrentWriteError) || tries >= 3) throw error;
+          const retryable = error instanceof ConcurrentWriteError || error instanceof LockLostError;
+          if (!retryable || tries >= 3) throw error;
         }
       }
     });

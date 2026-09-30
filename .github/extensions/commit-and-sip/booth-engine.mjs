@@ -55,6 +55,10 @@ export class BoothEngine {
     // A removed drink has no place to point at. Handing over a code that leads
     // to an empty leaderboard lookup would be worse than saying nothing.
     if (!this.leaderboardUrl || run.phase === "naming" || run.removed) return null;
+    // The service refused this publication: the name belongs to another
+    // attendee, or was taken down. A code would open the board on their row
+    // and call it "your drink".
+    if (run.sync?.state === "rejected") return null;
     const url = new URL(this.leaderboardUrl);
     // Once the service confirms the drink, the handle it confirmed is the one
     // on the board: another booth may have used this phrase first. The drink

@@ -23,6 +23,8 @@ This document began as a proposal. It now records what was built, the decisions 
 
 Hosting is subscription **GitHub - NonProd - skills**, region `westus2`, resource group `rg-commit-and-sip-lb-westus2`, app `commit-and-sip-leaderboard`. West US 3 was chosen first, but at deployment time it had no B1 capacity in either of two resource groups. A quota check does not detect that: it confirms entitlement, not physical capacity. The full reasoning, including the policy findings, is in `.azure/deployment-plan.md`.
 
+**The lock is a renewed lease with fencing.** The holder renews it every five seconds while it works, so only a holder that has made no progress for the full 15 seconds can lose it. Immediately before the rename, after the new board is already written aside, the holder checks the lease is still its own. If it is not, it does not rename; it retries from disk. **Residual risk, stated plainly:** a holder that passes that final check and then stalls for more than 15 seconds before its rename completes could still overwrite a write made in between. Plain files have no compare-and-swap that rules this out. The window is two consecutive filesystem calls wide, the version check narrows it further, and `npm run leaderboard:republish` restores anything lost from each booth's authoritative copy.
+
 **How the file store stays correct across instances:** the plan runs one instance, but App Service does not guarantee that. During scale operations or platform maintenance, a second instance can run against the same `/home` share, and `WEBSITE_DISABLE_OVERLAPPED_RECYCLING` only affects recycling within one VM. So correctness does not rest on either setting. Every write takes a lock file created exclusively on the share. It re-reads the board from disk rather than trusting its own memory, applies its change, checks that the board's version has not moved, and replaces the file atomically through a uniquely named temporary file. Reads always come from disk. A lock older than 15 seconds is treated as left by a dead instance and taken over. If two instances ever did hold it at once, the version check refuses the later write and retries it. If the file is unreadable, the service refuses to start rather than start empty and overwrite it. **Cost:** every request reads the board file. At a few hundred rows that is small, but this store is built for one busy booth event, not for scale-out.
 
 **Why the board is a projection:** every booth machine keeps the authoritative copy of its own drinks and takedowns. `npm run leaderboard:republish` rebuilds the board from a booth. It replays every takedown first, so removed names are reserved again, and then sends every drink. Run it on each booth machine, with the staff key, after data loss or an `EVENT_ID` change. It also publishes drinks served before the booth was configured, which would otherwise never be sent.
@@ -98,7 +100,9 @@ POST   /api/entries             booth key. 201 new, 200 same entry again (handle
                                 may be canonical), 409 duplicate_drink |
                                 unavailable_drink | handle_taken,
                                 422 score_mismatch | rejected_name | invalid_handle
-DELETE /api/entries/:id         staff key. 204 retracted, 404 absent. Reserves either way
+POST   /api/retractions         staff key. Body exactly { id }. 204 retracted, 404 absent.
+                                Reserves either way. The ID is never in a URL, so web-server
+                                logs hold no removed name.
 GET    /healthz                 { ok, moderation: "reviewed" | "placeholder" }
 ```
 

@@ -84,7 +84,7 @@ Specialized-technology check: the canvas extension imports `@github/copilot-sdk/
 ```mermaid
 flowchart LR
   booth[Booth machine\ncanvas extension] -- "POST /api/entries\nBearer booth key" --> app
-  staff[Staff: admin canvas or\nnpm run remove] -- "DELETE /api/entries/:id\nBearer staff key" --> app
+  staff[Staff: admin canvas or\nnpm run remove] -- "POST /api/retractions {id}\nBearer staff key" --> app
   monitor[Booth monitor] -- "GET / , GET /api/board" --> app
   phones[Attendee phones\nvia QR, step 4] -. "GET only" .-> app
   app[App Service B1, 1 instance\nNode 22] -- "atomic writes" --> disk[("/home/data\nboard JSON + reservation key")]
@@ -114,7 +114,7 @@ No storage account, role assignment, or key vault. Nothing needs `roleAssignment
 | `GET /` | public | Board page. Shows "Updated HH:MM:SS"; if it goes offline it keeps the last board and says it is stale. No mascot art. |
 | `GET /api/board[?handle=]` | public | Top 20, true total, `asOf`, and the attendee's own place |
 | `POST /api/entries` | booth key | Re-scored and re-moderated with the booth's own modules. Receipt echoes `handle, id, name, score` |
-| `DELETE /api/entries/:id` | staff key | Deletes and **reserves the ID** as an HMAC fingerprint. 404 still reserves |
+| `POST /api/retractions` | staff key | Body `{ id }`. Deletes and **reserves the ID** as an HMAC fingerprint. 404 still reserves. The ID never appears in a URL, so web-server logs hold no removed name. |
 | `GET /healthz` | public | `{ ok, moderation }` |
 
 ### Security decisions

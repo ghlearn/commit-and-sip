@@ -29,7 +29,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       ? `${removals.length - unsettled.length} of ${removals.length} takedowns are reserved on the public leaderboard.\n`
       : "This booth has no takedowns to replay.\n");
     if (unsettled.some(removal => removal.published === "not-configured")) {
-      process.stdout.write("This booth has no staff key, so removed names are NOT reserved. Run this on a staff machine.\n");
+      // The removals are recorded only in this booth's ledger, so no other
+      // machine can replay them.
+      process.stdout.write("This booth has no staff key, so removed names are NOT reserved. "
+        + "Add the staff key to this machine with npm run leaderboard:configure, then run this again here.\n");
     }
     // "rejected" drinks were refused for good (the name was taken or taken
     // down) and are deliberately not resent: they are reported, not failures.

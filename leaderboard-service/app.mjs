@@ -189,11 +189,16 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
     // Deletes the entry and reserves the name at every booth. What is kept is
     // a keyed fingerprint of the ID and nothing else: the name, the reason and
     // who removed it stay in the booth's local ledger. 404 still reserves,
-    // because staff often catch a name before it has synced.
-    async "DELETE /api/entries"(request, url, id) {
+    // because staff often catch a name before it has synced. The ID arrives in
+    // the body of a fixed route, so web-server logs never record it.
+    async "POST /api/retractions"(request) {
       requireKey(request, staffKey);
-      if (!ID.test(id ?? "")) throw new HttpError(400, "invalid_id", "That is not a drink ID.");
-      return (await store.retract(id, fingerprint(id))) ? [204, null] : [404, { error: "not_found" }];
+      const body = await readJson(request);
+      const shaped = body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).join() === "id";
+      if (!shaped || typeof body.id !== "string" || !ID.test(body.id)) {
+        throw new HttpError(400, "invalid_id", "Send exactly { id } with a drink ID.");
+      }
+      return (await store.retract(body.id, fingerprint(body.id))) ? [204, null] : [404, { error: "not_found" }];
     },
 
     async "GET /healthz"() { return [200, { moderation, ok: true }]; },
@@ -217,12 +222,9 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
         response.end(head ? undefined : await readFile(asset.file));
         return;
       }
-      const [, base, id] = /^(\/api\/entries)\/([^/]+)$/.exec(url.pathname) ?? [];
-      const route = routes[`${method} ${base ?? url.pathname}`];
-      if (!route || (base && method !== "DELETE") || (!base && method === "DELETE")) {
-        throw new HttpError(404, "not_found", "Not found.");
-      }
-      const [status, body] = await route(request, url, id);
+      const route = routes[`${method} ${url.pathname}`];
+      if (!route) throw new HttpError(404, "not_found", "Not found.");
+      const [status, body] = await route(request, url);
       response.writeHead(status, { ...headers, "Cache-Control": "no-store",
         ...(body === null ? {} : { "Content-Type": "application/json; charset=utf-8" }) });
       response.end(body === null || head ? undefined : JSON.stringify(body));
