@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 // One interface, two backends: memory for the tests, a JSON file for Azure.
@@ -182,63 +182,106 @@ export class FileStore extends MemoryStore {
     this.reserved = new Set(disk.reserved);
   }
 
+  // A lease is one small JSON document: who holds it and when they last
+  // renewed it. Identity and age come from the same read, so a judgement that
+  // a lease is stale always refers to that exact lease, never to one created
+  // a moment later. (File mtimes cannot give that: a stat and a read are two
+  // operations that can see two different files.)
+  static lease(owner) { return JSON.stringify({ at: Date.now(), owner }); }
+
+  async readLease() {
+    let text;
+    try { text = await readFile(this.lockFile, "utf8"); }
+    catch (error) { if (error.code === "ENOENT") return null; throw error; }
+    try {
+      const { at, owner } = JSON.parse(text);
+      return typeof owner === "string" && Number.isFinite(at) ? { at, owner, text } : { at: Infinity, owner: null, text };
+    } catch {
+      // Unparseable: a write in progress, most likely. Treat it as live.
+      return { at: Infinity, owner: null, text };
+    }
+  }
+
   async acquireLock() {
     const owner = randomBytes(8).toString("hex");
     const deadline = Date.now() + this.lockTimeoutMs;
     for (;;) {
       try {
         // Exclusive create is atomic on the /home share: exactly one instance wins.
-        await writeFile(this.lockFile, owner, { flag: "wx" });
+        await writeFile(this.lockFile, FileStore.lease(owner), { flag: "wx" });
         return owner;
       } catch (error) {
         if (error.code !== "EEXIST") throw error;
       }
-      try {
-        const [info, holder] = await Promise.all([stat(this.lockFile), readFile(this.lockFile, "utf8")]);
-        if (Date.now() - info.mtimeMs > this.staleLockMs) {
-          // Take over only the exact lease judged stale, never one created since.
-          if ((await readFile(this.lockFile, "utf8")) === holder) await rm(this.lockFile, { force: true });
-          continue;
-        }
-      } catch (error) {
-        if (error.code === "ENOENT") continue;
-        throw error;
+      const held = await this.readLease();
+      if (held && Date.now() - held.at > this.staleLockMs) {
+        await this.takeOver(held.text);
+        continue;
       }
-      if (Date.now() > deadline) {
+      if (held && Date.now() > deadline) {
         throw Object.assign(new Error("The board is locked by another instance."), { code: "board_locked" });
       }
       await new Promise(resolve => setTimeout(resolve, 20 + Math.floor(Math.random() * 30)));
     }
   }
 
-  // Renews the lease while this instance holds it, but only while it is still
+  // Removes the lease judged stale, and only that one. The lock is moved aside
+  // in one atomic rename, and what was moved is compared with what was judged.
+  // If it is anything else (renewed since, or a successor's fresh lease), it is
+  // put back exactly as it was, and nothing is taken over. If a third instance
+  // created a lock in that instant, the displaced holder cannot commit anyway:
+  // its ownership check before the rename will not find its lease.
+  async takeOver(staleText) {
+    const aside = `${this.lockFile}.${randomBytes(6).toString("hex")}.stale`;
+    try {
+      await rename(this.lockFile, aside);
+    } catch (error) {
+      if (error.code === "ENOENT") return;
+      throw error;
+    }
+    const moved = await readFile(aside, "utf8");
+    if (moved !== staleText) {
+      try { await writeFile(this.lockFile, moved, { flag: "wx" }); }
+      catch (error) { if (error.code !== "EEXIST") throw error; }
+    }
+    await rm(aside, { force: true });
+  }
+
+  // Renews the lease while this instance holds it, and only while it is still
   // this instance's: a renewal must never refresh a lease someone else took.
+  // The new lease replaces the old through a rename, so it is never half written.
   renewLease(owner) {
-    const timer = setInterval(async () => {
+    let stopped = false;
+    let inFlight = Promise.resolve();
+    const renew = async () => {
+      if (stopped || (await this.readLease())?.owner !== owner) return;
+      const temporary = `${this.lockFile}.${randomBytes(6).toString("hex")}.renew`;
       try {
-        if ((await readFile(this.lockFile, "utf8")) === owner) {
-          const now = new Date();
-          await utimes(this.lockFile, now, now);
-        }
-      } catch { /* the commit-time check is what decides */ }
-    }, Math.floor(this.staleLockMs / 3));
+        await writeFile(temporary, FileStore.lease(owner));
+        await rename(temporary, this.lockFile);
+      } catch {
+        await rm(temporary, { force: true });   // the commit-time check is what decides
+      }
+    };
+    const timer = setInterval(() => { inFlight = inFlight.then(renew, renew); }, Math.floor(this.staleLockMs / 3));
     timer.unref?.();
-    return () => clearInterval(timer);
+    // Stopping waits for a renewal already under way. Clearing the timer alone
+    // does not: a renewal mid-flight could otherwise recreate the lease after
+    // the lock was released, and every instance would wait out a lease that
+    // nobody holds.
+    return async () => {
+      stopped = true;
+      clearInterval(timer);
+      await inFlight;
+    };
   }
 
   async assertOwner(owner) {
-    let holder = null;
-    try { holder = await readFile(this.lockFile, "utf8"); }
-    catch (error) { if (error.code !== "ENOENT") throw error; }
-    if (holder !== owner) throw new LockLostError();
+    if ((await this.readLease())?.owner !== owner) throw new LockLostError();
   }
 
   async releaseLock(owner) {
-    try {
-      if ((await readFile(this.lockFile, "utf8")) === owner) await rm(this.lockFile, { force: true });
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
+    if ((await this.readLease())?.owner === owner) await rm(this.lockFile, { force: true });
   }
 
   // The random suffix matters: process IDs can repeat across instances, and
@@ -279,8 +322,11 @@ export class FileStore extends MemoryStore {
           throw error;
         }
       } finally {
-        stopRenewing();
-        await this.releaseLock(owner);
+        await stopRenewing();
+        // A lease that cannot be removed expires on its own. Failing here would
+        // turn a write that already landed into an error, or hide the error
+        // that actually stopped the write.
+        await this.releaseLock(owner).catch(() => {});
       }
     };
     const next = this.queue.then(async () => {

@@ -32,7 +32,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       // The removals are recorded only in this booth's ledger, so no other
       // machine can replay them.
       process.stdout.write("This booth has no staff key, so removed names are NOT reserved. "
-        + "Add the staff key to this machine with npm run leaderboard:configure, then run this again here.\n");
+        + "To fix it, copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <a staff machine's booth/local-config.json>, then run this again here.\n");
     }
     // "rejected" drinks were refused for good (the name was taken or taken
     // down) and are deliberately not resent: they are reported, not failures.

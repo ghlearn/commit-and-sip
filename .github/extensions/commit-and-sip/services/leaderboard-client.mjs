@@ -76,7 +76,10 @@ export function createLeaderboardClient({ url, boothKey, staffKey = null, timeou
 // Production traffic goes through publicFetch, which pins DNS to public
 // addresses at socket creation, so a hostile or hijacked record cannot turn
 // the configured service into a request against the booth's own network.
+// Only an absent `leaderboardApi` means "not configured". A present but
+// malformed value (null, "", false) is an error, not a quiet way to switch
+// publishing off.
 export function leaderboardClientFromConfig(config) {
-  const api = config?.leaderboardApi;
-  return api ? createLeaderboardClient({ ...validateLeaderboardApi(api), fetchImpl: publicFetch }) : null;
+  if (config?.leaderboardApi === undefined) return null;
+  return createLeaderboardClient({ ...validateLeaderboardApi(config.leaderboardApi), fetchImpl: publicFetch });
 }

@@ -36,13 +36,33 @@ async function writePrivate(file, value) {
   await chmod(file, 0o600);
 }
 
-export async function configure({ url, staff = true, configFile, parametersFile, key = newKey }) {
+// Keys are generated only for a brand-new deployment, when this machine has no
+// booth key yet. After that, the service holds these exact keys, and a freshly
+// generated staff key would be refused. Redeploying to accept it would lock
+// out every other staff machine. So a booth-only machine becomes a staff
+// machine by copying the deployed keys from one that already has them
+// (`from`: that machine's booth/local-config.json, moved over a private
+// channel), never by minting new ones.
+export async function configure({ url, staff = true, configFile, parametersFile, from = null, key = newKey }) {
   const config = await readJson(configFile);
   const existing = config.leaderboardApi ?? {};
+  let source = existing;
+  if (from !== null) {
+    source = (await readJson(from)).leaderboardApi ?? {};
+    if (!source.boothKey || (staff && !source.staffKey)) {
+      throw new Error(`${from} has no ${source.boothKey ? "staffKey" : "leaderboardApi keys"} to copy. Use the booth/local-config.json of a staff machine.`);
+    }
+  }
+  const fresh = !source.boothKey;
+  if (!fresh && staff && !source.staffKey) {
+    throw new Error("This machine has a booth key but no staff key. A new staff key would not match the deployed "
+      + "service, and redeploying to add one would lock out every other staff machine. Copy the keys from a staff "
+      + "machine instead: npm run leaderboard:configure -- --url <url> --from <that machine's booth/local-config.json>");
+  }
   const api = {
     url,
-    boothKey: existing.boothKey ?? key(),
-    ...(staff ? { staffKey: existing.staffKey ?? key() } : {}),
+    boothKey: source.boothKey ?? key(),
+    ...(staff ? { staffKey: source.staffKey ?? key() } : {}),
   };
   validateLeaderboardApi(api);
   const next = validateStaffConfig({ ...config, leaderboardApi: api });
@@ -55,33 +75,29 @@ export async function configure({ url, staff = true, configFile, parametersFile,
       parameters: { boothKey: { value: api.boothKey }, staffKey: { value: api.staffKey } },
     });
   }
-  // Which keys are new. A booth-only machine promoted to staff keeps its booth
-  // key and gains a staff key, and the deployment must be told about that one.
-  const generated = [
-    ...(existing.boothKey ? [] : ["boothKey"]),
-    ...(staff && !existing.staffKey ? ["staffKey"] : []),
-  ];
-  // A publish-only booth given a copy of a staff machine's config loses its
-  // staff key here, and has to be told so rather than that it was kept.
+  // What changed on this machine: keys newly generated (fresh setup only),
+  // copied from another machine, or removed by --no-staff-key.
+  const generated = fresh ? ["boothKey", ...(staff ? ["staffKey"] : [])] : [];
+  const copied = from === null ? [] : ["boothKey", "staffKey"].filter(name => api[name] && api[name] !== existing[name]);
   const removed = !staff && existing.staffKey ? ["staffKey"] : [];
-  return { generated, next, removed };
+  return { copied, generated, next, removed };
 }
 
 export function parseArguments(argv) {
-  const args = { parameters: true, staff: true, url: null };
+  const args = { from: null, parameters: true, staff: true, url: null };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     if (flag === "--no-staff-key") { args.staff = false; args.parameters = false; continue; }
-    if (flag === "--url") {
+    if (flag === "--url" || flag === "--from") {
       const value = argv[index + 1];
-      if (value === undefined || value.startsWith("--")) throw new Error("--url needs a value.");
-      args.url = value;
+      if (value === undefined || value.startsWith("--")) throw new Error(`${flag} needs a value.`);
+      args[flag.slice(2)] = value;
       index += 1;
       continue;
     }
     throw new Error(`Unknown option ${flag}.`);
   }
-  if (!args.url) throw new Error("Usage: npm run leaderboard:configure -- --url https://<app>.azurewebsites.net [--no-staff-key]");
+  if (!args.url) throw new Error("Usage: npm run leaderboard:configure -- --url https://<app>.azurewebsites.net [--from <staff machine's booth/local-config.json>] [--no-staff-key]");
   return args;
 }
 
@@ -89,14 +105,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   try {
     const args = parseArguments(process.argv.slice(2));
     const parametersFile = args.parameters ? resolve(root, "dist", "leaderboard.secure.parameters.json") : null;
-    const { generated, removed } = await configure({
-      configFile: resolve(root, "booth", "local-config.json"), parametersFile, staff: args.staff, url: args.url,
+    const { copied, generated, removed } = await configure({
+      configFile: resolve(root, "booth", "local-config.json"), from: args.from, parametersFile, staff: args.staff, url: args.url,
     });
     const kept = ["boothKey", "staffKey"].filter(key => !generated.includes(key) && !removed.includes(key)
-      && (key === "boothKey" || args.staff));
+      && !copied.includes(key) && (key === "boothKey" || args.staff));
     process.stdout.write((generated.length
       ? `Generated ${generated.join(" and ")} in booth/local-config.json. Redeploy the infrastructure so the service accepts ${generated.length === 1 ? "it" : "them"}.\n`
       : "")
+      + (copied.length ? `Copied ${copied.join(" and ")} from ${args.from}. They match the deployed service; no redeploy is needed.\n` : "")
       + (kept.length ? `Kept the existing ${kept.join(" and ")}.\n` : "")
       + (removed.length ? "Removed the staffKey: this machine can now publish but not take drinks down.\n" : "")
       + (parametersFile ? "Wrote dist/leaderboard.secure.parameters.json for the deployment. Delete it once deployed.\n" : "")

@@ -56,7 +56,7 @@ export async function retryReport(engine) {
       exitCode: 1,
       text: `${owed.map(record => `${record.id}\tNOT off the public leaderboard`).join("\n")}\n`
         + `${owed.length} takedown${owed.length === 1 ? "" : "s"} could not reach the public leaderboard because this booth has no staff key. `
-        + `Only this machine holds ${owed.length === 1 ? "that removal" : "those removals"}: add the staff key to this machine with npm run leaderboard:configure, then retry.\n`,
+        + `Only this machine holds ${owed.length === 1 ? "that removal" : "those removals"}: copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <a staff machine's booth/local-config.json>, then retry.\n`,
     };
   }
   const results = await engine.retryRetractions();
@@ -71,7 +71,7 @@ export async function retryReport(engine) {
 export const PUBLIC_BOARD = {
   absent: "It was not on the public leaderboard.",
   failed: "It is NOT yet off the public leaderboard. Run npm run remove -- --retry once the network is back.",
-  "not-configured": "This booth has no staff key, so it is NOT off the public leaderboard. To finish it, add the staff key to this machine with npm run leaderboard:configure, then retry.",
+  "not-configured": "This booth has no staff key, so it is NOT off the public leaderboard. To finish it, copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <a staff machine's booth/local-config.json>, then retry.",
   retracted: "It was taken off the public leaderboard.",
 };
 

@@ -270,7 +270,7 @@ export class BoothEngine {
       requireValue(owed.length === 0, "takedowns_owed",
         `${owed.length === 1 ? "One takedown has" : `${owed.length} takedowns have`} not reached the public leaderboard, `
         + "so wiping would leave it public with no record to retry from. Refresh once the network is back, "
-        + "or add the staff key to this machine with npm run leaderboard:configure. Nothing was changed.", 409);
+        + "or copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <a staff machine's booth/local-config.json>. Nothing was changed.", 409);
       const summary = eventSummary(data);
       // An attendee mid-order would lose the drink on the screen in front of
       // them. Finish or hand over the station first.

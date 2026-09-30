@@ -615,11 +615,12 @@ test("configuring keeps one set of keys, keeps them private, and never sets the 
   // A booth machine that should publish but not delete.
   const boothOnly = await configure({ configFile: join(directory, "booth.json"), staff: false, url });
   assert.equal(boothOnly.next.leaderboardApi.staffKey, undefined);
-  // Later promoted to a staff machine: the booth key is kept, and the new
-  // staff key must be reported, or the deployment is never told about it.
-  const promoted = await configure({ configFile: join(directory, "booth.json"), url });
-  assert.deepEqual(promoted.generated, ["staffKey"]);
-  assert.equal(promoted.next.leaderboardApi.boothKey, boothOnly.next.leaderboardApi.boothKey);
+  // Promoted to a staff machine: never by minting a staff key, which the
+  // service would refuse. It copies the deployed keys from a staff machine.
+  await assert.rejects(() => configure({ configFile: join(directory, "booth.json"), url }), /would not match the deployed service/);
+  const promoted = await configure({ configFile: join(directory, "booth.json"), from: configFile, url });
+  assert.deepEqual(promoted.generated, []);
+  assert.equal(promoted.next.leaderboardApi.staffKey, saved.leaderboardApi.staffKey, "the staff key the service already accepts");
 
   // Other staff settings survive, and an existing QR is left exactly as it was.
   await writeFile(join(directory, "kept.json"), JSON.stringify({ leaderboardUrl: "https://example.org/board" }));
@@ -628,7 +629,9 @@ test("configuring keeps one set of keys, keeps them private, and never sets the 
 
   await assert.rejects(() => configure({ configFile, url: "http://insecure.example.org" }), { code: "invalid_config" });
   assert.throws(() => parseArguments([]), /Usage/);
-  assert.deepEqual(parseArguments(["--url", url, "--no-staff-key"]), { parameters: false, staff: false, url });
+  assert.deepEqual(parseArguments(["--url", url, "--no-staff-key"]), { from: null, parameters: false, staff: false, url });
+  assert.equal(parseArguments(["--url", url, "--from", "/tmp/staff.json"]).from, "/tmp/staff.json");
+  assert.throws(() => parseArguments(["--url", url, "--from"]), /--from needs a value/);
 });
 
 test("the infrastructure keeps secrets out of the repository and one writer on the board", async () => {
@@ -980,10 +983,10 @@ test("a read never sees a write that has not reached the disk", async t => {
   assert.equal(await Promise.race([store.isReserved("fp"), tick()]), pending);
 
   // The write then fails. The entry must never have been visible.
-  await rm(directory, { force: true, recursive: true });
+  store.persist = () => Promise.reject(Object.assign(new Error("disk full"), { code: "ENOSPC" }));
   const reading = store.list();
   land();
-  await assert.rejects(admitting, { code: "ENOENT" });
+  await assert.rejects(admitting, { code: "ENOSPC" });
   assert.deepEqual(await reading, [], "the entry that failed to persist was never shown");
 });
 
@@ -998,7 +1001,7 @@ test("retrying on a booth without a staff key does not claim nothing is waiting"
   const report = await retryReport(engine);
   assert.equal(report.exitCode, 1, "an outstanding public takedown is not a success");
   assert.match(report.text, new RegExp(`${served.submission.id}\\tNOT off the public leaderboard`));
-  assert.match(report.text, /add the staff key to this machine/, "the fix names this machine, which holds the removal");
+  assert.match(report.text, /copy the deployed keys to this machine .*--from/, "the fix names this machine, which holds the removal");
   assert.doesNotMatch(report.text, /No takedowns are waiting/);
 });
 
@@ -1045,17 +1048,16 @@ test("a takedown on one instance stops a submission arriving at the other", asyn
 });
 
 test("a lock left by a dead instance is taken over; a live one is waited for", async t => {
-  const { utimes } = await import("node:fs/promises");
   const directory = await tempDirectory(t);
   const lock = join(directory, "default.json.lock");
   const store = await FileStore.open({ directory, lockTimeoutMs: 150, staleLockMs: 1_000 });
 
-  await writeFile(lock, "live-instance");
+  const live = JSON.stringify({ at: Date.now() + 60_000, owner: "live-instance" });
+  await writeFile(lock, live);
   await assert.rejects(() => store.create(entry("mona-waited")), { code: "board_locked" });
-  assert.equal(await readFile(lock, "utf8"), "live-instance", "another instance's live lock is never broken");
+  assert.equal(await readFile(lock, "utf8"), live, "another instance's live lock is never broken");
 
-  const old = new Date(Date.now() - 60_000);
-  await utimes(lock, old, old);
+  await writeFile(lock, JSON.stringify({ at: Date.now() - 60_000, owner: "dead-instance" }));
   await store.create(entry("mona-after-crash"));
   assert.deepEqual((await store.list()).map(item => item.id), ["mona-after-crash"], "a dead instance's lock does not block the board");
   const { access } = await import("node:fs/promises");
@@ -1063,12 +1065,11 @@ test("a lock left by a dead instance is taken over; a live one is waited for", a
 });
 
 test("a holder whose lease was taken over cannot commit over the new holder", async t => {
-  const { utimes } = await import("node:fs/promises");
   const directory = await tempDirectory(t);
   const lock = join(directory, "default.json.lock");
   const [a, b] = await Promise.all([FileStore.open({ directory, staleLockMs: 60 }), FileStore.open({ directory, staleLockMs: 60 })]);
   // A stalls long enough to lose its lease: no renewal while it is frozen.
-  a.renewLease = () => () => {};
+  a.renewLease = () => async () => {};
   // The exact interleaving from the review: A has passed its version check
   // and is about to rename when B takes over the stale lease and commits.
   let stalled = false;
@@ -1076,8 +1077,9 @@ test("a holder whose lease was taken over cannot commit over the new holder", as
   a.persist = async (text, owner) => {
     if (!stalled) {
       stalled = true;
-      const old = new Date(Date.now() - 60_000);
-      await utimes(lock, old, old);
+      // A's lease, unrenewed while A was frozen, is now past its time.
+      const lease = JSON.parse(await readFile(lock, "utf8"));
+      await writeFile(lock, JSON.stringify({ ...lease, at: Date.now() - 60_000 }));
       await b.create(entry("mona-from-b"));
     }
     return persist(text, owner);
@@ -1230,24 +1232,21 @@ test("no staff guidance sends anyone to another machine to finish this booth's t
 });
 
 test("renewing a lease never refreshes a lease someone else now holds", async t => {
-  const { stat, utimes } = await import("node:fs/promises");
   const directory = await tempDirectory(t);
   const store = await FileStore.open({ directory, staleLockMs: 60 });   // renews every 20ms
   const lock = join(directory, "default.json.lock");
-  const old = new Date(Date.now() - 60_000);
   const stop = store.renewLease("mine");
-  t.after(stop);
+  const age = async () => Date.now() - JSON.parse(await readFile(lock, "utf8")).at;
 
-  await writeFile(lock, "someone-else");
-  await utimes(lock, old, old);
+  await writeFile(lock, JSON.stringify({ at: Date.now() - 60_000, owner: "someone-else" }));
   await new Promise(resolve => setTimeout(resolve, 120));
-  assert.ok(Date.now() - (await stat(lock)).mtimeMs > 30_000,
-    "a lease this instance lost is left to go stale, so a dead holder cannot be kept alive");
+  assert.ok(await age() > 30_000, "a lease this instance lost is left to go stale, so a dead holder cannot be kept alive");
+  assert.equal(JSON.parse(await readFile(lock, "utf8")).owner, "someone-else");
 
-  await writeFile(lock, "mine");
-  await utimes(lock, old, old);
+  await writeFile(lock, JSON.stringify({ at: Date.now() - 60_000, owner: "mine" }));
   await new Promise(resolve => setTimeout(resolve, 120));
-  assert.ok(Date.now() - (await stat(lock)).mtimeMs < 1_000, "its own lease is renewed");
+  assert.ok(await age() < 1_000, "its own lease is renewed");
+  await stop();
 });
 
 // --- Review round 6 ----------------------------------------------------------
@@ -1282,4 +1281,98 @@ test("a takedown queued behind an admission cannot turn its receipt into a 500",
   assert.equal(validateReceipt(await response.json(), sent).rank, 1, "ranked from the board as it stood at admission");
   assert.equal((await retraction).status, 204);
   assert.equal((await board(url)).total, 0, "and the takedown still happened");
+});
+
+
+// --- Review round 7 ----------------------------------------------------------
+
+test("taking over a stale lease never removes the live lease that replaced it", async t => {
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory, staleLockMs: 60 });
+  const lock = join(directory, "default.json.lock");
+  // Judged stale from one read...
+  const stale = JSON.stringify({ at: Date.now() - 60_000, owner: "dead" });
+  // ...but by the time the takeover acts, a live successor holds the lock.
+  const successor = JSON.stringify({ at: Date.now(), owner: "successor" });
+  await writeFile(lock, successor);
+  await store.takeOver(stale);
+  assert.equal(await readFile(lock, "utf8"), successor, "the successor's live lease is put back exactly");
+  const { readdir } = await import("node:fs/promises");
+  assert.deepEqual((await readdir(directory)).filter(name => name.includes(".stale")), [], "nothing is left aside");
+
+  // The lease that really was judged stale is removed.
+  await writeFile(lock, stale);
+  await store.takeOver(stale);
+  await assert.rejects(() => readFile(lock, "utf8"), { code: "ENOENT" });
+});
+
+test("a half-written lease is treated as live, never as stale", async t => {
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory, lockTimeoutMs: 120, staleLockMs: 60 });
+  await writeFile(join(directory, "default.json.lock"), '{"at":');
+  await assert.rejects(() => store.create(entry("mona-x")), { code: "board_locked" });
+});
+
+
+test("a present but malformed leaderboardApi is an error, not a quiet opt-out", () => {
+  for (const value of [null, false, 0, "", []]) {
+    assert.throws(() => leaderboardClientFromConfig({ leaderboardApi: value }), { code: "invalid_config" }, JSON.stringify(value));
+  }
+  assert.equal(leaderboardClientFromConfig({}), null, "only an absent setting means unconfigured");
+});
+
+test("promoting a booth to staff copies the deployed keys and never mints a new one", async t => {
+  const { configure } = await import("../scripts/configure-leaderboard.mjs");
+  const directory = await tempDirectory(t);
+  const url = "https://commit-and-sip-leaderboard.azurewebsites.net";
+  const staffMachine = join(directory, "staff.json");
+  const deployed = (await configure({ configFile: staffMachine, url })).next.leaderboardApi;
+
+  // A booth machine set up from the staff machine's config, publish-only.
+  const booth = join(directory, "booth.json");
+  const setUp = await configure({ configFile: booth, from: staffMachine, staff: false, url });
+  assert.deepEqual([setUp.generated, setUp.next.leaderboardApi.boothKey], [[], deployed.boothKey]);
+  assert.equal(setUp.next.leaderboardApi.staffKey, undefined);
+
+  // Promotion without a source is refused: the key it would mint is useless.
+  let minted = 0;
+  await assert.rejects(() => configure({ configFile: booth, key: () => { minted += 1; return "x".repeat(64); }, url }),
+    /lock out every other staff machine/);
+  assert.equal(minted, 0);
+  assert.equal(JSON.parse(await readFile(booth, "utf8")).leaderboardApi.staffKey, undefined, "and nothing was written");
+
+  const promoted = await configure({ configFile: booth, from: staffMachine, url });
+  assert.deepEqual(promoted.copied, ["staffKey"]);
+  assert.equal(promoted.next.leaderboardApi.staffKey, deployed.staffKey);
+  await assert.rejects(() => configure({ configFile: join(directory, "other.json"), from: booth.replace("booth", "missing"), url }),
+    /has no leaderboardApi keys to copy/);
+});
+
+
+test("a lock is never left behind by a renewal that was in flight at release", async t => {
+  // Renewals every 10ms, writes that each span several of them, and nothing
+  // holding the lock afterwards: a renewal that finished after the release
+  // would recreate a lease nobody holds.
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory, staleLockMs: 30 });
+  for (let index = 0; index < 25; index += 1) {
+    await store.serialise(async () => {
+      await new Promise(resolve => setTimeout(resolve, 12 + (index % 4) * 3));
+      await MemoryStore.prototype.create.call(store, entry(`mona-${index}`));
+    });
+    await assert.rejects(() => readFile(join(directory, "default.json.lock"), "utf8"), { code: "ENOENT" },
+      `no lease survives release ${index}`);
+  }
+  const { readdir } = await import("node:fs/promises");
+  assert.deepEqual((await readdir(directory)).filter(name => /\.(renew|tmp|stale)$/.test(name)), [], "and no temporary files");
+});
+
+
+test("a write that landed is not reported as failed because its lock could not be released", async t => {
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory });
+  store.releaseLock = () => Promise.reject(Object.assign(new Error("share hiccup"), { code: "EIO" }));
+  const admitted = await store.admit(entry("mona-landed"), { fingerprint: "fp", handles: [HANDLE] });
+  assert.equal(admitted.created, true, "the lease expires on its own; the write stands");
+  assert.deepEqual((await (await FileStore.open({ directory })).list()).map(item => item.id), ["mona-landed"]);
 });
