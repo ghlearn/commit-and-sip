@@ -2,9 +2,10 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { DomainError } from "../.github/extensions/commit-and-sip/domain.mjs";
 import { leaderboard } from "../.github/extensions/commit-and-sip/services/booth-menu.mjs";
+import { canonicalHandle } from "../.github/extensions/commit-and-sip/services/leaderboard.mjs";
 import { blocklistStatus } from "../.github/extensions/commit-and-sip/services/moderation.mjs";
 import { scoreCoffeeName } from "../.github/extensions/commit-and-sip/services/name-score.mjs";
-import { ConflictError } from "./store.mjs";
+import { HandleTakenError, ReservedError } from "./store.mjs";
 
 // The public leaderboard for the Commit & Sip booth.
 //
@@ -125,11 +126,22 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
 
   const routes = {
     async "GET /api/board"(request, url) {
-      const board = leaderboard(await store.list());
+      const entries = await store.list();
+      const board = leaderboard(entries);
       const body = { asOf: now().toISOString(), entries: board.slice(0, BOARD_SIZE).map(publicRow), total: board.length };
       const handle = url.searchParams.get("handle");
       if (handle !== null) {
-        const mine = HANDLE.test(handle) ? board.find(row => row.handle === handle) : undefined;
+        // With a drink ID the lookup is exact. A QR scanned before the booth's
+        // publish was confirmed carries the handle the booth issued, while the
+        // drink may be stored under its canonical form, so either matches.
+        // Without an ID a handle alone is still unique, because admission
+        // never lets two entries share one.
+        const drink = url.searchParams.get("drink");
+        const own = drink === null
+          ? entries.find(entry => entry.handle === handle)
+          : entries.find(entry => entry.id === drink
+            && (entry.handle === handle || entry.handle === canonicalHandle(handle, drink)));
+        const mine = HANDLE.test(handle) && own ? board.find(row => row.handle === own.handle && row.name === own.name) : undefined;
         body.you = mine ? publicRow(mine) : null;
       }
       return [200, body];
@@ -138,24 +150,33 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
     async "POST /api/entries"(request) {
       requireKey(request, boothKey);
       const submission = validateSubmission(await readJson(request), rules, words);
-      // Taken down at some booth. Worded exactly as the booth words a
-      // blocklist hit, so nobody can tell the two apart and guess why.
-      if (await store.isReserved(fingerprint(submission.id))) {
-        throw new HttpError(409, "unavailable_drink", "That name is not available.");
-      }
+      // Handles are unique per booth, not per event. If another entry already
+      // uses this one, the drink is stored under its canonical handle instead,
+      // and the receipt says so.
+      const handles = [submission.handle, canonicalHandle(submission.handle, submission.id)];
+      let admitted;
       try {
-        await store.create({ ...submission, createdAt: now().toISOString() });
+        // One store operation, so a retraction cannot land between checking
+        // the reservation and writing the entry.
+        admitted = await store.admit({ ...submission, createdAt: now().toISOString() },
+          { fingerprint: fingerprint(submission.id), handles });
       } catch (error) {
-        if (!(error instanceof ConflictError)) throw error;
+        // Taken down at some booth. Worded exactly as the booth words a
+        // blocklist hit, so nobody can tell the two apart and guess why.
+        if (error instanceof ReservedError) throw new HttpError(409, "unavailable_drink", "That name is not available.");
+        if (error instanceof HandleTakenError) throw new HttpError(409, "handle_taken", "That handle is already on the board.");
+        throw error;
+      }
+      if (!admitted.created) {
         // A booth retries after a network blip, so the same entry arriving
         // twice is a success. Someone else's drink under the same name is not.
-        const existing = await store.get(submission.id);
-        const same = existing && existing.handle === submission.handle
+        const existing = admitted.entry;
+        const same = handles.includes(existing.handle)
           && existing.name === submission.name && existing.score === submission.score;
         if (!same) throw new HttpError(409, "duplicate_drink", "Another barista already published a drink with this name.");
-        return [200, receiptFor(submission, await store.list())];
+        return [200, receiptFor(existing, await store.list())];
       }
-      return [201, receiptFor(submission, await store.list())];
+      return [201, receiptFor(admitted.entry, await store.list())];
     },
 
     // Deletes the entry and reserves the name at every booth. What is kept is

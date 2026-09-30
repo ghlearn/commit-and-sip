@@ -76,7 +76,7 @@ test("an attendee runs the whole exercise through the canvas alone", async t => 
   assert.equal(served.submission.name, "Ducky Dawn Drip");
   assert.ok(served.submission.score > 0 && served.submission.score <= 5000);
   assert.equal(served.standing.rank, 1);
-  assert.equal(served.attendeeUrl, `https://sip.example.com/board?handle=${begun.handle}`);
+  assert.equal(served.attendeeUrl, `https://sip.example.com/board?handle=${begun.handle}&drink=ducky-dawn-drip`);
   assert.match(served.qrDataUrl, /^data:image\/png;base64,/, "a real code is rendered for a real destination");
 
   const cleared = (await booth.act("complete")).body;
@@ -137,7 +137,7 @@ test("a missing QR encoder degrades to the plain link instead of a broken code",
   await panel.dispatch("begin", {});
   const served = await panel.dispatch("submit_name", { name: "Mona Meridian" });
   assert.equal(served.qrDataUrl, null, "no code is shown rather than a broken one");
-  assert.equal(served.attendeeUrl, "https://sip.example.com/board?handle=" + served.handle,
+  assert.equal(served.attendeeUrl, `https://sip.example.com/board?handle=${served.handle}&drink=mona-meridian`,
     "the link itself is still offered");
 });
 

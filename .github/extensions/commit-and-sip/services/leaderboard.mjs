@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { requireValue } from "../domain.mjs";
 
 // The booth is authoritative for its own menu; the event leaderboard is a
@@ -19,6 +20,15 @@ export function submissionFor(entry) {
   return { handle: entry.handle, id: entry.id, name: entry.name, score: entry.score };
 }
 
+// Handles are unique at one booth, not across an event: there are 512
+// unsuffixed phrases. When two booths hand out the same one, the service keeps
+// the first and gives the later drink this handle instead. It is derived from
+// the drink ID, so a retry always lands on the same value and the booth can
+// check the receipt exactly rather than accept whatever handle comes back.
+export function canonicalHandle(handle, id) {
+  return `${handle.replace(/-[0-9a-f]{8}$/, "")}-${createHash("sha256").update(id).digest("hex").slice(0, 8)}`;
+}
+
 // A receipt is trusted only when it is about the entry that was actually sent.
 // A service that answers with a different handle, ID, name or score is
 // reporting on someone else, and its rank must never be shown next to this
@@ -27,7 +37,9 @@ export function submissionFor(entry) {
 export function validateReceipt(receipt, submission) {
   requireValue(receipt && typeof receipt === "object" && !Array.isArray(receipt),
     "invalid_receipt", "The leaderboard service returned an unusable receipt.");
-  requireValue(receipt.handle === submission.handle && receipt.id === submission.id
+  const handleMatches = receipt.handle === submission.handle
+    || receipt.handle === canonicalHandle(submission.handle, submission.id);
+  requireValue(handleMatches && receipt.id === submission.id
     && receipt.name === submission.name && receipt.score === submission.score,
     "receipt_mismatch", "The leaderboard receipt does not match the submitted entry.");
   requireValue(Number.isSafeInteger(receipt.rank) && receipt.rank > 0,
@@ -67,7 +79,7 @@ export function failedSync(previous, error, now = new Date().toISOString()) {
 // What the canvas is allowed to say. A local score is a fact the booth owns; a
 // global rank is not, until the service has confirmed it. These are separate so
 // the UI cannot imply an event standing that nobody has accepted.
-export function syncView(sync) {
+export function syncView(sync, handle = null) {
   if (!sync || sync.state === "disabled") {
     return { eventRank: null, message: null, state: "disabled" };
   }
@@ -75,7 +87,10 @@ export function syncView(sync) {
     return {
       entries: sync.receipt.entries,
       eventRank: sync.receipt.rank,
-      message: `Confirmed on the event leaderboard at rank ${sync.receipt.rank}.`,
+      message: `Confirmed on the event leaderboard at rank ${sync.receipt.rank}.`
+        + (handle && sync.receipt.handle !== handle
+          ? ` Another booth had already used your handle, so the board shows you as ${sync.receipt.handle}.`
+          : ""),
       state: "confirmed",
     };
   }

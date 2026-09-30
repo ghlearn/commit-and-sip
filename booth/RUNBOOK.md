@@ -147,7 +147,9 @@ When the booth publishes to the leaderboard service, removal also takes the drin
 | taken off the public leaderboard | Removed there, and the name is reserved | None |
 | was not on the public leaderboard | It had not synced yet; the name is still reserved there | None |
 | **NOT yet off the public leaderboard** | The service was unreachable | Press **Refresh** on the dashboard, or run `npm run remove -- --retry` once the network is back |
-| no staff key for the public leaderboard | This machine can publish but not delete | Take it down from a staff machine |
+| no staff key for the public leaderboard | This machine can publish but not delete | Take it down from a staff machine. If a staff key is added to this machine later, **Refresh** retries it |
+
+A takedown whose outcome was never recorded, for example because the machine stopped mid-removal, is retried the same way. Only "taken off" and "was not on" are final.
 
 House examples cannot be removed this way. They are booth configuration, so edit `booth/orders.json` instead.
 
@@ -160,7 +162,7 @@ If a panel is closed or the extension reloads mid-run, reopen the canvas. Saved 
 | No network | Keep running. The booth is local-first and needs no network. Only the event leaderboard line is unavailable, and the canvas says so rather than inventing a rank. |
 | Name rejected unexpectedly | Check the blocklist for an over-broad `substring` entry. Do not read the matched term aloud or add exceptions mid-session. |
 | Entries stay unconfirmed on the event leaderboard | Expected while no `leaderboardApi` is configured. Otherwise the sync reason names the refusal: `score_mismatch` means the service and booth run different rubric versions, and `unavailable_drink` means staff took that name down. |
-| Public board lost or a new `EVENT_ID` set | Run `npm run leaderboard:republish` on every booth machine. Each booth holds the authoritative copy of its own drinks. |
+| Public board lost or a new `EVENT_ID` set | Run `npm run leaderboard:republish` on every booth machine. Each booth holds the authoritative copy of its own drinks and takedowns. It replays takedowns first, so removed names are reserved again, and **only a machine with the staff key can do that part**: the command fails and says so on a booth-only machine. |
 | Panel connection lost | Reopen the canvas. Saved state persists. Do not share loopback URLs or tickets. |
 | Counter stuck on a previous attendee | Use hand-over. If the UI does not respond, inspect the provider log before touching the store. |
 | Unexpected provider error | Inspect the extension's host-reported log. Keep stack traces and internal identifiers off attendee screens and out of public reports. |
@@ -186,7 +188,7 @@ The booth is local-first. A drink is committed to this booth's menu before anyth
 
 The booth publishes only when `leaderboardApi` is configured; otherwise the canvas shows no event line at all. The client owns a 4-second timeout, so a booth never waits on a slow service.
 
-A failed submission retries on the next refresh, so a brief network outage recovers without staff. A receipt whose handle, ID, name, or score does not match what was sent is recorded as a failure, not displayed: a service answering about a different entry must never be shown as this attendee's rank. Check the extension log if entries stay unconfirmed.
+A failed submission retries on the next refresh, so a brief network outage recovers without staff. A receipt whose handle, ID, name, or score does not match what was sent (the handle may instead be its canonical form, when another booth used the phrase first) is recorded as a failure, not displayed: a service answering about a different entry must never be shown as this attendee's rank. Check the extension log if entries stay unconfirmed.
 
 Read ranks carefully when helping an attendee. "Rank 1 of 1 at this booth" is this booth's own menu and nothing more. Only a confirmed event line reflects the wider competition.
 
@@ -224,7 +226,7 @@ The board is a JSON file on the app's persistent `/home` storage, so the plan is
 
 ## Leaderboard and QR readiness
 
-There is no approved deployment or public URL yet. A local `127.0.0.1` renderer cannot host an attendee phone experience, and repository assets are not a public destination. Never use credential-bearing URLs to make private images appear public.
+The leaderboard **service** is deployed (see [Leaderboard service operations](#leaderboard-service-operations)), but it is **not approved as an attendee destination**. `leaderboardUrl` stays unset, and no QR code is generated, until the blocklist is reviewed and brand sign-off is done. Staff may open the board themselves; attendees must not be sent to it. A local `127.0.0.1` renderer cannot host an attendee phone experience, and repository assets are not a public destination. Never use credential-bearing URLs to make private images appear public.
 
 After the public destination is approved and configured:
 

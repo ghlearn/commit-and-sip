@@ -31,6 +31,22 @@ export class ConflictError extends Error {
   }
 }
 
+export class ReservedError extends Error {
+  constructor() {
+    super("That drink ID is reserved.");
+    this.name = "ReservedError";
+    this.code = "reserved";
+  }
+}
+
+export class HandleTakenError extends Error {
+  constructor() {
+    super("Every candidate handle is already used by another entry.");
+    this.name = "HandleTakenError";
+    this.code = "handle_taken";
+  }
+}
+
 export class MemoryStore {
   constructor() {
     this.entries = new Map();
@@ -50,6 +66,24 @@ export class MemoryStore {
   async list() { return [...this.entries.values()].map(entry => ({ ...entry })); }
 
   async isReserved(fingerprint) { return this.reserved.has(fingerprint); }
+
+  // The whole admission decision as one step, so nothing can interleave with
+  // it: a retraction cannot slip between the reservation check and the write,
+  // and two attendees sharing a handle cannot both claim the unsuffixed form.
+  // Returns the stored entry when the ID already exists, for the caller to
+  // judge as a retry or a clash; otherwise stores it under the first handle in
+  // `handles` that no other entry uses.
+  async admit(entry, { fingerprint, handles }) {
+    if (this.reserved.has(fingerprint)) throw new ReservedError();
+    const existing = this.entries.get(entry.id);
+    if (existing) return { created: false, entry: { ...existing } };
+    const used = new Set([...this.entries.values()].map(item => item.handle));
+    const handle = handles.find(candidate => !used.has(candidate));
+    if (!handle) throw new HandleTakenError();
+    const stored = { ...entry, handle };
+    this.entries.set(entry.id, stored);
+    return { created: true, entry: { ...stored } };
+  }
 
   // Reserves even when nothing was published: staff often catch a name before
   // it syncs, and another booth must still be refused it.
@@ -88,19 +122,32 @@ export class FileStore extends MemoryStore {
   }
 
   // Writes are chained so two requests can never interleave a read-modify-write.
+  // Memory changes only if the disk does: if the write or the rename fails,
+  // the maps are put back, so a retry cannot report success for an entry that
+  // would vanish on restart.
   serialise(change) {
     const next = this.queue.then(async () => {
-      const result = await change();
-      const temporary = `${this.file}.${process.pid}.tmp`;
-      await writeFile(temporary, `${JSON.stringify({ entries: [...this.entries.values()], reserved: [...this.reserved] })}\n`);
-      await rename(temporary, this.file);
-      return result;
+      const entries = new Map(this.entries);
+      const reserved = new Set(this.reserved);
+      try {
+        const result = await change();
+        const temporary = `${this.file}.${process.pid}.tmp`;
+        await writeFile(temporary, `${JSON.stringify({ entries: [...this.entries.values()], reserved: [...this.reserved] })}\n`);
+        await rename(temporary, this.file);
+        return result;
+      } catch (error) {
+        this.entries = entries;
+        this.reserved = reserved;
+        throw error;
+      }
     });
     this.queue = next.catch(() => {});
     return next;
   }
 
   create(entry) { return this.serialise(() => super.create(entry)); }
+
+  admit(entry, options) { return this.serialise(() => super.admit(entry, options)); }
 
   retract(id, fingerprint) { return this.serialise(() => super.retract(id, fingerprint)); }
 }

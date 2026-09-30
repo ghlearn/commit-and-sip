@@ -25,7 +25,9 @@ Hosting is subscription **GitHub - NonProd - skills**, region `westus2`, resourc
 
 **What the file store costs:** exactly one instance may write. The plan pins capacity to 1, `WEBSITE_DISABLE_OVERLAPPED_RECYCLING=1` prevents a second instance overlapping during a recycle, and every write within the process is serialised and lands atomically through a rename. If the file is unreadable, the service refuses to start rather than start empty and overwrite it.
 
-**Why the board is a projection:** every booth machine keeps the authoritative copy of its own drinks. `npm run leaderboard:republish` rebuilds the board from a booth. Run it on each booth machine after data loss or an `EVENT_ID` change. It also publishes drinks served before the booth was configured, which would otherwise never be sent.
+**Why the board is a projection:** every booth machine keeps the authoritative copy of its own drinks and takedowns. `npm run leaderboard:republish` rebuilds the board from a booth. It replays every takedown first, so removed names are reserved again, and then sends every drink. Run it on each booth machine, with the staff key, after data loss or an `EVENT_ID` change. It also publishes drinks served before the booth was configured, which would otherwise never be sent.
+
+If a write to disk fails, the in-memory board is put back as it was, so the service never reports success for something that would vanish on restart.
 
 The service uses Node built-ins only. There are no runtime dependencies to audit, install, or patch.
 
@@ -37,6 +39,8 @@ The service uses Node built-ins only. There are no runtime dependencies to audit
 | Staff key | Retract only | `booth/local-config.json` on machines allowed to take drinks down, and an App Service setting |
 
 Keys are presented as `Authorization: Bearer`, compared in constant time, and must be at least 32 characters and differ from each other. `npm run leaderboard:configure` generates them once and keeps them after that. The same keys go into the deployment as `@secure()` Bicep parameters, so an infrastructure redeploy cannot silently wipe settings that were added by hand.
+
+**Handles are made unique across booths by the service.** A booth draws its handle from 512 phrases and knows only its own. If another entry already uses the phrase, the service stores the drink under a *canonical* handle: the phrase plus eight hex characters derived from the drink ID. It returns that handle in the receipt. The rule lives in `canonicalHandle()` in `services/leaderboard.mjs`, which both sides import, so the booth accepts the original handle or exactly that canonical one and nothing else. The attendee is told if their board handle differs. Their QR link carries the drink ID as well as the handle, so it finds their own drink even before the publish is confirmed. Admission is one serialised store operation covering the reservation check, the handle choice and the write, so concurrent requests cannot interleave.
 
 **Departure from the proposal:** the proposal suggested per-booth keys mapped to a booth ID. This build uses one shared booth key. The cost is that one compromised booth cannot be cut off without re-keying all of them. For an event with a few booth machines, that was judged acceptable. Per-booth keys would also put a booth identity into storage, and at present everything stored is either shown publicly or unreadable.
 
@@ -60,7 +64,7 @@ The service deletes the entry and **reserves the drink ID**. That ID is derived 
 
 The stored board therefore holds no name, reason, or record of who removed anything. Those stay in the booth's local ledger. A refused resubmission gets `409 unavailable_drink` with the booth's own blocklist wording, so the counter cannot tell a takedown from a blocklist hit.
 
-A retraction for a drink that never synced returns `404`, and the booth records that as `absent`. It **still reserves the name**, because staff often catch a name before it syncs. A retraction that cannot reach the service is recorded as `failed`, shown in the admin canvas, and retried on its **Refresh** or with `npm run remove -- --retry`. A publish still in flight when staff remove the drink is retracted again once its receipt arrives.
+A retraction for a drink that never synced returns `404`, and the booth records that as `absent`. It **still reserves the name**, because staff often catch a name before it syncs. Only `retracted` and `absent` are settled. Anything else is retried on the admin canvas's **Refresh** or with `npm run remove -- --retry`: `failed` (network), `not-configured` (a staff key added later), and a missing outcome (the machine stopped mid-removal). A publish still in flight when staff remove the drink is retracted again once its receipt arrives.
 
 ### Receipts are checked on every field
 
@@ -87,9 +91,10 @@ Each `EVENT_ID` is a separate board file, so setting a new ID starts a fresh boa
 
 ```
 GET    /                        public board (the future QR destination)
-GET    /api/board[?handle=]     { asOf, total, entries[<=20], you? }
-POST   /api/entries             booth key. 201 new, 200 same entry again,
-                                409 duplicate_drink | unavailable_drink,
+GET    /api/board[?handle=&drink=]  { asOf, total, entries[<=20], you? }
+POST   /api/entries             booth key. 201 new, 200 same entry again (handle
+                                may be canonical), 409 duplicate_drink |
+                                unavailable_drink | handle_taken,
                                 422 score_mismatch | rejected_name | invalid_handle
 DELETE /api/entries/:id         staff key. 204 retracted, 404 absent. Reserves either way
 GET    /healthz                 { ok, moderation: "reviewed" | "placeholder" }

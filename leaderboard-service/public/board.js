@@ -8,7 +8,9 @@
 const REFRESH_MS = 10_000;
 const STALE_AFTER_MS = 30_000;
 
-const handle = new URLSearchParams(location.search).get("handle");
+const params = new URLSearchParams(location.search);
+const handle = params.get("handle");
+const drink = params.get("drink");
 const time = date => date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const $ = id => document.getElementById(id);
 
@@ -24,7 +26,8 @@ function cell(tag, text, className) {
 function render(board) {
   const rows = board.entries.map(entry => {
     const row = document.createElement("tr");
-    if (handle && entry.handle === handle) row.className = "mine";
+    // Only the row the service identified, never every row sharing a phrase.
+    if (board.you && entry.handle === board.you.handle && entry.name === board.you.name) row.className = "mine";
     const rank = cell("th", String(entry.rank));
     rank.scope = "row";
     row.append(rank, cell("td", entry.name, "drink"), cell("td", entry.handle, "handle"),
@@ -67,7 +70,9 @@ function showStatus() {
 
 async function refresh() {
   try {
-    const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
+    const query = handle
+      ? `?handle=${encodeURIComponent(handle)}${drink ? `&drink=${encodeURIComponent(drink)}` : ""}`
+      : "";
     const response = await fetch(`/api/board${query}`, { cache: "no-store" });
     if (!response.ok) throw new Error(String(response.status));
     render(await response.json());

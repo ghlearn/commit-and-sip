@@ -498,11 +498,11 @@ test("a booth rebuilds its part of a lost board, including drinks served before 
   const first = await service(t);
   const online = new BoothEngine({ catalog, rules, store: runs,
     leaderboardClient: createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url: first.url }) });
-  const results = await online.republishAll();
+  const { drinks: results } = await online.republishAll();
   assert.deepEqual(results.map(result => result.state), ["confirmed", "confirmed"]);
   assert.deepEqual((await board(first.url)).entries.map(row => row.name).sort(), ["Ducky Dawn Drizzle", "Mona Moonrise Mocha"],
     "a removed drink is never republished");
-  assert.equal((await online.republishAll()).every(result => result.state === "confirmed"), true, "running it twice is harmless");
+  assert.equal((await online.republishAll()).drinks.every(result => result.state === "confirmed"), true, "running it twice is harmless");
 
   // The service loses everything. The booth still has the authoritative copy.
   const replacement = await service(t);
@@ -587,7 +587,7 @@ test("configuring keeps one set of keys, keeps them private, and never sets the 
   const url = "https://commit-and-sip-leaderboard.azurewebsites.net";
 
   const first = await configure({ configFile, parametersFile, url });
-  assert.equal(first.generated, true);
+  assert.deepEqual(first.generated, ["boothKey", "staffKey"]);
   const saved = JSON.parse(await readFile(configFile, "utf8"));
   assert.match(saved.leaderboardApi.boothKey, /^[0-9a-f]{64}$/);
   assert.notEqual(saved.leaderboardApi.boothKey, saved.leaderboardApi.staffKey);
@@ -601,12 +601,17 @@ test("configuring keeps one set of keys, keeps them private, and never sets the 
 
   // Re-running must not rotate the keys out from under a deployed service.
   const again = await configure({ configFile, parametersFile, url });
-  assert.equal(again.generated, false);
+  assert.deepEqual(again.generated, []);
   assert.deepEqual(JSON.parse(await readFile(configFile, "utf8")).leaderboardApi, saved.leaderboardApi);
 
   // A booth machine that should publish but not delete.
   const boothOnly = await configure({ configFile: join(directory, "booth.json"), staff: false, url });
   assert.equal(boothOnly.next.leaderboardApi.staffKey, undefined);
+  // Later promoted to a staff machine: the booth key is kept, and the new
+  // staff key must be reported, or the deployment is never told about it.
+  const promoted = await configure({ configFile: join(directory, "booth.json"), url });
+  assert.deepEqual(promoted.generated, ["staffKey"]);
+  assert.equal(promoted.next.leaderboardApi.boothKey, boothOnly.next.leaderboardApi.boothKey);
 
   // Other staff settings survive, and an existing QR is left exactly as it was.
   await writeFile(join(directory, "kept.json"), JSON.stringify({ leaderboardUrl: "https://example.org/board" }));
@@ -638,4 +643,168 @@ test("the infrastructure keeps secrets out of the repository and one writer on t
   const ignored = await readFile(new URL("../.gitignore", import.meta.url), "utf8");
   assert.match(ignored, /^dist\/$/m, "the secure deployment parameters are written under an ignored directory");
   assert.match(ignored, /^booth\/local-config\.json$/m);
+});
+
+// --- Review round 1 ----------------------------------------------------------
+
+test("a takedown queued behind another write still stops a concurrent submission", async t => {
+  // The write queue is held shut so the retraction is still pending when the
+  // submission arrives. Checking the reservation outside the queue would see
+  // "not reserved" and write the entry after the retraction lands.
+  const directory = await tempDirectory(t);
+  let open;
+  const gate = new Promise(resolve => { open = resolve; });
+  class GatedStore extends FileStore {
+    serialise(change) { return super.serialise(async () => { await gate; return change(); }); }
+  }
+  const store = Object.setPrototypeOf(await FileStore.open({ directory }), GatedStore.prototype);
+  const app = createApp({ boothKey: BOOTH_KEY, reservationKey: RESERVATION_KEY, rules, staffKey: STAFF_KEY, store, words });
+  const server = createServer(app).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const url = `http://127.0.0.1:${server.address().port}`;
+
+  const sent = submission("Mona Moonrise Mocha");
+  const retraction = del(url, sent.id);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const publication = post(url, submission("Mona Moonrise Mocha", OTHER_HANDLE));
+  await new Promise(resolve => setTimeout(resolve, 50));
+  open();
+  assert.equal((await retraction).status, 404);
+  const published = await publication;
+  assert.equal(published.status, 409, "the submission must see the reservation queued ahead of it");
+  assert.equal((await published.json()).error, "unavailable_drink");
+  assert.equal((await board(url)).total, 0);
+});
+
+test("a failed write leaves memory exactly as it was on disk", async t => {
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory });
+  await store.create(entry("mona-kept"));
+  await rm(directory, { force: true, recursive: true });   // the next write cannot land
+  // A handle nobody holds, so the only possible failure is the write itself.
+  await assert.rejects(() => store.admit(entry("mona-lost"), { fingerprint: "fp", handles: [OTHER_HANDLE] }), { code: "ENOENT" });
+  await assert.rejects(() => store.retract("mona-kept", "fp-kept"), { code: "ENOENT" });
+  assert.deepEqual((await store.list()).map(item => item.id), ["mona-kept"], "the failed admission is not in memory");
+  assert.equal(await store.isReserved("fp-kept"), false, "nor is the failed reservation");
+  // Once the disk is back, a retry is a fresh admission, not a false "already there".
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(directory, { recursive: true });
+  assert.equal((await store.admit(entry("mona-lost"), { fingerprint: "fp", handles: [OTHER_HANDLE] })).created, true);
+  assert.deepEqual((await (await FileStore.open({ directory })).list()).map(item => item.id).sort(), ["mona-kept", "mona-lost"]);
+});
+
+test("two booths that issued the same handle each get a distinct place on the board", async t => {
+  const { url } = await service(t);
+  const { canonicalHandle } = await import("../.github/extensions/commit-and-sip/services/leaderboard.mjs");
+  const first = submission("Mona Moonrise Mocha", HANDLE);
+  const second = submission("Ducky Dawn Drizzle", HANDLE);   // same phrase, another booth
+  const firstReceipt = await (await post(url, first)).json();
+  const secondResponse = await post(url, second);
+  assert.equal(secondResponse.status, 201);
+  const secondReceipt = await secondResponse.json();
+  assert.equal(firstReceipt.handle, HANDLE, "the first keeps the phrase");
+  assert.equal(secondReceipt.handle, canonicalHandle(HANDLE, second.id), "the second gets the deterministic suffix");
+  assert.equal(validateReceipt(secondReceipt, second).handle, secondReceipt.handle, "and the booth accepts exactly that");
+  assert.throws(() => validateReceipt({ ...secondReceipt, handle: `${HANDLE}-00000000` }, second),
+    { code: "receipt_mismatch" }, "but no other suffix");
+  // A retry lands on the same canonical handle rather than a clash.
+  const retried = await post(url, second);
+  assert.equal(retried.status, 200);
+  assert.equal((await retried.json()).handle, secondReceipt.handle);
+
+  const handles = (await board(url)).entries.map(row => row.handle);
+  assert.equal(new Set(handles).size, handles.length, "no two rows share a handle");
+  // Each phone finds its own drink, including a QR scanned before confirmation
+  // that still carries the phrase the booth issued.
+  assert.equal((await board(url, `?handle=${HANDLE}&drink=${first.id}`)).you.name, first.name);
+  assert.equal((await board(url, `?handle=${HANDLE}&drink=${second.id}`)).you.name, second.name);
+  assert.equal((await board(url, `?handle=${secondReceipt.handle}&drink=${second.id}`)).you.name, second.name);
+  assert.equal((await board(url, `?handle=${HANDLE}&drink=someone-else`)).you, null);
+});
+
+test("the attendee is told when the board shows them under a different handle", async () => {
+  const { syncView, canonicalHandle } = await import("../.github/extensions/commit-and-sip/services/leaderboard.mjs");
+  const receipt = { entries: 2, handle: canonicalHandle(HANDLE, "mona-x"), rank: 1, score: 1 };
+  assert.match(syncView({ receipt, state: "confirmed" }, HANDLE).message, new RegExp(`shows you as ${receipt.handle}`));
+  assert.doesNotMatch(syncView({ receipt: { ...receipt, handle: HANDLE }, state: "confirmed" }, HANDLE).message, /shows you as/);
+});
+
+test("the store never lets two entries share a handle, even under the suffix", async () => {
+  const { HandleTakenError } = await import("../leaderboard-service/store.mjs");
+  const store = new MemoryStore();
+  await store.admit(entry("mona-a"), { fingerprint: "a", handles: ["h", "h-1"] });
+  assert.equal((await store.admit(entry("mona-b"), { fingerprint: "b", handles: ["h", "h-1"] })).entry.handle, "h-1");
+  await assert.rejects(() => store.admit(entry("mona-c"), { fingerprint: "c", handles: ["h", "h-1"] }), HandleTakenError);
+});
+
+test("the board highlights only the attendee's own row, not every row sharing a phrase", async () => {
+  const script = await readFile(new URL("../leaderboard-service/public/board.js", import.meta.url), "utf8");
+  assert.doesNotMatch(script, /entry\.handle === handle\b/, "matching on the handle parameter alone highlights strangers");
+  assert.match(script, /board\.you/);
+});
+
+test("a takedown with no recorded outcome, or made before a staff key existed, is retried", async t => {
+  let canRetract = false;
+  const client = { async publish(sent) { return { ...sent, entries: 1, rank: 1 }; } };
+  const { engine, store } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const record = await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
+  assert.equal(record.published, "not-configured");
+
+  // A booth that cannot retract has nothing to try and must not rewrite the
+  // ledger on every dashboard refresh.
+  const transactions = [];
+  const original = store.transaction.bind(store);
+  store.transaction = change => { transactions.push(1); return original(change); };
+  assert.deepEqual(await engine.retryRetractions(), []);
+  assert.equal(transactions.length, 0);
+
+  // A staff key is added later.
+  client.retract = async () => { if (!canRetract) throw new Error("offline"); return "retracted"; };
+  canRetract = true;
+  assert.deepEqual(await engine.retryRetractions(), [{ id: served.submission.id, published: "retracted" }]);
+
+  // The process stopped after the local removal, before recording anything.
+  await engine.open({ runId: "booth-2" });
+  const second = await engine.dispatch("booth-2", "submit_name", { name: "Ducky Dawn Drizzle" });
+  await original(data => {
+    data.menu.splice(data.menu.findIndex(item => item.id === second.submission.id), 1);
+    data.removals.push({ handle: second.handle, id: second.submission.id, name: second.submission.name,
+      reason: "test", removedAt: "2026-01-01T00:00:00Z", removedBy: "lead" });
+  });
+  assert.deepEqual(await engine.retryRetractions(), [{ id: second.submission.id, published: "retracted" }],
+    "a removal whose outcome was never recorded is still owed a retraction");
+  assert.deepEqual(await engine.retryRetractions(), [], "settled takedowns are not retried");
+});
+
+test("rebuilding a lost board restores its reservations before any drink", async t => {
+  const first = await service(t);
+  const directory = await tempDirectory(t);
+  const runs = new RunStore(directory);
+  const boothClient = url => createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url });
+  const engine = new BoothEngine({ catalog, rules, store: runs, leaderboardClient: boothClient(first.url) });
+  await engine.open({ runId: "booth-1" });
+  const kept = await engine.dispatch("booth-1", "submit_name", { name: "Ducky Dawn Drizzle" });
+  await engine.publish("booth-1");
+  await engine.open({ runId: "booth-2" });
+  const removed = await engine.dispatch("booth-2", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.publish("booth-2");
+  await engine.removeDrink({ id: removed.submission.id, reason: "test", removedBy: "lead" });
+
+  // The service loses everything, reservations included.
+  const replacement = await service(t);
+  const rebuilt = new BoothEngine({ catalog, rules, store: runs, leaderboardClient: boothClient(replacement.url) });
+  const { drinks, removals } = await rebuilt.republishAll();
+  assert.deepEqual(removals, [{ id: removed.submission.id, published: "absent" }]);
+  assert.deepEqual(drinks.map(result => result.name), [kept.submission.name]);
+  const retyped = await post(replacement.url, submission("Mona Moonrise Mocha", OTHER_HANDLE));
+  assert.equal(retyped.status, 409, "a name taken down before the loss is still refused after the rebuild");
+  assert.equal((await rebuilt.store.read()).removals[0].published, "retracted", "a settled outcome is not rewritten");
+
+  // A booth without a staff key cannot restore reservations, and says so.
+  const boothOnly = new BoothEngine({ catalog, rules, store: runs,
+    leaderboardClient: createLeaderboardClient({ boothKey: BOOTH_KEY, url: replacement.url }) });
+  assert.deepEqual((await boothOnly.republishAll()).removals, [{ id: removed.submission.id, published: "not-configured" }]);
 });

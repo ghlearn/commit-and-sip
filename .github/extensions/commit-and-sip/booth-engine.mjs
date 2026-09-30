@@ -22,6 +22,10 @@ const PHASES = ["naming", "served", "complete"];
 const MENU_WINDOW = 12;
 const BOARD_WINDOW = 10;
 
+// Takedown outcomes that need no retry: removed from the public board, or it
+// was never there. Anything else is still owed a retraction.
+const SETTLED = ["retracted", "absent"];
+
 export class BoothEngine {
   constructor({ store, catalog, rules, leaderboardUrl = null, leaderboardClient = null }) {
     // Reuse the reviewed leaderboard rule rather than inventing a second,
@@ -43,7 +47,12 @@ export class BoothEngine {
     // to an empty leaderboard lookup would be worse than saying nothing.
     if (!this.leaderboardUrl || run.phase === "naming" || run.removed) return null;
     const url = new URL(this.leaderboardUrl);
-    url.searchParams.set("handle", run.handle);
+    // Once the service confirms the drink, the handle it confirmed is the one
+    // on the board: another booth may have used this phrase first. The drink
+    // ID pins the lookup either way, so a shared phrase can never lead a phone
+    // to somebody else's drink.
+    url.searchParams.set("handle", run.sync?.state === "confirmed" ? run.sync.receipt.handle : run.handle);
+    if (run.submission?.id) url.searchParams.set("drink", run.submission.id);
     return url.toString();
   }
 
@@ -104,11 +113,16 @@ export class BoothEngine {
     return published;
   }
 
-  // Retries every takedown that did not reach the public board. Safe to call
-  // repeatedly: a retraction that already landed comes back "absent".
+  // Retries every takedown that has not reached the public board. Only
+  // "retracted" and "absent" are settled: "failed" is a network error, a
+  // missing outcome means the process stopped between the local removal and
+  // the retraction, and "not-configured" becomes retryable once a staff key
+  // is added. A booth that cannot retract has nothing to try, so it does not
+  // rewrite the ledger on every refresh.
   async retryRetractions() {
+    if (!this.leaderboardClient?.retract) return [];
     const data = await this.store.read();
-    const pending = this.removalLog(data).filter(record => record.published === "failed");
+    const pending = this.removalLog(data).filter(record => !SETTLED.includes(record.published));
     const results = [];
     for (const record of pending) results.push({ id: record.id, published: await this.retract(record.id) });
     return results;
@@ -121,8 +135,28 @@ export class BoothEngine {
   // "disabled" and would otherwise never be sent. Entries already on the board
   // come back as successes, so running it twice is harmless. Removed drinks are
   // never republished.
+  //
+  // Takedowns are replayed first. A lost board loses its reservations too, and
+  // without them a name staff removed could be published again from another
+  // booth. A retraction of something not on the board still reserves it, so
+  // replaying is safe, and settled outcomes on the removal records are kept.
   async republishAll() {
-    if (!this.leaderboardClient) return [];
+    if (!this.leaderboardClient) return { drinks: [], removals: [] };
+    const removals = [];
+    for (const record of this.removalLog(await this.store.read())) {
+      if (!this.leaderboardClient.retract) {
+        removals.push({ id: record.id, published: "not-configured" });
+        continue;
+      }
+      if (!SETTLED.includes(record.published)) {
+        removals.push({ id: record.id, published: await this.retract(record.id) });
+        continue;
+      }
+      let published;
+      try { published = await this.leaderboardClient.retract(record.id); }
+      catch { published = "failed"; }
+      removals.push({ id: record.id, published });
+    }
     const data = await this.store.read();
     const runIds = this.houseMenu(data).filter(entry => !entry.example && data.runs[entry.runId])
       .map(entry => entry.runId);
@@ -132,7 +166,7 @@ export class BoothEngine {
       const run = (await this.store.read()).runs[runId];
       results.push({ runId, name: run.submission?.name, state: run.sync.state, reason: run.sync.reason });
     }
-    return results;
+    return { drinks: results, removals };
   }
 
   // --- Staff operations -----------------------------------------------------
@@ -281,7 +315,7 @@ export class BoothEngine {
       // The booth's own standing is a local fact. The event standing is only
       // ever what the service confirmed, so the two are reported separately.
       standing: run.phase === "naming" ? null : standingFor(this.houseMenu(data), run.runId),
-      sync: syncView(run.sync),
+      sync: syncView(run.sync, run.handle),
     };
   }
 

@@ -55,7 +55,13 @@ export async function configure({ url, staff = true, configFile, parametersFile,
       parameters: { boothKey: { value: api.boothKey }, staffKey: { value: api.staffKey } },
     });
   }
-  return { generated: !existing.boothKey, next };
+  // Which keys are new. A booth-only machine promoted to staff keeps its booth
+  // key and gains a staff key, and the deployment must be told about that one.
+  const generated = [
+    ...(existing.boothKey ? [] : ["boothKey"]),
+    ...(staff && !existing.staffKey ? ["staffKey"] : []),
+  ];
+  return { generated, next };
 }
 
 export function parseArguments(argv) {
@@ -83,7 +89,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const { generated } = await configure({
       configFile: resolve(root, "booth", "local-config.json"), parametersFile, staff: args.staff, url: args.url,
     });
-    process.stdout.write(`${generated ? "Generated new" : "Kept the existing"} leaderboard keys in booth/local-config.json.\n`
+    process.stdout.write((generated.length
+      ? `Generated ${generated.join(" and ")} in booth/local-config.json. Redeploy the infrastructure so the service accepts ${generated.length === 1 ? "it" : "them"}.\n`
+      : "Kept the existing leaderboard keys in booth/local-config.json.\n")
       + (parametersFile ? "Wrote dist/leaderboard.secure.parameters.json for the deployment. Delete it once deployed.\n" : "")
       + "leaderboardUrl (the attendee QR code) was not changed.\n");
   } catch (error) {

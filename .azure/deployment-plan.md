@@ -60,7 +60,7 @@ Three tenant-root assignments cannot be read with the deployer's permissions. Th
 | Booth canvas extension (existing) | Client | Node 22 ESM, Copilot canvas SDK | `.github/extensions/commit-and-sip/` |
 | Leaderboard client seam (existing) | Contract | `submissionFor`, `validateReceipt`, `validateLeaderboardClient` | `.github/extensions/commit-and-sip/services/leaderboard.mjs` |
 | Rubric, name rules, moderation, ranking (existing) | Shared domain | Pure Node ESM that imports only `node:` built-ins | `.github/extensions/commit-and-sip/services/{name-score,coffee-name,moderation,booth-menu}.mjs` |
-| **Leaderboard service (new)** | API + static board page | Node 22, `node:http`, `@azure/data-tables`, `@azure/identity` | `leaderboard-service/` |
+| **Leaderboard service (new)** | API + static board page | Node 22 built-ins only (`node:http`, `node:fs`, `node:crypto`); no runtime dependencies | `leaderboard-service/` |
 | Staff takedown (existing) | CLI | Node | `scripts/remove-drink.mjs` |
 
 Specialized-technology check: the canvas extension imports `@github/copilot-sdk/extension`, but **the deployed component does not**. The leaderboard service is a plain Node HTTP app, so `azure-hosted-copilot-sdk` routing does not apply to what is being hosted.
@@ -69,7 +69,7 @@ Specialized-technology check: the canvas extension imports `@github/copilot-sdk/
 
 ## 4. Recipe Selection
 
-**Selected:** Bicep, deployed with the Azure CLI (`az deployment group create`)
+**Selected:** Bicep at subscription scope, deployed with the Azure CLI (`az deployment sub create`). The template creates its own resource group.
 
 **Rationale:** `azd` is not installed, and there is one service. `az` and Bicep are already present. Adding `azd` would add a tool to the staff machine for no capability this deployment needs. The Azure Functions `azd init -t` template rule does not apply, because no Function App is used.
 
@@ -206,7 +206,7 @@ The storage account in the original inventory was removed together with Table St
 
 ## 8. Validation Proof
 
-Secure parameters were supplied as **throwaway random values** from a 0600 temporary file, which was deleted afterwards. Real keys are generated during deployment.
+Secure parameters were supplied as **throwaway random values** from a 0600 temporary file, which was deleted afterwards. The real keys are generated **before** deployment by `npm run leaderboard:configure`. They live in `booth/local-config.json` (0600, git-ignored), and the same values are passed as `@secure()` parameters through `dist/leaderboard.secure.parameters.json`, which is deleted after deploying.
 
 | Check | Command Run | Result | Timestamp |
 |-------|-------------|--------|-----------|
@@ -253,6 +253,7 @@ The tenant-root **MFA enforcement for resource write actions** cannot be evaluat
 | 2026-09-30 | Secure parameters file deleted | ✅ |
 | 2026-09-30 | `az webapp deploy` (zip) | ✅ Content live. The CLI hung polling a status record the app never writes; `--async true` is now the documented command. |
 | 2026-09-30 | Live verification found **HEAD / returned 404** | ❌ This would have blocked `npm run qr` (it checks the destination with HEAD). Fixed, tested, mutation-checked, redeployed. ✅ |
+| 2026-09-30 | Redeploy after review round 1 (atomic admission, write rollback, canonical handles, takedown replay) | ❌ **Blocked, not failed.** Kudu returned 403 because the deployer's access on the subscription dropped from **Contributor to Reader** between 13:28 and ~19:00 UTC; `publishxml/action`, which succeeded at 13:24, is now refused. There is no deny assignment. The live service still runs the previous build. **Redeploy once Contributor is restored:** `npm run leaderboard:package`, then the `az webapp deploy … --async true` command in the runbook. |
 
 **Lesson recorded:** the provisioning check in §6 confirmed quota and SKU listing. Neither detects physical capacity, which only the deployment itself revealed.
 
@@ -300,7 +301,7 @@ The tenant-root **MFA enforcement for resource write actions** cannot be evaluat
 
 ## 10. Next Steps
 
-> Current: Deployed. Step 4 (public QR) remains gated on the blocklist review and brand sign-off.
+> Current: Deployed at the previous build. The review round 1 fixes are committed but **not deployed**: the deployer now holds only Reader. Step 4 (public QR) remains gated on the blocklist review and brand sign-off.
 
 1. azure-validate: `az bicep build`, `what-if`, packaging smoke test
 2. azure-deploy: `leaderboard:configure` → `az deployment sub create` → `leaderboard:package` → `az webapp deploy`
