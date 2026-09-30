@@ -1,4 +1,6 @@
+import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { promisify } from "node:util";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -19,6 +21,7 @@ guardNodeVersion();
 // front of attendees, and it waits for the blocklist review and brand sign-off.
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const execFileAsync = promisify(execFile);
 const newKey = () => randomBytes(32).toString("hex");
 
 async function readJson(file) {
@@ -29,17 +32,32 @@ async function readJson(file) {
   }
 }
 
+// Makes a file readable by its owner only, before anything secret is in it.
+// On Windows, POSIX modes do not set ACLs, so inheritance is removed and only
+// the current user is granted access with icacls. If that cannot be done, the
+// caller writes nothing.
+export async function restrictToOwner(path, { platform = process.platform, run = execFileAsync, env = process.env } = {}) {
+  if (platform !== "win32") {
+    await chmod(path, 0o600);   // in case the umask left it narrower than intended, never wider
+    return;
+  }
+  const user = env.USERNAME && (env.USERDOMAIN ? `${env.USERDOMAIN}\\${env.USERNAME}` : env.USERNAME);
+  if (!user) throw new Error("Cannot tell which Windows user to restrict the key file to, so no keys were written.");
+  await run("icacls", [path, "/inheritance:r", "/grant:r", `${user}:F`]);
+}
+
 // The keys are written only into a new file that is private from the moment
 // it exists, and that file then replaces the target in one rename. Writing
 // into the existing file would not work: `mode` applies only when a file is
 // created, so an older, readable local-config.json would hold both keys until
-// a later chmod, and would keep holding them if that chmod failed.
-async function writePrivate(file, value) {
+// a later chmod, and would keep holding them if that chmod failed. A rename
+// within one volume keeps the new file's owner-only permissions or ACL.
+async function writePrivate(file, value, access = {}) {
   await mkdir(dirname(file), { recursive: true });
   const temporary = `${file}.${randomBytes(6).toString("hex")}.tmp`;
   try {
     await writeFile(temporary, "", { flag: "wx", mode: 0o600 });
-    await chmod(temporary, 0o600);   // in case the umask left it narrower than intended, never wider
+    await restrictToOwner(temporary, access);
     await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`);
     await rename(temporary, file);
   } catch (error) {
@@ -48,14 +66,7 @@ async function writePrivate(file, value) {
   }
 }
 
-// Keys are generated only for a brand-new deployment, when this machine has no
-// booth key yet. After that, the service holds these exact keys, and a freshly
-// generated staff key would be refused. Redeploying to accept it would lock
-// out every other staff machine. So a booth-only machine becomes a staff
-// machine by copying the deployed keys from one that already has them
-// (`from`: that machine's booth/local-config.json, moved over a private
-// channel), never by minting new ones.
-export async function configure({ url, staff = true, configFile, parametersFile, from = null, key = newKey }) {
+export async function configure({ url, staff = true, configFile, parametersFile, from = null, key = newKey, access = {} }) {
   const config = await readJson(configFile);
   const existing = config.leaderboardApi ?? {};
   let source = existing;
@@ -78,14 +89,14 @@ export async function configure({ url, staff = true, configFile, parametersFile,
   };
   validateLeaderboardApi(api);
   const next = validateStaffConfig({ ...config, leaderboardApi: api });
-  await writePrivate(configFile, next);
+  await writePrivate(configFile, next, access);
   if (parametersFile) {
     if (!api.staffKey) throw new Error("The deployment needs the staff key. Run this on a staff machine without --no-staff-key.");
     await writePrivate(parametersFile, {
       $schema: "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
       contentVersion: "1.0.0.0",
       parameters: { boothKey: { value: api.boothKey }, staffKey: { value: api.staffKey } },
-    });
+    }, access);
   }
   // What changed on this machine: keys newly generated (fresh setup only),
   // copied from another machine, or removed by --no-staff-key.

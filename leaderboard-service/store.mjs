@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -98,6 +98,7 @@ export class MemoryStore {
 }
 
 const EVENT = /^[a-z0-9-]{1,63}$/;
+const STORED_ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
 
 export class LockLostError extends Error {
   constructor() {
@@ -161,17 +162,29 @@ export class FileStore extends MemoryStore {
     try {
       text = await readFile(this.file, "utf8");
     } catch (error) {
-      if (error.code === "ENOENT") return { entries: new Map(), reserved: new Set(), version: 0 };
+      if (error.code === "ENOENT") return { entries: new Map(), keyId: null, reserved: new Set(), version: 0 };
       throw error;
     }
+    const unreadable = reason => new Error(`${this.file} is not a readable board (${reason}). Move it aside to start empty, or restore it.`);
     let saved;
     try { saved = JSON.parse(text); } catch { saved = null; }
-    if (!Array.isArray(saved?.entries) || !Array.isArray(saved.reserved ?? [])) {
-      throw new Error(`${this.file} is not a readable board. Move it aside to start empty, or restore it.`);
+    if (!Array.isArray(saved?.entries) || !Array.isArray(saved.reserved ?? [])) throw unreadable("wrong shape");
+    // Every row must be loadable as itself. Two rows with one ID would load
+    // "successfully" as one, and the next write would drop the other for good.
+    const entries = new Map();
+    for (const entry of saved.entries) {
+      if (typeof entry?.id !== "string" || !STORED_ID.test(entry.id)) throw unreadable("an entry without a valid ID");
+      if (entries.has(entry.id)) throw unreadable(`two entries with ID ${entry.id}`);
+      entries.set(entry.id, entry);
+    }
+    const reserved = new Set(saved.reserved ?? []);
+    if (reserved.size !== (saved.reserved ?? []).length || [...reserved].some(item => typeof item !== "string")) {
+      throw unreadable("malformed reservations");
     }
     return {
-      entries: new Map(saved.entries.map(entry => [entry.id, entry])),
-      reserved: new Set(saved.reserved ?? []),
+      entries,
+      keyId: typeof saved.keyId === "string" ? saved.keyId : null,
+      reserved,
       version: Number.isSafeInteger(saved.version) ? saved.version : 0,
     };
   }
@@ -359,7 +372,8 @@ export class FileStore extends MemoryStore {
           const result = await change();
           if ((await this.snapshot()).version !== disk.version) throw new ConcurrentWriteError();
           await this.persist(`${JSON.stringify({
-            entries: [...this.entries.values()], reserved: [...this.reserved], version: disk.version + 1,
+            entries: [...this.entries.values()], keyId: this.keyId ?? disk.keyId ?? undefined,
+            reserved: [...this.reserved], version: disk.version + 1,
           })}\n`, owner);
           return result;
         } catch (error) {
@@ -439,6 +453,33 @@ async function readReservationKey(file, deadline) {
 
 // `create` writes the new key; it is replaceable so tests can hold a create
 // half-done, the moment another instance must not read.
+// Which key a board's reservations were fingerprinted with. Stored on the
+// board, so a key that no longer matches is noticed rather than silently
+// making every takedown unmatchable.
+export const keyIdOf = key => createHash("sha256").update(`key:${key}`).digest("hex").slice(0, 16);
+
+// Opens the reservation key for this store and binds it to the board. Fails
+// closed: if the key file is gone while the board holds reservations, a new
+// key would void every takedown, so the service refuses to start and says to
+// restore the key. A board fingerprinted with a different key is refused too.
+export async function openReservationKey(directory, store, options = {}) {
+  const board = await store.snapshot();
+  let exists = true;
+  try { await readFile(join(directory, "reservation.key"), "utf8"); }
+  catch (error) { if (error.code === "ENOENT") exists = false; else throw error; }
+  if (!exists && board.reserved.size > 0) {
+    throw new Error(`reservation.key is missing, but ${store.file} holds ${board.reserved.size} reserved name(s). `
+      + "Restore the key from backup; a new key would let every taken-down name be published again.");
+  }
+  const key = await reservationKey(directory, options);
+  const keyId = keyIdOf(key);
+  if (board.keyId && board.keyId !== keyId && board.reserved.size > 0) {
+    throw new Error(`${store.file} was reserved with a different reservation key. Restore the matching reservation.key.`);
+  }
+  store.keyId = keyId;
+  return key;
+}
+
 export async function reservationKey(directory, {
   waitMs = 5_000, create = (path, text) => writeFile(path, text, { flag: "wx", mode: 0o600 }),
 } = {}) {

@@ -1585,3 +1585,81 @@ test("container stdout and stderr are kept, which on Linux is the httpLogs setti
   assert.match(app, /--docker-container-logging filesystem` writes exactly httpLogs\.fileSystem/,
     "the reason is recorded where the next reader will look");
 });
+
+// --- Review round 12 ---------------------------------------------------------
+
+test("a board with duplicate or missing entry IDs is refused, not silently shrunk", async t => {
+  for (const [label, entries] of [
+    ["duplicate IDs", [entry("mona-a"), { ...entry("mona-a"), handle: OTHER_HANDLE }]],
+    ["a missing ID", [{ ...entry("mona-a"), id: undefined }]],
+    ["an ID that could not be stored", [{ ...entry("mona-a"), id: "../escape" }]],
+  ]) {
+    const directory = await tempDirectory(t);
+    const file = join(directory, "default.json");
+    const text = JSON.stringify({ entries, reserved: [], version: 3 });
+    await writeFile(file, text);
+    await assert.rejects(() => FileStore.open({ directory }), /is not a readable board/, label);
+    assert.equal(await readFile(file, "utf8"), text, `${label}: the file is left exactly as found`);
+  }
+});
+
+test("a lost reservation key fails closed while the board holds reservations", async t => {
+  const { keyIdOf, openReservationKey } = await import("../leaderboard-service/store.mjs");
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory });
+  const key = await openReservationKey(directory, store);
+  await store.retract("mona-gone", "fp-gone");
+  assert.equal(JSON.parse(await readFile(join(directory, "default.json"), "utf8")).keyId, keyIdOf(key),
+    "the board records which key its reservations use");
+
+  await rm(join(directory, "reservation.key"));
+  const restarted = await FileStore.open({ directory });
+  await assert.rejects(() => openReservationKey(directory, restarted), /reservation\.key is missing, but .* holds 1 reserved name/);
+  await assert.rejects(() => readFile(join(directory, "reservation.key")), { code: "ENOENT" }, "and no replacement key was minted");
+
+  await writeFile(join(directory, "reservation.key"), `${"c".repeat(64)}\n`);
+  const reopened = await FileStore.open({ directory });
+  await assert.rejects(() => openReservationKey(directory, reopened), /different reservation key/);
+
+  const fresh = await tempDirectory(t);
+  assert.match(await openReservationKey(fresh, await FileStore.open({ directory: fresh })), /^[0-9a-f]{64}$/,
+    "a board with no reservations may start with a new key");
+});
+
+test("a static file that cannot be read gets a clean 500, not a half-sent 200", async t => {
+  const { url } = await service(t);
+  const { rename: move } = await import("node:fs/promises");
+  const css = new URL("../leaderboard-service/public/board.css", import.meta.url);
+  const aside = new URL("../leaderboard-service/public/board.css.aside-for-test", import.meta.url);
+  await move(css, aside);
+  t.after(() => move(aside, css));
+  const response = await fetch(`${url}/board.css`);
+  assert.equal(response.status, 500);
+  assert.equal((await response.json()).error, "server_error");
+  assert.equal((await fetch(`${url}/healthz`)).status, 200, "and the server is still answering");
+});
+
+test("on Windows the key file is restricted with an owner-only ACL before any key is in it", async t => {
+  const { configure } = await import("../scripts/configure-leaderboard.mjs");
+  const directory = await tempDirectory(t);
+  const configFile = join(directory, "local-config.json");
+  const calls = [];
+  const run = async (command, args) => calls.push({ args, command, contentAtCall: await readFile(args[0], "utf8") });
+  const access = { env: { USERDOMAIN: "CORP", USERNAME: "barista" }, platform: "win32", run };
+  const { next } = await configure({ access, configFile, url: "https://commit-and-sip-leaderboard.azurewebsites.net" });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, "icacls");
+  assert.deepEqual(calls[0].args.slice(1), ["/inheritance:r", "/grant:r", "CORP\\barista:F"]);
+  assert.equal(calls[0].contentAtCall, "", "the ACL is applied while the file is still empty");
+  assert.ok(JSON.parse(await readFile(configFile, "utf8")).leaderboardApi.boothKey === next.leaderboardApi.boothKey);
+
+  // If the ACL cannot be applied, no key is written anywhere.
+  const failing = { ...access, run: async () => { throw new Error("icacls failed"); } };
+  const other = join(directory, "other.json");
+  await assert.rejects(() => configure({ access: failing, configFile: other, url: "https://commit-and-sip-leaderboard.azurewebsites.net" }), /icacls failed/);
+  await assert.rejects(() => readFile(other, "utf8"), { code: "ENOENT" });
+  const { readdir } = await import("node:fs/promises");
+  assert.deepEqual((await readdir(directory)).filter(name => name.endsWith(".tmp")), [], "no half-written key file is left");
+  await assert.rejects(() => configure({ access: { ...access, env: {} }, configFile: other,
+    url: "https://commit-and-sip-leaderboard.azurewebsites.net" }), /Cannot tell which Windows user/);
+});

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { loadNameRules } from "../.github/extensions/commit-and-sip/services/coffee-name.mjs";
 import { blocklistStatus } from "../.github/extensions/commit-and-sip/services/moderation.mjs";
 import { createApp } from "./app.mjs";
-import { FileStore, reservationKey } from "./store.mjs";
+import { FileStore, openReservationKey } from "./store.mjs";
 
 // Node built-ins only: no SDK, no connection string, no storage account. The
 // board is kept on App Service's persistent /home storage by a single instance.
@@ -20,7 +20,7 @@ const directory = process.env.DATA_DIR || "/home/data/commit-and-sip";
 const store = await FileStore.open({ directory, event: process.env.EVENT_ID || "default" });
 
 const app = createApp({
-  boothKey: required("BOOTH_KEY"), log: message => console.error(message), reservationKey: await reservationKey(directory),
+  boothKey: required("BOOTH_KEY"), log: message => console.error(message), reservationKey: await openReservationKey(directory, store),
   rules, staffKey: required("STAFF_KEY"), store, words,
 });
 

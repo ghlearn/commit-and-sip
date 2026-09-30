@@ -227,11 +227,14 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
       const url = new URL(request.url, "http://localhost");
       const asset = method === "GET" ? STATIC[url.pathname] : undefined;
       if (asset) {
+        // Read first: a failed read must still be able to answer with a 500,
+        // which it cannot once a 200 has gone out.
+        const body = await readFile(asset.file);
         response.writeHead(200, {
           ...headers, "Cache-Control": "public, max-age=300", "Content-Security-Policy": CONTENT_SECURITY_POLICY,
           "Content-Type": asset.type,
         });
-        response.end(head ? undefined : await readFile(asset.file));
+        response.end(head ? undefined : body);
         return;
       }
       const route = routes[`${method} ${url.pathname}`];
@@ -243,6 +246,8 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
     } catch (error) {
       const known = error instanceof HttpError;
       if (!known) log(`leaderboard error: ${error?.name}: ${error?.message}`);
+      // A response that has already started cannot become an error response.
+      if (response.headersSent) { response.destroy(); return; }
       response.writeHead(known ? error.status : 500, { ...headers, "Cache-Control": "no-store",
         "Content-Type": "application/json; charset=utf-8" });
       response.end(head ? undefined : JSON.stringify({ error: known ? error.code : "server_error", message: known ? error.message : "Unexpected error." }));
