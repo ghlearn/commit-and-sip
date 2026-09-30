@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 import { once } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -634,8 +635,10 @@ test("the infrastructure keeps secrets out of the repository and one writer on t
     assert.match(main, new RegExp(`@secure\\(\\)\\s*\\n(?:@[^\\n]*\\n)*param ${name} string`), `${name} is a secure parameter`);
     assert.doesNotMatch(parameters, new RegExp(name), `${name} is never in the committed parameters`);
   }
-  assert.match(app, /capacity: 1\b/, "the file-backed board allows exactly one instance");
-  assert.match(app, /WEBSITE_DISABLE_OVERLAPPED_RECYCLING', value: '1'/, "no second writer during a recycle");
+  assert.match(app, /capacity: 1\b/, "one instance is all a booth needs");
+  // Defence in depth only: it covers recycling within one VM. The store's lock
+  // and version check are what keep a second instance from losing writes.
+  assert.match(app, /WEBSITE_DISABLE_OVERLAPPED_RECYCLING', value: '1'/, "overlapped recycling stays off");
   assert.match(app, /alwaysOn: true/);
   assert.match(app, /httpsOnly: true/);
   assert.match(app, /remoteDebuggingEnabled: false/);
@@ -695,15 +698,19 @@ test("a failed write leaves memory exactly as it was on disk", async t => {
   const directory = await tempDirectory(t);
   const store = await FileStore.open({ directory });
   await store.create(entry("mona-kept"));
-  await rm(directory, { force: true, recursive: true });   // the next write cannot land
-  // A handle nobody holds, so the only possible failure is the write itself.
-  await assert.rejects(() => store.admit(entry("mona-lost"), { fingerprint: "fp", handles: [OTHER_HANDLE] }), { code: "ENOENT" });
-  await assert.rejects(() => store.retract("mona-kept", "fp-kept"), { code: "ENOENT" });
-  assert.deepEqual((await store.list()).map(item => item.id), ["mona-kept"], "the failed admission is not in memory");
-  assert.equal(await store.isReserved("fp-kept"), false, "nor is the failed reservation");
-  // Once the disk is back, a retry is a fresh admission, not a false "already there".
-  const { mkdir } = await import("node:fs/promises");
-  await mkdir(directory, { recursive: true });
+  // The disk refuses the write after the change has been applied in memory,
+  // which is the moment a rollback has to happen.
+  let full = true;
+  const persist = store.persist.bind(store);
+  store.persist = text => (full ? Promise.reject(Object.assign(new Error("disk full"), { code: "ENOSPC" })) : persist(text));
+  await assert.rejects(() => store.admit(entry("mona-lost"), { fingerprint: "fp", handles: [OTHER_HANDLE] }), { code: "ENOSPC" });
+  await assert.rejects(() => store.retract("mona-kept", "fp-kept"), { code: "ENOSPC" });
+  const inMemory = await MemoryStore.prototype.list.call(store);
+  assert.deepEqual(inMemory.map(item => item.id), ["mona-kept"], "the failed admission is not left in memory");
+  assert.equal(await MemoryStore.prototype.isReserved.call(store, "fp-kept"), false, "nor the failed reservation");
+  assert.deepEqual((await store.list()).map(item => item.id), ["mona-kept"], "and the board served is what the disk holds");
+  // Once the disk recovers, a retry is a fresh admission, not a false "already there".
+  full = false;
   assert.equal((await store.admit(entry("mona-lost"), { fingerprint: "fp", handles: [OTHER_HANDLE] })).created, true);
   assert.deepEqual((await (await FileStore.open({ directory })).list()).map(item => item.id).sort(), ["mona-kept", "mona-lost"]);
 });
@@ -1006,4 +1013,133 @@ test("the highlighted row keeps every text colour above 4.5:1", async () => {
   assert.ok(contrast(token("accent-ink"), token("board")) < 4.5, "the green ink on the highlight is too faint, as reported");
   assert.match(css, /tr\.mine th, tr\.mine \.handle \{ color: var\(--text\); \}/, "so the highlighted row uses the text colour");
   assert.ok(contrast(token("text"), token("board")) >= 4.5);
+});
+
+// --- Review round 4 ----------------------------------------------------------
+// Two FileStores on one directory stand in for two App Service instances on
+// one /home share: separate processes, separate memory, one file.
+
+test("two instances writing one board never lose each other's entries", async t => {
+  const directory = await tempDirectory(t);
+  const [a, b] = await Promise.all([FileStore.open({ directory }), FileStore.open({ directory })]);
+  const ids = Array.from({ length: 24 }, (_, index) => `mona-${index}`);
+  await Promise.all(ids.map((id, index) => (index % 2 ? a : b)
+    .admit(entry(id), { fingerprint: `fp-${id}`, handles: [`${HANDLE}-${String(index).padStart(8, "0")}`] })));
+  const fresh = await FileStore.open({ directory });
+  assert.deepEqual((await fresh.list()).map(item => item.id).sort(), [...ids].sort(), "every write from both instances survived");
+  assert.equal((await a.list()).length, 24, "each instance reads what the other wrote");
+  assert.equal((await b.get("mona-1")).id, "mona-1");
+});
+
+test("a takedown on one instance stops a submission arriving at the other", async t => {
+  const directory = await tempDirectory(t);
+  const [a, b] = await Promise.all([FileStore.open({ directory }), FileStore.open({ directory })]);
+  await a.retract("mona-moonrise-mocha", "fp-moonrise");
+  const { ReservedError } = await import("../leaderboard-service/store.mjs");
+  await assert.rejects(() => b.admit(entry("mona-moonrise-mocha"), { fingerprint: "fp-moonrise", handles: [HANDLE] }), ReservedError);
+  assert.equal(await b.isReserved("fp-moonrise"), true);
+});
+
+test("a lock left by a dead instance is taken over; a live one is waited for", async t => {
+  const { utimes } = await import("node:fs/promises");
+  const directory = await tempDirectory(t);
+  const lock = join(directory, "default.json.lock");
+  const store = await FileStore.open({ directory, lockTimeoutMs: 150, staleLockMs: 1_000 });
+
+  await writeFile(lock, "live-instance");
+  await assert.rejects(() => store.create(entry("mona-waited")), { code: "board_locked" });
+  assert.equal(await readFile(lock, "utf8"), "live-instance", "another instance's live lock is never broken");
+
+  const old = new Date(Date.now() - 60_000);
+  await utimes(lock, old, old);
+  await store.create(entry("mona-after-crash"));
+  assert.deepEqual((await store.list()).map(item => item.id), ["mona-after-crash"], "a dead instance's lock does not block the board");
+  const { access } = await import("node:fs/promises");
+  await assert.rejects(() => access(lock), { code: "ENOENT" }, "and the lock is released afterwards");
+});
+
+test("if two instances ever held the lock at once, the version check keeps both writes", async t => {
+  const directory = await tempDirectory(t);
+  const [a, b] = await Promise.all([FileStore.open({ directory }), FileStore.open({ directory })]);
+  // B ignores the lock, as a second instance would if a lease were misjudged.
+  b.acquireLock = async () => "rogue";
+  b.releaseLock = async () => {};
+  let interleaved = false;
+  await a.serialise(async () => {
+    if (!interleaved) {
+      interleaved = true;
+      await b.create(entry("mona-from-b"));    // lands on disk while A is mid-write
+    }
+    await MemoryStore.prototype.create.call(a, entry("mona-from-a"));
+  });
+  const fresh = await FileStore.open({ directory });
+  assert.deepEqual((await fresh.list()).map(item => item.id).sort(), ["mona-from-a", "mona-from-b"],
+    "A noticed the board moved, re-read it, and wrote both");
+});
+
+test("the event cannot be wiped while a takedown is still owed to the public board", async t => {
+  const { WIPE_CONFIRMATION } = await import("../.github/extensions/commit-and-sip/services/event-archive.mjs");
+  let online = false;
+  const client = {
+    async publish(sent) { return { ...sent, entries: 1, rank: 1 }; },
+    async retract() { if (!online) throw new Error("offline"); return "retracted"; },
+  };
+  const { engine, store } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.publish("booth-1");
+  await engine.dispatch("booth-1", "complete", {});
+  const removed = await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
+  assert.deepEqual([removed.published, removed.owed], ["failed", true]);
+
+  const before = JSON.stringify(await store.read());
+  await assert.rejects(() => engine.archiveAndWipe({ archivedBy: "lead", confirm: WIPE_CONFIRMATION }),
+    { code: "takedowns_owed" }, "wiping would destroy the only record the retry scans");
+  assert.equal(JSON.stringify(await store.read()), before, "nothing was changed");
+
+  online = true;
+  const wiped = await engine.archiveAndWipe({ archivedBy: "lead", confirm: WIPE_CONFIRMATION });
+  assert.ok(wiped.archive, "once the takedown lands, the wipe retries it and proceeds");
+  assert.deepEqual((await store.read()).removals ?? [], [], "the wiped ledger starts without removals");
+});
+
+test("a drink that was never published owes no public takedown", async t => {
+  const { WIPE_CONFIRMATION } = await import("../.github/extensions/commit-and-sip/services/event-archive.mjs");
+  const { engine } = await engineWith(t, null);   // this booth never publishes
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.dispatch("booth-1", "complete", {});
+  const removed = await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
+  assert.deepEqual([removed.published, removed.owed], ["not-configured", false],
+    "no false alarm: it was never on the public board");
+  assert.deepEqual(await engine.owedPublicTakedowns(), []);
+  assert.ok((await engine.archiveAndWipe({ archivedBy: "lead", confirm: WIPE_CONFIRMATION })).archive,
+    "and it does not block the end of the event");
+});
+
+test("a direct removal that may leave a drink public is reported as unfinished", async t => {
+  const boothOnly = { async publish(sent) { return { ...sent, entries: 1, rank: 1 }; } };
+  const { engine } = await engineWith(t, boothOnly);
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.publish("booth-1");
+  const removed = await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
+  assert.deepEqual([removed.published, removed.owed], ["not-configured", true],
+    "the script exits non-zero on `owed`, so automation cannot read this as done");
+  const source = await readFile(new URL("../scripts/remove-drink.mjs", import.meta.url), "utf8");
+  assert.match(source, /if \(record\.owed\) process\.exitCode = 1;/);
+});
+
+test("two writers that ever overlap cannot trample each other's temporary file", async t => {
+  // The lock normally prevents this; the unique temporary name is the defence
+  // for the moment it does not (a lease judged stale while its holder still
+  // writes). Every overlapping write must land whole.
+  const directory = await tempDirectory(t);
+  const [a, b] = await Promise.all([FileStore.open({ directory }), FileStore.open({ directory })]);
+  const writes = Array.from({ length: 40 }, (_, index) =>
+    (index % 2 ? a : b).persist(`${JSON.stringify({ entries: [], reserved: [], version: index })}\n`));
+  const outcomes = await Promise.allSettled(writes);
+  assert.deepEqual(outcomes.filter(outcome => outcome.status === "rejected").map(outcome => outcome.reason.code), [],
+    "no overlapping write failed");
+  assert.doesNotThrow(() => JSON.parse(readFileSync(join(directory, "default.json"), "utf8")), "and the board is whole");
 });

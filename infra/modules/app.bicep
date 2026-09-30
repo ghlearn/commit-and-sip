@@ -9,9 +9,11 @@ param boothKey string
 @secure()
 param staffKey string
 
-// One B1 instance, deliberately. The board is a JSON file on /home, which is
-// only safe with a single writer. Always On keeps it warm for the monitor, and
-// the Free tier's daily CPU quota could stop the board mid-event.
+// One B1 instance, deliberately: a booth needs no more. The board is a JSON
+// file on /home. The platform can still briefly run a second instance, so the
+// store locks and version-checks every write on the share rather than relying
+// on this. Always On keeps it warm for the monitor, and the Free tier's daily
+// CPU quota could stop the board mid-event.
 resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: 'asp-${appName}'
   location: location
@@ -62,7 +64,8 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'DATA_DIR', value: '/home/data/commit-and-sip' }
         // /home is the persistent share; this keeps it mounted.
         { name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE', value: 'true' }
-        // Two overlapping instances during a recycle would be two writers.
+        // Avoids overlapping workers within one VM during a recycle. It does not
+        // cover scale operations or maintenance; the store's lock does.
         { name: 'WEBSITE_DISABLE_OVERLAPPED_RECYCLING', value: '1' }
         // The package is prebuilt and has no dependencies; nothing to build.
         { name: 'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'false' }

@@ -228,7 +228,7 @@ Then open `/healthz`. `moderation: "placeholder"` means the service is running w
 
 Every infrastructure deployment needs the keys again (step 1 keeps the existing ones). Copy `booth/local-config.json` to each additional booth machine through a private channel; use `--no-staff-key` on machines that should not take drinks down. To rotate the keys, delete `leaderboardApi` from the file, rerun steps 1 and 2, and copy the new file to every booth.
 
-The board is a JSON file on the app's persistent `/home` storage, so the plan is pinned to **one instance**: never scale it out. To start a fresh board for a new event, change `eventId` in `infra/main.parameters.json` and redeploy the infrastructure. The old board stays on disk.
+The board is a JSON file on the app's persistent `/home` storage. The plan runs **one instance**, and there is no reason to scale it out. The store stays correct if the platform briefly runs a second instance, because writes are locked and version-checked on the shared disk, but it is not built for sustained scale-out. To start a fresh board for a new event, change `eventId` in `infra/main.parameters.json` and redeploy the infrastructure. The old board stays on disk.
 
 ## Leaderboard and QR readiness
 

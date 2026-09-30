@@ -104,7 +104,7 @@ No storage account, role assignment, or key vault. Nothing needs `roleAssignment
 - **Static Web Apps managed Functions cannot use managed identity**, so they would need a storage key, which breaches GH.15.05. Static Web Apps is also not offered in `westus3`.
 - **Table Storage through a managed identity needs a role grant** that the deployer cannot make.
 - **The Free tier (F1)** has no Always On and a 60 CPU-minute daily quota. A monitor polling all day could stop the board mid-event.
-- `/home` survives restarts and redeploys. It is safe only with one writer, so capacity is pinned to 1, overlapped recycling is disabled, and writes are serialised and atomic (temp file plus rename). If the file is unreadable, the service refuses to start rather than overwrite it.
+- `/home` survives restarts and redeploys, and is shared by every instance. Capacity is 1, but the platform may briefly run a second instance, so the store does not rely on that. Writes take an exclusive lock file on the share (taken over if stale), re-read the board from disk, check its version before an atomic replace, and retry if it moved. Reads come from disk. If the file is unreadable, the service refuses to start rather than overwrite it.
 - **The board is a projection.** Every booth keeps the authoritative copy, and `npm run leaderboard:republish` rebuilds the board from each booth.
 
 ### API

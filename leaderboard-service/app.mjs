@@ -111,7 +111,8 @@ function validateSubmission(body, rules, words) {
 function receiptFor(entry, entries) {
   const board = leaderboard(entries);
   const row = board.find(item => item.handle === entry.handle && item.name === entry.name);
-  // Echoes exactly what arrived: the booth compares these fields verbatim.
+  // ID, name and score echo exactly what arrived; the handle is the one stored,
+  // which is the submitted handle or its canonical form. The booth checks both.
   return { entries: board.length, handle: entry.handle, id: entry.id, name: entry.name, rank: row.rank, score: entry.score };
 }
 

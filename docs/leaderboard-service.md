@@ -23,7 +23,7 @@ This document began as a proposal. It now records what was built, the decisions 
 
 Hosting is subscription **GitHub - NonProd - skills**, region `westus2`, resource group `rg-commit-and-sip-lb-westus2`, app `commit-and-sip-leaderboard`. West US 3 was chosen first, but at deployment time it had no B1 capacity in either of two resource groups. A quota check does not detect that: it confirms entitlement, not physical capacity. The full reasoning, including the policy findings, is in `.azure/deployment-plan.md`.
 
-**What the file store costs:** exactly one instance may write. The plan pins capacity to 1, `WEBSITE_DISABLE_OVERLAPPED_RECYCLING=1` prevents a second instance overlapping during a recycle, and every write within the process is serialised and lands atomically through a rename. If the file is unreadable, the service refuses to start rather than start empty and overwrite it.
+**How the file store stays correct across instances:** the plan runs one instance, but App Service does not guarantee that. During scale operations or platform maintenance, a second instance can run against the same `/home` share, and `WEBSITE_DISABLE_OVERLAPPED_RECYCLING` only affects recycling within one VM. So correctness does not rest on either setting. Every write takes a lock file created exclusively on the share. It re-reads the board from disk rather than trusting its own memory, applies its change, checks that the board's version has not moved, and replaces the file atomically through a uniquely named temporary file. Reads always come from disk. A lock older than 15 seconds is treated as left by a dead instance and taken over. If two instances ever did hold it at once, the version check refuses the later write and retries it. If the file is unreadable, the service refuses to start rather than start empty and overwrite it. **Cost:** every request reads the board file. At a few hundred rows that is small, but this store is built for one busy booth event, not for scale-out.
 
 **Why the board is a projection:** every booth machine keeps the authoritative copy of its own drinks and takedowns. `npm run leaderboard:republish` rebuilds the board from a booth. It replays every takedown first, so removed names are reserved again, and then sends every drink. Run it on each booth machine, with the staff key, after data loss or an `EVENT_ID` change. It also publishes drinks served before the booth was configured, which would otherwise never be sent.
 
@@ -70,7 +70,7 @@ A retraction for a drink that never synced returns `404`, and the booth records 
 
 ### Receipts are checked on every field
 
-The service replies with `{handle, id, name, score, rank, entries}`, echoing exactly what arrived. As the proposal asked, `validateReceipt` now also compares `id`, so a receipt about a different entry that shared the handle, name and score is refused.
+The service replies with `{handle, id, name, score, rank, entries}`. `id`, `name` and `score` are echoed exactly as they arrived. `handle` is either the submitted handle or, when another booth used the phrase first, exactly `canonicalHandle(handle, id)`, and the booth accepts nothing else. As the proposal asked, `validateReceipt` now also compares `id`, so a receipt about a different entry that shared the handle, name and score is refused.
 
 ### The public page
 

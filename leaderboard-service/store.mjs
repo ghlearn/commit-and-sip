@@ -1,15 +1,15 @@
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 // One interface, two backends: memory for the tests, a JSON file for Azure.
 //
 // In App Service the file lives under /home, which is Azure-backed storage that
-// survives restarts and redeployments. That is only safe with exactly one
-// writer, so the service must run on one instance (the plan pins it, and
-// overlapped recycling is disabled). Within that one process every write is
-// serialised, and each lands atomically through a rename, so a crash mid-write
-// leaves the previous board intact rather than a torn file.
+// survives restarts and redeployments and is shared by every instance. The
+// plan runs one instance, but correctness does not depend on it: writes take
+// a lock on the share, work from what is on disk, and check the version has
+// not moved (see FileStore). Each lands atomically through a rename, so a
+// crash mid-write leaves the previous board intact rather than a torn file.
 //
 // This board is a projection. Every booth machine keeps the authoritative copy
 // of its own drinks, and `npm run leaderboard:republish` rebuilds the board
@@ -95,50 +95,151 @@ export class MemoryStore {
 
 const EVENT = /^[a-z0-9-]{1,63}$/;
 
+export class ConcurrentWriteError extends Error {
+  constructor() {
+    super("Another instance wrote the board during this write.");
+    this.name = "ConcurrentWriteError";
+    this.code = "concurrent_write";
+  }
+}
+
+// The file on /home is the only source of truth, and every write is made
+// under a lock that other instances honour too.
+//
+// App Service normally runs this on one instance, but it does not promise
+// that: during scale operations or platform maintenance a second instance can
+// run against the same /home share. Each instance keeps its own memory, so a
+// write that trusted memory would overwrite whatever the other had written.
+// So a write takes a lock file created exclusively on the share, re-reads the
+// board from disk, applies its change, checks the version on disk has not
+// moved, and replaces the file atomically. Reads always come from disk.
+//
+// The lock is a lease: an instance that dies holding it would otherwise block
+// the board forever, so a lock older than `staleLockMs` is taken over. The
+// version check is the second line: if two instances ever did hold the lock at
+// once, the later write is refused and retried rather than losing the other.
 export class FileStore extends MemoryStore {
   // The event ID names the file, so it is held to a charset that cannot walk
   // out of the data directory.
-  static async open({ directory, event = "default" }) {
+  static async open({ directory, event = "default", lockTimeoutMs = 10_000, staleLockMs = 15_000 }) {
     if (!EVENT.test(event)) throw new Error("EVENT_ID must be 1-63 lowercase letters, digits, or hyphens.");
     await mkdir(directory, { recursive: true });
     const store = new FileStore();
-    store.file = join(directory, `${event}.json`);
-    store.queue = Promise.resolve();
-    let text = null;
-    try { text = await readFile(store.file, "utf8"); }
-    catch (error) { if (error.code !== "ENOENT") throw error; }
-    if (text !== null) {
-      // An unreadable board is left exactly as found and the service refuses
-      // to start. Starting empty would overwrite it on the first submission.
-      let saved;
-      try { saved = JSON.parse(text); } catch { saved = null; }
-      if (!Array.isArray(saved?.entries) || !Array.isArray(saved.reserved ?? [])) {
-        throw new Error(`${store.file} is not a readable board. Move it aside to start empty, or restore it.`);
-      }
-      for (const entry of saved.entries) store.entries.set(entry.id, entry);
-      for (const fingerprint of saved.reserved ?? []) store.reserved.add(fingerprint);
-    }
+    const file = join(directory, `${event}.json`);
+    Object.assign(store, { file, lockFile: `${file}.lock`, lockTimeoutMs, queue: Promise.resolve(), staleLockMs });
+    // An unreadable board is left exactly as found and the service refuses
+    // to start. Starting empty would overwrite it on the first submission.
+    store.load(await store.snapshot());
     return store;
   }
 
-  // Writes are chained so two requests can never interleave a read-modify-write.
-  // Memory changes only if the disk does: if the write or the rename fails,
-  // the maps are put back, so a retry cannot report success for an entry that
-  // would vanish on restart.
-  serialise(change) {
-    const next = this.queue.then(async () => {
-      const entries = new Map(this.entries);
-      const reserved = new Set(this.reserved);
+  async snapshot() {
+    let text;
+    try {
+      text = await readFile(this.file, "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") return { entries: new Map(), reserved: new Set(), version: 0 };
+      throw error;
+    }
+    let saved;
+    try { saved = JSON.parse(text); } catch { saved = null; }
+    if (!Array.isArray(saved?.entries) || !Array.isArray(saved.reserved ?? [])) {
+      throw new Error(`${this.file} is not a readable board. Move it aside to start empty, or restore it.`);
+    }
+    return {
+      entries: new Map(saved.entries.map(entry => [entry.id, entry])),
+      reserved: new Set(saved.reserved ?? []),
+      version: Number.isSafeInteger(saved.version) ? saved.version : 0,
+    };
+  }
+
+  // Copies, so a change applied to memory can never alter the snapshot it
+  // may have to be rolled back to.
+  load(disk) {
+    this.entries = new Map([...disk.entries].map(([id, entry]) => [id, { ...entry }]));
+    this.reserved = new Set(disk.reserved);
+  }
+
+  async acquireLock() {
+    const owner = randomBytes(8).toString("hex");
+    const deadline = Date.now() + this.lockTimeoutMs;
+    for (;;) {
       try {
-        const result = await change();
-        const temporary = `${this.file}.${process.pid}.tmp`;
-        await writeFile(temporary, `${JSON.stringify({ entries: [...this.entries.values()], reserved: [...this.reserved] })}\n`);
-        await rename(temporary, this.file);
-        return result;
+        // Exclusive create is atomic on the /home share: exactly one instance wins.
+        await writeFile(this.lockFile, owner, { flag: "wx" });
+        return owner;
       } catch (error) {
-        this.entries = entries;
-        this.reserved = reserved;
+        if (error.code !== "EEXIST") throw error;
+      }
+      try {
+        const [info, holder] = await Promise.all([stat(this.lockFile), readFile(this.lockFile, "utf8")]);
+        if (Date.now() - info.mtimeMs > this.staleLockMs) {
+          // Take over only the exact lease judged stale, never one created since.
+          if ((await readFile(this.lockFile, "utf8")) === holder) await rm(this.lockFile, { force: true });
+          continue;
+        }
+      } catch (error) {
+        if (error.code === "ENOENT") continue;
         throw error;
+      }
+      if (Date.now() > deadline) {
+        throw Object.assign(new Error("The board is locked by another instance."), { code: "board_locked" });
+      }
+      await new Promise(resolve => setTimeout(resolve, 20 + Math.floor(Math.random() * 30)));
+    }
+  }
+
+  async releaseLock(owner) {
+    try {
+      if ((await readFile(this.lockFile, "utf8")) === owner) await rm(this.lockFile, { force: true });
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+
+  // The random suffix matters: process IDs can repeat across instances, and
+  // two writers sharing a temporary file would corrupt each other's write.
+  async persist(text) {
+    const temporary = `${this.file}.${randomBytes(6).toString("hex")}.tmp`;
+    await writeFile(temporary, text);
+    try {
+      await rename(temporary, this.file);
+    } catch (error) {
+      await rm(temporary, { force: true });
+      throw error;
+    }
+  }
+
+  // Writes are chained within this process and locked across instances.
+  // Memory changes only if the disk does: if anything fails, memory is put
+  // back to what the disk holds.
+  serialise(change) {
+    const attempt = async () => {
+      const owner = await this.acquireLock();
+      try {
+        const disk = await this.snapshot();
+        this.load(disk);
+        try {
+          const result = await change();
+          if ((await this.snapshot()).version !== disk.version) throw new ConcurrentWriteError();
+          await this.persist(`${JSON.stringify({
+            entries: [...this.entries.values()], reserved: [...this.reserved], version: disk.version + 1,
+          })}\n`);
+          return result;
+        } catch (error) {
+          this.load(disk);
+          throw error;
+        }
+      } finally {
+        await this.releaseLock(owner);
+      }
+    };
+    const next = this.queue.then(async () => {
+      for (let tries = 1; ; tries += 1) {
+        try { return await attempt(); }
+        catch (error) {
+          if (!(error instanceof ConcurrentWriteError) || tries >= 3) throw error;
+        }
       }
     });
     this.queue = next.catch(() => {});
@@ -149,18 +250,26 @@ export class FileStore extends MemoryStore {
 
   admit(entry, options) { return this.serialise(() => super.admit(entry, options)); }
 
-  // A write changes the maps before its file lands, so a read that did not
-  // wait could show an entry that is about to be rolled back, or briefly hide
-  // one a failed retraction is about to restore. Reads wait for every write
-  // queued before them. Writes never read through these, so nothing waits on
-  // itself.
-  async get(id) { await this.queue; return super.get(id); }
-
-  async list() { await this.queue; return super.list(); }
-
-  async isReserved(fingerprint) { await this.queue; return super.isReserved(fingerprint); }
-
   retract(id, fingerprint) { return this.serialise(() => super.retract(id, fingerprint)); }
+
+  // Reads come from disk, after every write this process has queued, so they
+  // see what another instance wrote and never a change that has not landed.
+  // They never assign to the shared maps: a write in progress owns those.
+  async get(id) {
+    await this.queue;
+    const entry = (await this.snapshot()).entries.get(id);
+    return entry ? { ...entry } : null;
+  }
+
+  async list() {
+    await this.queue;
+    return [...(await this.snapshot()).entries.values()].map(entry => ({ ...entry }));
+  }
+
+  async isReserved(fingerprint) {
+    await this.queue;
+    return (await this.snapshot()).reserved.has(fingerprint);
+  }
 }
 
 // The key for reservation fingerprints. Generated by the service on first

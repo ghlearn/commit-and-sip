@@ -49,7 +49,7 @@ export async function openEngine(directory = dataDirectory(), config = null) {
 // What `--retry` tells staff. "Nothing waiting" is said only when it is true:
 // a booth that cannot retract still has to own up to takedowns it owes.
 export async function retryReport(engine) {
-  const owed = await engine.unsettledRetractions();
+  const owed = await engine.owedPublicTakedowns();
   if (!engine.leaderboardClient?.retract) {
     if (!owed.length) return { exitCode: 0, text: "No takedowns are waiting to reach the public leaderboard.\n" };
     return {
@@ -103,7 +103,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
         + `Recorded by ${record.removedBy} at ${record.removedAt}: ${record.reason}\n`
         + "The name stays reserved and cannot be re-entered at this booth.\n"
         + `${PUBLIC_BOARD[record.published]}\n`);
-      if (record.published === "failed") process.exitCode = 1;
+      // Any takedown that may still be public is unfinished, not a success.
+      if (record.owed) process.exitCode = 1;
     }
   } catch (error) {
     process.stderr.write(`${error.message}\n`);

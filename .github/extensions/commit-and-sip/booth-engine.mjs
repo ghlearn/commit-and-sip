@@ -26,6 +26,15 @@ const BOARD_WINDOW = 10;
 // was never there. Anything else is still owed a retraction.
 const SETTLED = ["retracted", "absent"];
 
+// Whether a removed drink may be on the public board: its run published, or
+// may have (a failed publish can land with its response lost). A drink served
+// before this booth was configured ("disabled"), or refused by the service
+// ("rejected"), was never public. An unknown run is treated as public.
+function mayBePublic(data, record) {
+  const state = data.runs[record.runId]?.sync?.state;
+  return !["disabled", "rejected"].includes(state);
+}
+
 export class BoothEngine {
   constructor({ store, catalog, rules, leaderboardUrl = null, leaderboardClient = null }) {
     // Reuse the reviewed leaderboard rule rather than inventing a second,
@@ -91,7 +100,10 @@ export class BoothEngine {
     // The local takedown is already committed and never depends on the
     // network. Reaching the public board is attempted after it, and a failure
     // is recorded so staff can see it and retry rather than assume it worked.
-    return { ...record, published: await this.retract(record.id) };
+    // `owed` says whether the drink may still be public because of it.
+    const published = await this.retract(record.id);
+    const data = await this.store.read();
+    return { ...record, owed: !SETTLED.includes(published) && mayBePublic(data, record), published };
   }
 
   // Takes a removed drink off the public board and records the outcome on the
@@ -123,6 +135,13 @@ export class BoothEngine {
   // only this machine can finish them: another machine has no record of them.
   async unsettledRetractions() {
     return this.removalLog(await this.store.read()).filter(record => !SETTLED.includes(record.published));
+  }
+
+  // The subset that may still be showing on the public board. These are what
+  // staff must be warned about, and what must not be wiped away.
+  async owedPublicTakedowns(data = null) {
+    const current = data ?? await this.store.read();
+    return this.removalLog(current).filter(record => !SETTLED.includes(record.published) && mayBePublic(current, record));
   }
 
   async retryRetractions() {
@@ -237,7 +256,17 @@ export class BoothEngine {
   async archiveAndWipe({ archivedBy, confirm, now = new Date().toISOString() } = {}) {
     requireValue(confirm === WIPE_CONFIRMATION, "confirmation_required",
       `Type ${WIPE_CONFIRMATION} to confirm. Nothing was changed.`, 400);
+    // A takedown that has not reached the public board is recorded only in
+    // this ledger. Wiping it would leave the drink public with nothing left to
+    // retry it from, so give every owed takedown one more try first...
+    await this.retryRetractions().catch(() => {});
     return this.store.transaction(async data => {
+      // ...and refuse to wipe while any is still owed.
+      const owed = this.removalLog(data).filter(record => !SETTLED.includes(record.published) && mayBePublic(data, record));
+      requireValue(owed.length === 0, "takedowns_owed",
+        `${owed.length === 1 ? "One takedown has" : `${owed.length} takedowns have`} not reached the public leaderboard, `
+        + "so wiping would leave it public with no record to retry from. Refresh once the network is back, "
+        + "or add the staff key to this machine with npm run leaderboard:configure. Nothing was changed.", 409);
       const summary = eventSummary(data);
       // An attendee mid-order would lose the drink on the screen in front of
       // them. Finish or hand over the station first.
