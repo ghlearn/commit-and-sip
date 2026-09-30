@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { guardNodeVersion } from "./require-node.mjs";
@@ -29,11 +29,23 @@ async function readJson(file) {
   }
 }
 
+// The keys are written only into a new file that is private from the moment
+// it exists, and that file then replaces the target in one rename. Writing
+// into the existing file would not work: `mode` applies only when a file is
+// created, so an older, readable local-config.json would hold both keys until
+// a later chmod, and would keep holding them if that chmod failed.
 async function writePrivate(file, value) {
   await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  // writeFile's mode applies only when it creates the file.
-  await chmod(file, 0o600);
+  const temporary = `${file}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    await writeFile(temporary, "", { flag: "wx", mode: 0o600 });
+    await chmod(temporary, 0o600);   // in case the umask left it narrower than intended, never wider
+    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`);
+    await rename(temporary, file);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 // Keys are generated only for a brand-new deployment, when this machine has no

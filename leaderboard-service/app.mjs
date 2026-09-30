@@ -202,7 +202,18 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
       return (await store.retract(body.id, fingerprint(body.id))) ? [204, null] : [404, { error: "not_found" }];
     },
 
-    async "GET /healthz"() { return [200, { moderation, ok: true }]; },
+    // Reads the board, because that is what every other route needs. If the
+    // /home share becomes unreadable, the health check fails with it, and App
+    // Service sees an unhealthy instance rather than a green one serving 500s.
+    async "GET /healthz"() {
+      try {
+        await store.list();
+      } catch (error) {
+        log(`health check could not read the board: ${error?.code ?? error?.name}`);
+        return [503, { moderation, ok: false, store: "unreadable" }];
+      }
+      return [200, { moderation, ok: true }];
+    },
   };
 
   return async function handle(request, response) {

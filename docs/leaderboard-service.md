@@ -103,7 +103,8 @@ POST   /api/entries             booth key. 201 new, 200 same entry again (handle
 POST   /api/retractions         staff key. Body exactly { id }. 204 retracted, 404 absent.
                                 Reserves either way. The ID is never in a URL, so web-server
                                 logs hold no removed name.
-GET    /healthz                 { ok, moderation: "reviewed" | "placeholder" }
+GET    /healthz                 200 { ok, moderation: "reviewed" | "placeholder" }, or
+                                503 when the board on /home cannot be read
 ```
 
 ## Non-goals

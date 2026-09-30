@@ -1544,3 +1544,44 @@ test("an instance that loses the race to create the key waits for the winner's w
   assert.equal(lost, complete, "the loser used the winner's complete key, not an empty read");
   assert.equal((await readFile(file, "utf8")).trim(), complete);
 });
+
+// --- Review round 11 ---------------------------------------------------------
+
+test("API keys are never written into an existing readable config file", async t => {
+  const { configure } = await import("../scripts/configure-leaderboard.mjs");
+  const { chmod, link, stat } = await import("node:fs/promises");
+  const directory = await tempDirectory(t);
+  const configFile = join(directory, "local-config.json");
+  // An older, URL-only config, readable by everyone.
+  await writeFile(configFile, JSON.stringify({ leaderboardUrl: "https://example.org/board" }));
+  await chmod(configFile, 0o644);
+  // A second name for that same file: whatever is written into it, we see.
+  const observer = join(directory, "observer.json");
+  await link(configFile, observer);
+
+  const { next } = await configure({ configFile, url: "https://commit-and-sip-leaderboard.azurewebsites.net" });
+  const exposed = await readFile(observer, "utf8");
+  assert.ok(!exposed.includes(next.leaderboardApi.boothKey) && !exposed.includes(next.leaderboardApi.staffKey),
+    "the readable file never held a key: the private one replaced it");
+  assert.equal((await stat(configFile)).mode & 0o777, 0o600);
+  assert.equal(JSON.parse(await readFile(configFile, "utf8")).leaderboardUrl, "https://example.org/board", "and nothing was lost");
+  const { readdir } = await import("node:fs/promises");
+  assert.deepEqual((await readdir(directory)).filter(name => name.endsWith(".tmp")), []);
+});
+
+test("the health check fails when the board cannot be read", async t => {
+  const store = new MemoryStore();
+  const { url } = await service(t, { store });
+  assert.equal((await fetch(`${url}/healthz`)).status, 200);
+  store.list = () => Promise.reject(Object.assign(new Error("share unavailable"), { code: "EIO" }));
+  const unhealthy = await fetch(`${url}/healthz`);
+  assert.equal(unhealthy.status, 503, "App Service must see the instance as unhealthy");
+  assert.deepEqual(await unhealthy.json(), { moderation: "reviewed", ok: false, store: "unreadable" });
+});
+
+test("container stdout and stderr are kept, which on Linux is the httpLogs setting", async () => {
+  const app = await readFile(new URL("../infra/modules/app.bicep", import.meta.url), "utf8");
+  assert.match(app, /httpLogs: \{\s*fileSystem: \{\s*enabled: true/);
+  assert.match(app, /--docker-container-logging filesystem` writes exactly httpLogs\.fileSystem/,
+    "the reason is recorded where the next reader will look");
+});

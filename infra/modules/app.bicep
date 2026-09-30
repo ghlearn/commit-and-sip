@@ -93,7 +93,12 @@ resource scmCredentials 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@
   }
 }
 
-// Enough to read `az webapp log tail` during an event, and no more.
+// On Linux this one setting is what gathers the container's stdout and stderr,
+// so the service's console output (start-up, moderation warning, server
+// errors) is kept here, not only HTTP access lines. `az webapp log config
+// --docker-container-logging filesystem` writes exactly httpLogs.fileSystem;
+// applicationLogs.fileSystem is the Windows equivalent and does nothing here.
+// Three days and 35 MB: enough to read during an event, and no more.
 resource logs 'Microsoft.Web/sites/config@2023-12-01' = {
   parent: site
   name: 'logs'
