@@ -2186,6 +2186,8 @@ test("a stored row missing any served field is refused, and the health check say
   cases.push(
     ["a score that is text", { ...entry("mona-a"), score: "1000" }],
     ["a negative score", { ...entry("mona-a"), score: -1 }],
+    ["a score below the rubric's floor", { ...entry("mona-a"), score: 0 }],
+    ["a score above the rubric's ceiling", { ...entry("mona-a"), score: 5001 }],
     ["an empty name", { ...entry("mona-a"), name: " " }],
     ["a handle that is not one", { ...entry("mona-a"), handle: "<b>x</b>" }],
     ["a date that is not one", { ...entry("mona-a"), createdAt: "yesterday" }],
@@ -2213,4 +2215,59 @@ test("a stored row missing any served field is refused, and the health check say
   await writeFile(join(directory, "default.json"), JSON.stringify({ entries: [{ id: "mona-a" }], reserved: [], version: 2 }));
   assert.equal((await fetch(`${url}/healthz`)).status, 503);
   assert.equal((await fetch(`${url}/api/board`)).status >= 500, true, "and the board is not served in pieces");
+});
+
+// --- Review round 19 ---------------------------------------------------------
+
+test("the rubric's own score bounds load", async t => {
+  for (const score of [1, 5000]) {
+    const directory = await tempDirectory(t);
+    await writeFile(join(directory, "default.json"), JSON.stringify({ entries: [entry("mona-a", score)], reserved: [], version: 1 }));
+    assert.equal((await (await FileStore.open({ directory })).list())[0].score, score);
+  }
+});
+
+test("an instance left holding a replaced reservation key can no longer write", async t => {
+  const { keyIdOf, openReservationKey } = await import("../leaderboard-service/store.mjs");
+  const directory = await tempDirectory(t);
+  // Instance A starts, and binds the (empty) board to its key before serving.
+  const a = await FileStore.open({ directory });
+  const keyA = await openReservationKey(directory, a);
+  assert.equal(JSON.parse(await readFile(join(directory, "default.json"), "utf8")).keyId, keyIdOf(keyA),
+    "bound on disk at start-up, not at the first write");
+
+  // The key file disappears while nothing is reserved; instance B mints a new one.
+  await rm(join(directory, "reservation.key"));
+  const b = await FileStore.open({ directory });
+  const keyB = await openReservationKey(directory, b);
+  assert.notEqual(keyIdOf(keyB), keyIdOf(keyA));
+
+  // A's takedown would be fingerprinted with a key B cannot match. Refused.
+  const serviceA = await service(t, { store: a });
+  const refused = await del(serviceA.url, "mona-moonrise-mocha");
+  assert.equal(refused.status, 503);
+  assert.equal((await refused.json()).error, "reservation_key_mismatch");
+  assert.deepEqual([...(await b.snapshot()).reserved], [], "nothing was recorded under the old key");
+  const health = await fetch(`${serviceA.url}/healthz`);
+  assert.equal(health.status, 503, "so App Service recycles A onto the key the board uses");
+  assert.equal((await health.json()).store, "reservation_key_mismatch");
+
+  // B, on the bound key, is healthy and writes normally.
+  const serviceB = await service(t, { store: b });
+  assert.equal((await fetch(`${serviceB.url}/healthz`)).status, 200);
+  assert.equal((await del(serviceB.url, "mona-moonrise-mocha")).status, 200);
+});
+
+test("binding the key survives a write that had to be retried", async t => {
+  const { ConcurrentWriteError, keyIdOf, openReservationKey } = await import("../leaderboard-service/store.mjs");
+  const directory = await tempDirectory(t);
+  // A board bound to a key that is gone, with nothing reserved: rebinding is allowed.
+  await writeFile(join(directory, "default.json"), JSON.stringify({ entries: [], keyId: "0".repeat(16), reserved: [], version: 1 }));
+  const store = await FileStore.open({ directory });
+  const persist = store.persist.bind(store);
+  let calls = 0;
+  store.persist = (...args) => { calls += 1; return calls === 1 ? Promise.reject(new ConcurrentWriteError()) : persist(...args); };
+  const key = await openReservationKey(directory, store);
+  assert.equal(calls, 2, "the first write was refused and retried");
+  assert.equal(JSON.parse(await readFile(join(directory, "default.json"), "utf8")).keyId, keyIdOf(key));
 });

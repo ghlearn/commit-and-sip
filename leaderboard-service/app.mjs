@@ -5,7 +5,7 @@ import { leaderboard } from "../.github/extensions/commit-and-sip/services/booth
 import { canonicalHandle, PUBLICATION_TOKEN, publicRef, tokenHashOf } from "../.github/extensions/commit-and-sip/services/leaderboard.mjs";
 import { blocklistStatus } from "../.github/extensions/commit-and-sip/services/moderation.mjs";
 import { scoreCoffeeName } from "../.github/extensions/commit-and-sip/services/name-score.mjs";
-import { HandleTakenError, ReservedError } from "./store.mjs";
+import { HandleTakenError, KeyMismatchError, ReservedError } from "./store.mjs";
 
 // The public leaderboard for the Commit & Sip booth.
 //
@@ -212,9 +212,12 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
     async "GET /healthz"() {
       try {
         await store.list();
+        // An instance holding a key the board is no longer bound to must be
+        // recycled, so it restarts on the key the board uses.
+        await store.assertKeyBound?.();
       } catch (error) {
         log(`health check could not read the board: ${error?.code ?? error?.name}`);
-        return [503, { moderation, ok: false, store: "unreadable" }];
+        return [503, { moderation, ok: false, store: error instanceof KeyMismatchError ? error.code : "unreadable" }];
       }
       return [200, { moderation, ok: true }];
     },
@@ -248,7 +251,7 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
         ...(body === null ? {} : { "Content-Type": "application/json; charset=utf-8" }) });
       response.end(body === null || head ? undefined : JSON.stringify(body));
     } catch (error) {
-      const known = error instanceof HttpError;
+      const known = error instanceof HttpError || error instanceof KeyMismatchError;
       if (!known) log(`leaderboard error: ${error?.name}: ${error?.message}`);
       // A response that has already started cannot become an error response.
       if (response.headersSent) { response.destroy(); return; }

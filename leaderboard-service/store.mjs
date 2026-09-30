@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { MAX_SCORE } from "../.github/extensions/commit-and-sip/services/name-score.mjs";
 
 // One interface, two backends: memory for the tests, a JSON file for Azure.
 //
@@ -113,7 +114,8 @@ function storedEntryProblem(entry) {
   const where = `entry ${entry.id}`;
   if (typeof entry.handle !== "string" || !STORED_HANDLE.test(entry.handle)) return `${where} has no valid handle`;
   if (typeof entry.name !== "string" || !entry.name.trim() || entry.name.length > 80) return `${where} has no valid name`;
-  if (!Number.isSafeInteger(entry.score) || entry.score < 0) return `${where} has no valid score`;
+  // The same bounds the rubric clamps to, so no impossible score is served.
+  if (!Number.isSafeInteger(entry.score) || entry.score < 1 || entry.score > MAX_SCORE) return `${where} has no valid score`;
   if (typeof entry.createdAt !== "string" || Number.isNaN(Date.parse(entry.createdAt))) return `${where} has no valid createdAt`;
   if (entry.tokenHash !== undefined && (typeof entry.tokenHash !== "string" || !TOKEN_HASH.test(entry.tokenHash))) {
     return `${where} has a malformed tokenHash`;
@@ -129,6 +131,18 @@ export class LockLostError extends Error {
     super("This instance's lock on the board was taken over before the write committed.");
     this.name = "LockLostError";
     this.code = "lock_lost";
+  }
+}
+
+// This instance fingerprints with a different reservation key from the one
+// the board is bound to, so its fingerprints would not match the board's
+// reservations. It must not write, and should be restarted to pick up the key.
+export class KeyMismatchError extends Error {
+  constructor() {
+    super("The board is bound to a different reservation key than this instance holds. Restart the instance.");
+    this.name = "KeyMismatchError";
+    this.code = "reservation_key_mismatch";
+    this.status = 503;
   }
 }
 
@@ -217,6 +231,13 @@ export class FileStore extends MemoryStore {
       reserved,
       version: Number.isSafeInteger(saved.version) ? saved.version : 0,
     };
+  }
+
+  // For the health check: the board can be read, and is bound to this
+  // instance's reservation key.
+  async assertKeyBound() {
+    const disk = await this.snapshot();
+    if (this.keyId && disk.keyId && disk.keyId !== this.keyId) throw new KeyMismatchError();
   }
 
   // Copies, so a change applied to memory can never alter the snapshot it
@@ -419,8 +440,13 @@ export class FileStore extends MemoryStore {
     const attempt = async () => {
       const owner = await this.acquireLock();
       const stopRenewing = this.renewLease(owner);
+      const keyIdBefore = this.keyId;
       try {
         const disk = await this.snapshot();
+        // Checked under the lock on every write: an instance still holding a
+        // key the board is no longer bound to would record reservations that
+        // the rest of the service cannot match, or miss theirs.
+        if (this.keyId && disk.keyId && disk.keyId !== this.keyId) throw new KeyMismatchError();
         this.load(disk);
         try {
           const result = await change();
@@ -432,6 +458,7 @@ export class FileStore extends MemoryStore {
           return result;
         } catch (error) {
           this.load(disk);
+          this.keyId = keyIdBefore;
           throw error;
         }
       } finally {
@@ -516,7 +543,19 @@ export const keyIdOf = key => createHash("sha256").update(`key:${key}`).digest("
 // closed: if the key file is gone while the board holds reservations, a new
 // key would void every takedown, so the service refuses to start and says to
 // restore the key. A board fingerprinted with a different key is refused too.
+//
+// The decision, any key creation and the binding happen under the store's
+// cross-instance lock, and the binding is written to the board before the
+// instance serves anything. An instance that started earlier with another
+// key then finds the board bound to a key it does not hold, and every write
+// it attempts is refused (KeyMismatchError) instead of recording
+// fingerprints nobody else can match.
 export async function openReservationKey(directory, store, options = {}) {
+  const bind = () => bindReservationKey(directory, store, options);
+  return typeof store.serialise === "function" ? store.serialise(bind) : bind();
+}
+
+async function bindReservationKey(directory, store, options) {
   const board = await store.snapshot();
   let exists = true;
   try { await readFile(join(directory, "reservation.key"), "utf8"); }
