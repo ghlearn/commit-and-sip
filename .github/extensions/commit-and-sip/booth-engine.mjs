@@ -119,6 +119,12 @@ export class BoothEngine {
   // the retraction, and "not-configured" becomes retryable once a staff key
   // is added. A booth that cannot retract has nothing to try, so it does not
   // rewrite the ledger on every refresh.
+  // Removals still owed a retraction. They live in this booth's ledger, so
+  // only this machine can finish them: another machine has no record of them.
+  async unsettledRetractions() {
+    return this.removalLog(await this.store.read()).filter(record => !SETTLED.includes(record.published));
+  }
+
   async retryRetractions() {
     if (!this.leaderboardClient?.retract) return [];
     const data = await this.store.read();
@@ -366,7 +372,8 @@ export class BoothEngine {
     const data = await this.store.read();
     const run = data.runs[runId];
     if (!again && run?.sync?.state !== "pending" && run?.sync?.state !== "failed") return;
-    if (!run?.sync || run.removed) return;
+    // A refusal that retrying cannot change is final, even for a rebuild.
+    if (!run?.sync || run.removed || run.sync.state === "rejected") return;
     const entry = this.houseMenu(data).find(item => !item.example && item.runId === runId);
     if (!entry) return;
     // Minted and saved before the first send, never after: a token that

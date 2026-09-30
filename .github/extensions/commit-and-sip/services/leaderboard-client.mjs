@@ -31,10 +31,13 @@ export function validateLeaderboardApi(api) {
   return api;
 }
 
+// Carries the service's error code, so the booth can tell a refusal that
+// retrying cannot change from a transport failure that it can.
 async function failure(response, verb) {
   let code = "unknown";
   try { code = (await response.json()).error ?? code; } catch { /* the status is enough */ }
-  return new Error(`The leaderboard ${verb} failed: ${response.status} ${code}.`);
+  return Object.assign(new Error(`The leaderboard ${verb} failed: ${response.status} ${code}.`),
+    { code, status: response.status });
 }
 
 export function createLeaderboardClient({ url, boothKey, staffKey = null, timeoutMs = 4000, fetchImpl = globalThis.fetch }) {

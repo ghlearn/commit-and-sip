@@ -5,7 +5,14 @@ import { requireValue } from "../domain.mjs";
 // separate service that no booth can see into. Everything here is a client
 // seam: the local entry is always durable first, and a submission that fails
 // can never cost an attendee the drink they invented or the score they earned.
-export const SYNC_STATES = ["disabled", "pending", "confirmed", "failed"];
+export const SYNC_STATES = ["disabled", "pending", "confirmed", "failed", "rejected"];
+
+// Refusals that retrying cannot change: another attendee already holds the
+// name, or staff took it down. They become "rejected" and are never sent
+// again, not even by a rebuild. Otherwise, after the service lost its data,
+// the booth that lost a clash could publish first and take the name from the
+// attendee who legitimately holds it.
+export const TERMINAL_REJECTIONS = ["duplicate_drink", "unavailable_drink"];
 
 // A random value minted once per publication and kept with the run, so every
 // retry of one publication carries the same token. It lets the service tell a
@@ -78,11 +85,13 @@ export function confirmedSync(previous, receipt, now = new Date().toISOString())
 // The failure reason is kept for staff, never surfaced to the attendee, and
 // deliberately carries no service internals beyond a short message.
 export function failedSync(previous, error, now = new Date().toISOString()) {
+  const code = typeof error?.code === "string" && /^[a-z_]{1,40}$/.test(error.code) ? error.code : null;
   return {
     ...previous,
     attempts: previous.attempts + 1,
+    code,
     reason: typeof error?.message === "string" ? error.message.slice(0, 200) : "Unknown leaderboard error.",
-    state: "failed",
+    state: TERMINAL_REJECTIONS.includes(code) ? "rejected" : "failed",
     updatedAt: now,
   };
 }
@@ -103,6 +112,15 @@ export function syncView(sync, handle = null) {
           ? ` Another booth had already used your handle, so the board shows you as ${sync.receipt.handle}.`
           : ""),
       state: "confirmed",
+    };
+  }
+  if (sync.state === "rejected") {
+    // Deliberately says nothing about why, as the booth does for a blocklist
+    // hit. Staff read the code from the sync record.
+    return {
+      eventRank: null,
+      message: "Your drink is saved at this booth, but the event leaderboard did not accept this name.",
+      state: "rejected",
     };
   }
   return {

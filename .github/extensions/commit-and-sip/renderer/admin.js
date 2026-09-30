@@ -178,7 +178,7 @@
   const PUBLIC_BOARD = {
     absent: "was not on the public leaderboard",
     failed: "is NOT yet off the public leaderboard. Refresh to retry",
-    "not-configured": "this booth has no staff key for the public leaderboard, so remove it there separately",
+    "not-configured": "is NOT off the public leaderboard: this booth has no staff key. To finish it, add the staff key to this machine with npm run leaderboard:configure, then retry with Refresh",
     retracted: "was taken off the public leaderboard",
   };
 

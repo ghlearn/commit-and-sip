@@ -31,13 +31,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     if (unsettled.some(removal => removal.published === "not-configured")) {
       process.stdout.write("This booth has no staff key, so removed names are NOT reserved. Run this on a staff machine.\n");
     }
+    // "rejected" drinks were refused for good (the name was taken or taken
+    // down) and are deliberately not resent: they are reported, not failures.
+    const label = { confirmed: "ok    ", rejected: "held  " };
     for (const result of drinks) {
-      process.stdout.write(`${result.state === "confirmed" ? "ok    " : "FAILED"}\t${result.name}`
-        + `${result.state === "confirmed" ? "" : `\t${result.reason ?? ""}`}\n`);
+      process.stdout.write(`${label[result.state] ?? "FAILED"}\t${result.name}`
+        + `${result.state === "confirmed" ? "" : `\t${result.state === "rejected" ? "refused earlier; not resent" : result.reason ?? ""}`}\n`);
     }
-    const failed = drinks.filter(result => result.state !== "confirmed").length;
+    const held = drinks.filter(result => result.state === "rejected").length;
+    const failed = drinks.filter(result => !["confirmed", "rejected"].includes(result.state)).length;
     process.stdout.write(drinks.length
-      ? `${drinks.length - failed} of ${drinks.length} drinks are on the public leaderboard.\n`
+      ? `${drinks.length - failed - held} of ${drinks.length} drinks are on the public leaderboard`
+        + `${held ? `; ${held} held back because the service refused them earlier` : ""}.\n`
       : "This booth has no attendee drinks to publish.\n");
     if (failed || unsettled.length) process.exitCode = 1;
   } catch (error) {

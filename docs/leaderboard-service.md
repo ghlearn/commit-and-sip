@@ -27,7 +27,9 @@ Hosting is subscription **GitHub - NonProd - skills**, region `westus2`, resourc
 
 **Why the board is a projection:** every booth machine keeps the authoritative copy of its own drinks and takedowns. `npm run leaderboard:republish` rebuilds the board from a booth. It replays every takedown first, so removed names are reserved again, and then sends every drink. Run it on each booth machine, with the staff key, after data loss or an `EVENT_ID` change. It also publishes drinks served before the booth was configured, which would otherwise never be sent.
 
-If a write to disk fails, the in-memory board is put back as it was, so the service never reports success for something that would vanish on restart.
+If a write to disk fails, the in-memory board is put back as it was, so the service never reports success for something that would vanish on restart. Reads wait for any write queued before them, so they never see a change that has not reached the disk.
+
+A drink the service refused for good (`duplicate_drink` or `unavailable_drink`) is recorded on the booth as `rejected` with that code. It is never sent again, not by a refresh and not by a rebuild. Otherwise, after a data loss, the booth that lost a name clash could republish first and take the name from the attendee who holds it. The attendee is told the event board did not accept the name, without the reason.
 
 The service uses Node built-ins only. There are no runtime dependencies to audit, install, or patch.
 

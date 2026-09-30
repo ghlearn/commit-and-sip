@@ -153,7 +153,7 @@ When the booth publishes to the leaderboard service, removal also takes the drin
 | taken off the public leaderboard | Removed there, and the name is reserved | None |
 | was not on the public leaderboard | It had not synced yet; the name is still reserved there | None |
 | **NOT yet off the public leaderboard** | The service was unreachable | Press **Refresh** on the dashboard, or run `npm run remove -- --retry` once the network is back |
-| no staff key for the public leaderboard | This machine can publish but not delete | Take it down from a staff machine. If a staff key is added to this machine later, **Refresh** retries it |
+| **no staff key** / NOT off the public leaderboard | This machine can publish but not delete | Add the staff key **to this machine** (`npm run leaderboard:configure -- --url …`), then press **Refresh** or run `npm run remove -- --retry`. Another machine cannot finish it, because the removal is recorded only in this booth's ledger. |
 
 A takedown whose outcome was never recorded, for example because the machine stopped mid-removal, is retried the same way. Only "taken off" and "was not on" are final.
 
@@ -167,7 +167,7 @@ If a panel is closed or the extension reloads mid-run, reopen the canvas. Saved 
 | --- | --- |
 | No network | Keep running. The booth is local-first and needs no network. Only the event leaderboard line is unavailable, and the canvas says so rather than inventing a rank. |
 | Name rejected unexpectedly | Check the blocklist for an over-broad `substring` entry. Do not read the matched term aloud or add exceptions mid-session. |
-| Entries stay unconfirmed on the event leaderboard | Expected while no `leaderboardApi` is configured. Otherwise the sync reason names the refusal: `score_mismatch` means the service and booth run different rubric versions, and `unavailable_drink` means staff took that name down. |
+| Entries stay unconfirmed on the event leaderboard | Expected while no `leaderboardApi` is configured. Otherwise the sync reason names the refusal: `score_mismatch` means the service and booth run different rubric versions, and is retried. A sync state of `rejected` with code `duplicate_drink` (another attendee holds the name) or `unavailable_drink` (staff took it down) is final: it is never resent, even by `leaderboard:republish`. |
 | Public board lost or a new `EVENT_ID` set | Run `npm run leaderboard:republish` on every booth machine. Each booth holds the authoritative copy of its own drinks and takedowns. It replays takedowns first, so removed names are reserved again, and **only a machine with the staff key can do that part**: the command fails and says so on a booth-only machine. |
 | Panel connection lost | Reopen the canvas. Saved state persists. Do not share loopback URLs or tickets. |
 | Counter stuck on a previous attendee | Use hand-over. If the UI does not respond, inspect the provider log before touching the store. |

@@ -61,6 +61,9 @@ tbody th { width: 3.5em; font-weight: 800; color: var(--accent-ink); }
 .num { text-align: right; white-space: nowrap; }
 td.num { font-weight: 700; }
 tr.mine { background: var(--board); }
+/* On the highlighted row the green rank (4.35:1) and the muted handle (4.45:1)
+   fall below 4.5:1 against --board, and on a phone neither is large text. */
+tr.mine th, tr.mine .handle { color: var(--text); }
 
 .empty { padding: 2em 0; color: var(--muted); font-size: 1.1em; }
 

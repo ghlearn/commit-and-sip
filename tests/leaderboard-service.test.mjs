@@ -907,3 +907,103 @@ test("screen readers hear transitions, not a clock every ten seconds", async () 
   assert.match(script, /if \(message === announced\) return;/, "a repeated message is not re-announced");
   assert.doesNotMatch(script, /announce\(`Updated/, "the routine timestamp is never announced");
 });
+
+// --- Review round 3 ----------------------------------------------------------
+
+test("a refusal retrying cannot change is recorded as final and never resent", async t => {
+  const { url } = await service(t);
+  const { failedSync, syncView } = await import("../.github/extensions/commit-and-sip/services/leaderboard.mjs");
+  assert.equal(failedSync({ attempts: 0 }, Object.assign(new Error("x"), { code: "duplicate_drink" })).state, "rejected");
+  assert.equal(failedSync({ attempts: 0 }, Object.assign(new Error("x"), { code: "unavailable_drink" })).state, "rejected");
+  assert.equal(failedSync({ attempts: 0 }, new Error("timeout")).state, "failed", "a transport failure stays retryable");
+  assert.match(syncView({ state: "rejected" }).message, /did not accept this name/);
+
+  // Booth A publishes first. Booth B's attendee drew the same handle and name.
+  const directoryA = await tempDirectory(t);
+  const directoryB = await tempDirectory(t);
+  const client = serviceUrl => createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url: serviceUrl });
+  const boothA = new BoothEngine({ catalog, rules, store: new RunStore(directoryA), leaderboardClient: client(url) });
+  const boothB = new BoothEngine({ catalog, rules, store: new RunStore(directoryB), leaderboardClient: client(url) });
+  const a = await boothA.open({ runId: "a-1" });
+  await boothA.dispatch("a-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await boothA.publish("a-1");
+  await boothB.open({ runId: "b-1" });
+  await boothB.store.transaction(data => { data.runs["b-1"].handle = a.handle; });   // the shared phrase
+  await boothB.dispatch("b-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await boothB.publish("b-1");
+  const bSync = (await boothB.store.read()).runs["b-1"].sync;
+  assert.deepEqual([bSync.state, bSync.code], ["rejected", "duplicate_drink"]);
+
+  // Refreshing does not keep hammering the service with a refusal.
+  let calls = 0;
+  const counting = { ...client(url), async publish(submission) { calls += 1; return client(url).publish(submission); } };
+  const boothBAgain = new BoothEngine({ catalog, rules, store: boothB.store, leaderboardClient: counting });
+  await boothBAgain.dispatch("b-1", "refresh", {});
+  assert.equal(calls, 0);
+
+  // The service loses everything, and the losing booth happens to rebuild first.
+  const lost = await service(t);
+  const rebuildB = new BoothEngine({ catalog, rules, store: boothB.store, leaderboardClient: client(lost.url) });
+  const rebuildA = new BoothEngine({ catalog, rules, store: boothA.store, leaderboardClient: client(lost.url) });
+  assert.deepEqual((await rebuildB.republishAll()).drinks.map(result => result.state), ["rejected"],
+    "the refused drink is held back, not resent");
+  assert.deepEqual((await rebuildA.republishAll()).drinks.map(result => result.state), ["confirmed"]);
+  const owner = (await board(lost.url, `?handle=${a.handle}&drink=mona-moonrise-mocha`)).you;
+  assert.equal(owner.handle, a.handle, "the attendee who legitimately held the name still holds it");
+});
+
+test("a read never sees a write that has not reached the disk", async t => {
+  const directory = await tempDirectory(t);
+  let land;
+  const landed = new Promise(resolve => { land = resolve; });
+  // The change is applied to memory, then held before the file is written.
+  class SlowDisk extends FileStore {
+    serialise(change) { return super.serialise(async () => { const result = await change(); await landed; return result; }); }
+  }
+  const store = Object.setPrototypeOf(await FileStore.open({ directory }), SlowDisk.prototype);
+  const admitting = store.admit(entry("mona-pending"), { fingerprint: "fp", handles: [HANDLE] });
+  const pending = Symbol("pending");
+  const tick = () => new Promise(resolve => setImmediate(() => resolve(pending)));
+  assert.equal(await Promise.race([store.list(), tick()]), pending, "list waits for the write in progress");
+  assert.equal(await Promise.race([store.get("mona-pending"), tick()]), pending);
+  assert.equal(await Promise.race([store.isReserved("fp"), tick()]), pending);
+
+  // The write then fails. The entry must never have been visible.
+  await rm(directory, { force: true, recursive: true });
+  const reading = store.list();
+  land();
+  await assert.rejects(admitting, { code: "ENOENT" });
+  assert.deepEqual(await reading, [], "the entry that failed to persist was never shown");
+});
+
+test("retrying on a booth without a staff key does not claim nothing is waiting", async t => {
+  const { retryReport } = await import("../scripts/remove-drink.mjs");
+  const boothOnly = createLeaderboardClient({ boothKey: BOOTH_KEY, url: "https://leaderboard.example.org" });
+  const { engine } = await engineWith(t, boothOnly);
+  assert.deepEqual(await retryReport(engine), { exitCode: 0, text: "No takedowns are waiting to reach the public leaderboard.\n" });
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
+  const report = await retryReport(engine);
+  assert.equal(report.exitCode, 1, "an outstanding public takedown is not a success");
+  assert.match(report.text, new RegExp(`${served.submission.id}\\tNOT off the public leaderboard`));
+  assert.match(report.text, /add the staff key to this machine/, "the fix names this machine, which holds the removal");
+  assert.doesNotMatch(report.text, /No takedowns are waiting/);
+});
+
+test("the highlighted row keeps every text colour above 4.5:1", async () => {
+  const css = await readFile(new URL("../leaderboard-service/public/board.css", import.meta.url), "utf8");
+  const token = name => new RegExp(`--${name}:\\s*(#[0-9a-f]{6})`, "i").exec(css)[1];
+  const luminance = hex => {
+    const [r, g, b] = [1, 3, 5].map(index => parseInt(hex.slice(index, index + 2), 16) / 255)
+      .map(value => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a, b) => {
+    const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (light + 0.05) / (dark + 0.05);
+  };
+  assert.ok(contrast(token("accent-ink"), token("board")) < 4.5, "the green ink on the highlight is too faint, as reported");
+  assert.match(css, /tr\.mine th, tr\.mine \.handle \{ color: var\(--text\); \}/, "so the highlighted row uses the text colour");
+  assert.ok(contrast(token("text"), token("board")) >= 4.5);
+});

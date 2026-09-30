@@ -149,6 +149,17 @@ export class FileStore extends MemoryStore {
 
   admit(entry, options) { return this.serialise(() => super.admit(entry, options)); }
 
+  // A write changes the maps before its file lands, so a read that did not
+  // wait could show an entry that is about to be rolled back, or briefly hide
+  // one a failed retraction is about to restore. Reads wait for every write
+  // queued before them. Writes never read through these, so nothing waits on
+  // itself.
+  async get(id) { await this.queue; return super.get(id); }
+
+  async list() { await this.queue; return super.list(); }
+
+  async isReserved(fingerprint) { await this.queue; return super.isReserved(fingerprint); }
+
   retract(id, fingerprint) { return this.serialise(() => super.retract(id, fingerprint)); }
 }
 

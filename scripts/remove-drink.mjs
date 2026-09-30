@@ -46,10 +46,32 @@ export async function openEngine(directory = dataDirectory(), config = null) {
   });
 }
 
+// What `--retry` tells staff. "Nothing waiting" is said only when it is true:
+// a booth that cannot retract still has to own up to takedowns it owes.
+export async function retryReport(engine) {
+  const owed = await engine.unsettledRetractions();
+  if (!engine.leaderboardClient?.retract) {
+    if (!owed.length) return { exitCode: 0, text: "No takedowns are waiting to reach the public leaderboard.\n" };
+    return {
+      exitCode: 1,
+      text: `${owed.map(record => `${record.id}\tNOT off the public leaderboard`).join("\n")}\n`
+        + `${owed.length} takedown${owed.length === 1 ? "" : "s"} could not reach the public leaderboard because this booth has no staff key. `
+        + `Only this machine holds ${owed.length === 1 ? "that removal" : "those removals"}: add the staff key to this machine with npm run leaderboard:configure, then retry.\n`,
+    };
+  }
+  const results = await engine.retryRetractions();
+  return {
+    exitCode: results.some(result => !["retracted", "absent"].includes(result.published)) ? 1 : 0,
+    text: results.length
+      ? `${results.map(result => `${result.id}\t${PUBLIC_BOARD[result.published]}`).join("\n")}\n`
+      : "No takedowns are waiting to reach the public leaderboard.\n",
+  };
+}
+
 export const PUBLIC_BOARD = {
   absent: "It was not on the public leaderboard.",
   failed: "It is NOT yet off the public leaderboard. Run npm run remove -- --retry once the network is back.",
-  "not-configured": "This booth has no staff key for the public leaderboard. Remove it there separately.",
+  "not-configured": "This booth has no staff key, so it is NOT off the public leaderboard. To finish it, add the staff key to this machine with npm run leaderboard:configure, then retry.",
   retracted: "It was taken off the public leaderboard.",
 };
 
@@ -67,11 +89,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const args = parseArguments(process.argv.slice(2));
     const engine = await openEngine();
     if (args.retry) {
-      const results = await engine.retryRetractions();
-      process.stdout.write(results.length
-        ? `${results.map(result => `${result.id}\t${PUBLIC_BOARD[result.published]}`).join("\n")}\n`
-        : "No takedowns are waiting to reach the public leaderboard.\n");
-      if (results.some(result => result.published === "failed")) process.exitCode = 1;
+      const report = await retryReport(engine);
+      process.stdout.write(report.text);
+      process.exitCode = report.exitCode;
     } else if (args.list) {
       const drinks = await listDrinks(engine);
       process.stdout.write(drinks.length
