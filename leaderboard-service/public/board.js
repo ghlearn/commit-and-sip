@@ -18,7 +18,7 @@ const STALE_AFTER_MS = 30_000;
 
 const params = new URLSearchParams(location.search);
 const handle = params.get("handle");
-const drink = params.get("drink");
+const ref = params.get("ref");
 const time = date => date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const $ = id => document.getElementById(id);
 
@@ -96,7 +96,7 @@ function showStatus() {
 async function refresh() {
   try {
     const query = handle
-      ? `?handle=${encodeURIComponent(handle)}${drink ? `&drink=${encodeURIComponent(drink)}` : ""}`
+      ? `?handle=${encodeURIComponent(handle)}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}`
       : "";
     const response = await fetch(`/api/board${query}`, { cache: "no-store", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     if (!response.ok) throw new Error(String(response.status));

@@ -40,7 +40,7 @@ The booth reads one optional ignored file, `booth/local-config.json`, with two i
 }
 ```
 
-- `leaderboardApi` makes the booth publish to the leaderboard service and lets takedowns retract from it. **Write it with `npm run leaderboard:configure`, never by hand** (see [Leaderboard service operations](#leaderboard-service-operations)). Leave out `staffKey` on a machine that should not take drinks down. The file is written readable by its owner only.
+- `leaderboardApi` makes the booth publish to the leaderboard service and lets takedowns retract from it. Its `url` is the service's **origin only** (no path); anything else is refused at start-up. **Write it with `npm run leaderboard:configure`, never by hand** (see [Leaderboard service operations](#leaderboard-service-operations)). Leave out `staffKey` on a machine that should not take drinks down. The file is written readable by its owner only.
 - `leaderboardUrl` puts a QR code in front of attendees. **Leave it unset** until the moderation blocklist is reviewed and brand sign-off is done.
 
 Both URLs must be public HTTPS with no credentials, fragment, or nonstandard port. Retired pull-request keys (`mode`, `runs`, `repo`, `requiredChecks`) are rejected on start with a `retired_config` diagnostic rather than ignored, so a stale config cannot look configured. A valid JSON file containing `null`, an array, or a scalar is not valid staff configuration; correct it using the explicit `invalid_config` diagnostic rather than treating it as a network error.

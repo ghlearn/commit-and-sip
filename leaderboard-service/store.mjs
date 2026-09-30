@@ -253,14 +253,18 @@ export class FileStore extends MemoryStore {
   renewLease(owner) {
     let stopped = false;
     let inFlight = Promise.resolve();
+    // Never throws. A renewal that fails is simply not a renewal; the
+    // ownership check before the commit decides whether the write may land.
+    // A rejected promise parked between timer ticks would otherwise count as
+    // unhandled and could stop the whole service.
     const renew = async () => {
-      if (stopped || (await this.readLease())?.owner !== owner) return;
       const temporary = `${this.lockFile}.${randomBytes(6).toString("hex")}.renew`;
       try {
+        if (stopped || (await this.readLease())?.owner !== owner) return;
         await writeFile(temporary, FileStore.lease(owner));
         await rename(temporary, this.lockFile);
       } catch {
-        await rm(temporary, { force: true });   // the commit-time check is what decides
+        await rm(temporary, { force: true }).catch(() => {});
       }
     };
     const timer = setInterval(() => { inFlight = inFlight.then(renew, renew); }, Math.floor(this.staleLockMs / 3));

@@ -21,6 +21,11 @@ export function validateLeaderboardApi(api) {
   // The same rule the QR destination uses: a genuinely public HTTPS address.
   try { validateLeaderboardUrl(api.url); }
   catch { requireValue(false, "invalid_config", "leaderboardApi.url must be a public HTTPS address.", 400); }
+  // The service answers at its root. A path here would be silently dropped
+  // or, worse, prefixed onto every route, and the booth would never sync.
+  const parsed = new URL(api.url);
+  requireValue(parsed.pathname === "/" && !parsed.search,
+    "invalid_config", `leaderboardApi.url must be the service's origin only, such as ${parsed.origin}.`, 400);
   for (const name of ["boothKey", "staffKey"]) {
     if (name === "staffKey" && api.staffKey === undefined) continue;
     requireValue(typeof api[name] === "string" && api[name].length >= MIN_KEY_LENGTH,
@@ -41,7 +46,8 @@ async function failure(response, verb) {
 }
 
 export function createLeaderboardClient({ url, boothKey, staffKey = null, timeoutMs = 4000, fetchImpl = globalThis.fetch }) {
-  const endpoint = path => new URL(path, url.endsWith("/") ? url : `${url}/`).toString();
+  // Routes are absolute from the origin, whatever path the URL carries.
+  const endpoint = path => new URL(`/${path}`, new URL(url).origin).toString();
   const client = {
     async publish(submission) {
       const response = await fetchImpl(endpoint("api/entries"), {

@@ -23,6 +23,16 @@ export const TERMINAL_REJECTIONS = ["duplicate_drink", "unavailable_drink"];
 export const PUBLICATION_TOKEN = /^[0-9a-f]{32}$/;
 export const newPublicationToken = () => randomBytes(16).toString("hex");
 
+// What the service stores in place of the token.
+export const tokenHashOf = token => createHash("sha256").update(token).digest("hex");
+
+// The attendee's QR link and the board page find their own row with this, not
+// with the drink ID: the ID is the name, slugged, and request URLs end up in
+// web-server logs. It is derived from the token's hash, so the booth (which
+// holds the token) and the service (which holds only the hash) compute the
+// same value, and it reveals neither the token nor the name.
+export const publicRef = tokenHash => createHash("sha256").update(`ref:${tokenHash}`).digest("hex").slice(0, 16);
+
 // Exactly what is sent. Kept minimal on purpose: no run ID, no device, and no
 // booth identity, because an anonymous handle is all a public board needs.
 export function submissionFor(entry, token) {

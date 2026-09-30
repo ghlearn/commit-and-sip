@@ -2,7 +2,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { DomainError } from "../.github/extensions/commit-and-sip/domain.mjs";
 import { leaderboard } from "../.github/extensions/commit-and-sip/services/booth-menu.mjs";
-import { canonicalHandle, PUBLICATION_TOKEN } from "../.github/extensions/commit-and-sip/services/leaderboard.mjs";
+import { canonicalHandle, PUBLICATION_TOKEN, publicRef, tokenHashOf } from "../.github/extensions/commit-and-sip/services/leaderboard.mjs";
 import { blocklistStatus } from "../.github/extensions/commit-and-sip/services/moderation.mjs";
 import { scoreCoffeeName } from "../.github/extensions/commit-and-sip/services/name-score.mjs";
 import { HandleTakenError, ReservedError } from "./store.mjs";
@@ -133,16 +133,17 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
       const body = { asOf: now().toISOString(), entries: board.slice(0, BOARD_SIZE).map(publicRow), total: board.length };
       const handle = url.searchParams.get("handle");
       if (handle !== null) {
-        // With a drink ID the lookup is exact. A QR scanned before the booth's
-        // publish was confirmed carries the handle the booth issued, while the
-        // drink may be stored under its canonical form, so either matches.
-        // Without an ID a handle alone is still unique, because admission
-        // never lets two entries share one.
-        const drink = url.searchParams.get("drink");
-        const own = drink === null
+        // With a publication reference the lookup is exact. A QR scanned
+        // before the booth's publish was confirmed carries the handle the
+        // booth issued, while the drink may be stored under its canonical
+        // form, so either matches. Without a reference a handle alone is still
+        // unique, because admission never lets two entries share one. The
+        // reference is opaque: the drink ID would put the name in the logs.
+        const ref = url.searchParams.get("ref");
+        const own = ref === null
           ? entries.find(entry => entry.handle === handle)
-          : entries.find(entry => entry.id === drink
-            && (entry.handle === handle || entry.handle === canonicalHandle(handle, drink)));
+          : entries.find(entry => entry.tokenHash && publicRef(entry.tokenHash) === ref
+            && (entry.handle === handle || entry.handle === canonicalHandle(handle, entry.id)));
         const mine = HANDLE.test(handle) && own ? board.find(row => row.handle === own.handle && row.name === own.name) : undefined;
         body.you = mine ? publicRow(mine) : null;
       }
@@ -157,7 +158,7 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
       // and the receipt says so.
       const handles = [submission.handle, canonicalHandle(submission.handle, submission.id)];
       // Only a hash of the publication token is kept; it is compared, never shown.
-      const tokenHash = createHash("sha256").update(submission.token).digest("hex");
+      const tokenHash = tokenHashOf(submission.token);
       const { token, ...fields } = submission;
       let admitted;
       try {

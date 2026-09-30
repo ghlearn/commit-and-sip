@@ -44,7 +44,7 @@ The service uses Node built-ins only. There are no runtime dependencies to audit
 
 Keys are presented as `Authorization: Bearer`, compared in constant time, and must be at least 32 characters and differ from each other. `npm run leaderboard:configure` generates them **only for a brand-new deployment**. Every other machine gets the deployed keys copied with `--from`, and a booth-only machine is promoted to staff the same way. Minting a new staff key there would not match the service, and redeploying to accept it would lock out every other staff machine, so the command refuses. The same keys go into the deployment as `@secure()` Bicep parameters, so an infrastructure redeploy cannot silently wipe settings that were added by hand.
 
-**Handles are made unique across booths by the service.** A booth draws its handle from 512 phrases and knows only its own. If another entry already uses the phrase, the service stores the drink under a *canonical* handle: the phrase plus eight hex characters derived from the drink ID. It returns that handle in the receipt. The rule lives in `canonicalHandle()` in `services/leaderboard.mjs`, which both sides import, so the booth accepts the original handle or exactly that canonical one and nothing else. The attendee is told if their board handle differs. Their QR link carries the drink ID as well as the handle, so it finds their own drink even before the publish is confirmed. Admission is one serialised store operation covering the reservation check, the handle choice and the write, so concurrent requests cannot interleave.
+**Handles are made unique across booths by the service.** A booth draws its handle from 512 phrases and knows only its own. If another entry already uses the phrase, the service stores the drink under a *canonical* handle: the phrase plus eight hex characters derived from the drink ID. It returns that handle in the receipt. The rule lives in `canonicalHandle()` in `services/leaderboard.mjs`, which both sides import, so the booth accepts the original handle or exactly that canonical one and nothing else. The attendee is told if their board handle differs. Their QR link carries an opaque publication reference (`ref`, derived from the hash of the publication token) as well as the handle. It finds their own drink even before the publish is confirmed, and it spells out nothing of the name, which request logs would otherwise keep. Admission is one serialised store operation covering the reservation check, the handle choice and the write, so concurrent requests cannot interleave.
 
 **Departure from the proposal:** the proposal suggested per-booth keys mapped to a booth ID. This build uses one shared booth key. The cost is that one compromised booth cannot be cut off without re-keying all of them. For an event with a few booth machines, that was judged acceptable. Per-booth keys would also put a booth identity into storage, and at present everything stored is either shown publicly or unreadable.
 
@@ -95,7 +95,7 @@ Each `EVENT_ID` is a separate board file, so setting a new ID starts a fresh boa
 
 ```
 GET    /                        public board (the future QR destination)
-GET    /api/board[?handle=&drink=]  { asOf, total, entries[<=20], you? }
+GET    /api/board[?handle=&ref=]    { asOf, total, entries[<=20], you? }  (ref is opaque, never the drink ID)
 POST   /api/entries             booth key. 201 new, 200 same entry again (handle
                                 may be canonical), 409 duplicate_drink |
                                 unavailable_drink | handle_taken,

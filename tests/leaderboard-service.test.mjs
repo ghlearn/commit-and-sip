@@ -16,7 +16,7 @@ import { loadNameRules } from "../.github/extensions/commit-and-sip/services/cof
 import { leaderboard } from "../.github/extensions/commit-and-sip/services/booth-menu.mjs";
 import { createLeaderboardClient, leaderboardClientFromConfig, validateLeaderboardApi }
   from "../.github/extensions/commit-and-sip/services/leaderboard-client.mjs";
-import { newPublicationToken, submissionFor, validateReceipt } from "../.github/extensions/commit-and-sip/services/leaderboard.mjs";
+import { newPublicationToken, publicRef, submissionFor, tokenHashOf, validateReceipt } from "../.github/extensions/commit-and-sip/services/leaderboard.mjs";
 import { validateBlocklist } from "../.github/extensions/commit-and-sip/services/moderation.mjs";
 import { scoreCoffeeName } from "../.github/extensions/commit-and-sip/services/name-score.mjs";
 
@@ -745,10 +745,11 @@ test("two booths that issued the same handle each get a distinct place on the bo
   assert.equal(new Set(handles).size, handles.length, "no two rows share a handle");
   // Each phone finds its own drink, including a QR scanned before confirmation
   // that still carries the phrase the booth issued.
-  assert.equal((await board(url, `?handle=${HANDLE}&drink=${first.id}`)).you.name, first.name);
-  assert.equal((await board(url, `?handle=${HANDLE}&drink=${second.id}`)).you.name, second.name);
-  assert.equal((await board(url, `?handle=${secondReceipt.handle}&drink=${second.id}`)).you.name, second.name);
-  assert.equal((await board(url, `?handle=${HANDLE}&drink=someone-else`)).you, null);
+  const refOf = sent => publicRef(tokenHashOf(sent.token));
+  assert.equal((await board(url, `?handle=${HANDLE}&ref=${refOf(first)}`)).you.name, first.name);
+  assert.equal((await board(url, `?handle=${HANDLE}&ref=${refOf(second)}`)).you.name, second.name);
+  assert.equal((await board(url, `?handle=${secondReceipt.handle}&ref=${refOf(second)}`)).you.name, second.name);
+  assert.equal((await board(url, `?handle=${HANDLE}&ref=0000000000000000`)).you, null);
 });
 
 test("the attendee is told when the board shows them under a different handle", async () => {
@@ -962,7 +963,8 @@ test("a refusal retrying cannot change is recorded as final and never resent", a
   assert.deepEqual((await rebuildB.republishAll()).drinks.map(result => result.state), ["rejected"],
     "the refused drink is held back, not resent");
   assert.deepEqual((await rebuildA.republishAll()).drinks.map(result => result.state), ["confirmed"]);
-  const owner = (await board(lost.url, `?handle=${a.handle}&drink=mona-moonrise-mocha`)).you;
+  const aToken = (await boothA.store.read()).runs["a-1"].sync.token;
+  const owner = (await board(lost.url, `?handle=${a.handle}&ref=${publicRef(tokenHashOf(aToken))}`)).you;
   assert.equal(owner.handle, a.handle, "the attendee who legitimately held the name still holds it");
 });
 
@@ -1202,7 +1204,7 @@ test("a refused publication gets no QR code that would open someone else's row",
     leaderboardClient: refusing, leaderboardUrl: "https://sip.example.com/board" });
   await engine.open({ runId: "booth-1" });
   const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
-  assert.match(served.attendeeUrl, /drink=mona-moonrise-mocha/, "before the refusal a link is offered");
+  assert.ok(served.attendeeUrl, "before the refusal a link is offered");
   await engine.publish("booth-1");
   const view = await engine.get("booth-1");
   assert.equal(view.sync.state, "rejected");
@@ -1375,4 +1377,54 @@ test("a write that landed is not reported as failed because its lock could not b
   const admitted = await store.admit(entry("mona-landed"), { fingerprint: "fp", handles: [HANDLE] });
   assert.equal(admitted.created, true, "the lease expires on its own; the write stands");
   assert.deepEqual((await (await FileStore.open({ directory })).list()).map(item => item.id), ["mona-landed"]);
+});
+
+
+// --- Review round 8 ----------------------------------------------------------
+
+test("the attendee's link finds their row without spelling out the drink's name", async t => {
+  const { url } = await service(t);
+  const directory = await tempDirectory(t);
+  const engine = new BoothEngine({ catalog, rules, store: new RunStore(directory), leaderboardUrl: "https://sip.example.com/board",
+    leaderboardClient: createLeaderboardClient({ boothKey: BOOTH_KEY, url }) });
+  await engine.open({ runId: "booth-1" });
+  await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.publish("booth-1");
+  const link = new URL((await engine.get("booth-1")).attendeeUrl);
+  assert.doesNotMatch(link.href, /moonrise|mocha/i, "nothing name-derived reaches a URL that gets logged");
+  assert.deepEqual([...link.searchParams.keys()].sort(), ["handle", "ref"]);
+  assert.match(link.searchParams.get("ref"), /^[0-9a-f]{16}$/);
+  const you = (await board(url, link.search)).you;
+  assert.equal(you.name, "Mona Moonrise Mocha", "and it still finds their own drink");
+  const script = await readFile(new URL("../leaderboard-service/public/board.js", import.meta.url), "utf8");
+  assert.doesNotMatch(script, /params\.get\("drink"\)|&drink=/, "the page never forwards a drink ID");
+});
+
+test("an API URL with a path is refused, and routes always resolve from the origin", async () => {
+  const good = { boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url: "https://commit-and-sip-leaderboard.azurewebsites.net" };
+  assert.ok(validateLeaderboardApi({ ...good, url: `${good.url}/` }));
+  for (const url of [`${good.url}/board`, `${good.url}/api`, `${good.url}/?x=1`]) {
+    assert.throws(() => validateLeaderboardApi({ ...good, url }), { code: "invalid_config" }, url);
+  }
+  const seen = [];
+  const client = createLeaderboardClient({ ...good, url: `${good.url}/board`,
+    fetchImpl: async target => { seen.push(new URL(target).pathname); return { json: async () => ({}), ok: true, status: 204 }; } });
+  await client.publish({});
+  await client.retract("x");
+  assert.deepEqual(seen, ["/api/entries", "/api/retractions"], "never /board/api/...");
+});
+
+test("a failing lease renewal never becomes an unhandled rejection", async t => {
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory, staleLockMs: 30 });   // renews every 10ms
+  const unhandled = [];
+  const listener = reason => unhandled.push(reason);
+  process.on("unhandledRejection", listener);
+  t.after(() => process.off("unhandledRejection", listener));
+  store.readLease = () => Promise.reject(Object.assign(new Error("share hiccup"), { code: "EIO" }));
+  const stop = store.renewLease("mine");
+  await new Promise(resolve => setTimeout(resolve, 80));
+  await stop();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(unhandled, [], "a transient filesystem error must not be able to stop the service");
 });

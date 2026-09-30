@@ -3,7 +3,8 @@ import { PLACEMENTS } from "./services/coffee-name.mjs";
 import { validateLeaderboardUrl } from "./services/public-url.mjs";
 import { addDrink, leaderboard, removeDrink, seedMenu, standingFor } from "./services/booth-menu.mjs";
 import {
-  confirmedSync, failedSync, initialSync, newPublicationToken, submissionFor, syncView, validateLeaderboardClient, validateReceipt
+  confirmedSync, failedSync, initialSync, newPublicationToken, publicRef, submissionFor, syncView, tokenHashOf,
+  validateLeaderboardClient, validateReceipt
 } from "./services/leaderboard.mjs";
 import {
   archiveMatches, archivePayload, artifactName, emptyLedger, eventSummary, exportPayload, WIPE_CONFIRMATION
@@ -61,11 +62,12 @@ export class BoothEngine {
     if (run.sync?.state === "rejected") return null;
     const url = new URL(this.leaderboardUrl);
     // Once the service confirms the drink, the handle it confirmed is the one
-    // on the board: another booth may have used this phrase first. The drink
-    // ID pins the lookup either way, so a shared phrase can never lead a phone
-    // to somebody else's drink.
+    // on the board: another booth may have used this phrase first. The opaque
+    // publication reference pins the lookup either way, so a shared phrase can
+    // never lead a phone to somebody else's drink, and nothing in the URL
+    // spells out the drink's name.
     url.searchParams.set("handle", run.sync?.state === "confirmed" ? run.sync.receipt.handle : run.handle);
-    if (run.submission?.id) url.searchParams.set("drink", run.submission.id);
+    if (run.sync?.token) url.searchParams.set("ref", publicRef(tokenHashOf(run.sync.token)));
     return url.toString();
   }
 
