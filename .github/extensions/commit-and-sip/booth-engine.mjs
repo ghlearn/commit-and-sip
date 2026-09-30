@@ -202,7 +202,7 @@ export class BoothEngine {
   // booth. A retraction of something not on the board still reserves it, so
   // replaying is safe, and settled outcomes on the removal records are kept.
   async republishAll() {
-    if (!this.leaderboardClient) return { drinks: [], removals: [] };
+    if (!this.leaderboardClient) return { blocked: false, drinks: [], removals: [] };
     const removals = [];
     for (const record of this.removalLog(await this.store.read())) {
       if (!this.leaderboardClient.retract) {
@@ -218,6 +218,12 @@ export class BoothEngine {
       catch { published = "failed"; }
       removals.push({ id: record.id, published });
     }
+    // Takedowns first is a guarantee, not a preference. Until every removed ID
+    // is reserved again, the replacement board would accept that name, so no
+    // drink is sent: the rebuild stops here and says why.
+    if (removals.some(removal => !SETTLED.includes(removal.published))) {
+      return { blocked: true, drinks: [], removals };
+    }
     const data = await this.store.read();
     const runIds = this.houseMenu(data).filter(entry => !entry.example && data.runs[entry.runId])
       .map(entry => entry.runId);
@@ -231,7 +237,7 @@ export class BoothEngine {
         ? { name: run.submission?.name, reason: attempt.reason, runId, state: attempt.state }
         : { name: run.submission?.name, reason: run.sync.reason, runId, state: run.sync.state });
     }
-    return { drinks: results, removals };
+    return { blocked: false, drinks: results, removals };
   }
 
   // --- Staff operations -----------------------------------------------------

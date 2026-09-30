@@ -7,7 +7,7 @@ guardNodeVersion();
 
 // Rebuilds this booth's part of the public leaderboard: replays every
 // takedown, so removed names are reserved again, then sends every drink on the
-// menu.
+// menu. If any takedown is not reserved, no drink is sent.
 //
 // Use it after the service's data is lost or EVENT_ID changes, or when this
 // booth served drinks before it was configured to publish. The booth is the
@@ -20,7 +20,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     if (!engine.leaderboardClient) {
       throw new Error("This booth has no leaderboardApi in booth/local-config.json, so there is nowhere to publish.");
     }
-    const { drinks, removals } = await engine.republishAll();
+    const { blocked, drinks, removals } = await engine.republishAll();
     const unsettled = removals.filter(removal => !["retracted", "absent"].includes(removal.published));
     for (const removal of unsettled) {
       process.stdout.write(`FAILED\t${removal.id}\ttakedown not replayed (${removal.published})\n`);
@@ -34,20 +34,27 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       process.stdout.write("This booth has no staff key, so removed names are NOT reserved. "
         + "To fix it, copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <a staff machine's booth/local-config.json>, then run this again here.\n");
     }
-    // "rejected" drinks were refused for good (the name was taken or taken
-    // down) and are deliberately not resent: they are reported, not failures.
-    const label = { confirmed: "ok    ", rejected: "held  " };
-    for (const result of drinks) {
-      process.stdout.write(`${label[result.state] ?? "FAILED"}\t${result.name}`
-        + `${result.state === "confirmed" ? "" : `\t${result.state === "rejected" ? "refused earlier; not resent" : result.reason ?? ""}`}\n`);
+    if (blocked) {
+      // Sending drinks while a removed name is unreserved would let the
+      // replacement board accept it, so the rebuild stopped before any drink.
+      process.stdout.write("No drinks were sent. Every takedown must be reserved first; fix the failures above and run this again.\n");
+    } else {
+      // "rejected" drinks were refused for good (the name was taken or taken
+      // down) and are deliberately not resent: they are reported, not failures.
+      const label = { confirmed: "ok    ", rejected: "held  " };
+      for (const result of drinks) {
+        process.stdout.write(`${label[result.state] ?? "FAILED"}\t${result.name}`
+          + `${result.state === "confirmed" ? "" : `\t${result.state === "rejected" ? "refused earlier; not resent" : result.reason ?? ""}`}\n`);
+      }
+      const held = drinks.filter(result => result.state === "rejected").length;
+      const failed = drinks.filter(result => !["confirmed", "rejected"].includes(result.state)).length;
+      process.stdout.write(drinks.length
+        ? `${drinks.length - failed - held} of ${drinks.length} drinks are on the public leaderboard`
+          + `${held ? `; ${held} held back because the service refused them earlier` : ""}.\n`
+        : "This booth has no attendee drinks to publish.\n");
+      if (failed) process.exitCode = 1;
     }
-    const held = drinks.filter(result => result.state === "rejected").length;
-    const failed = drinks.filter(result => !["confirmed", "rejected"].includes(result.state)).length;
-    process.stdout.write(drinks.length
-      ? `${drinks.length - failed - held} of ${drinks.length} drinks are on the public leaderboard`
-        + `${held ? `; ${held} held back because the service refused them earlier` : ""}.\n`
-      : "This booth has no attendee drinks to publish.\n");
-    if (failed || unsettled.length) process.exitCode = 1;
+    if (blocked || unsettled.length) process.exitCode = 1;
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;

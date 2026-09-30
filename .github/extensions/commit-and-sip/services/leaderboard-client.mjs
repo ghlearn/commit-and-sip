@@ -72,7 +72,16 @@ export function createLeaderboardClient({ url, boothKey, staffKey = null, timeou
         method: "POST", signal: AbortSignal.timeout(timeoutMs),
       });
       if (response.status === 204) return "retracted";
-      if (response.status === 404) return "absent";
+      // Only the service's own answer settles a takedown as absent. Any other
+      // response, a 404 above all, proves nothing about the entry and is a
+      // failure that is retried.
+      if (response.status === 200) {
+        let body = null;
+        try { body = await response.json(); } catch { /* not the service's answer */ }
+        if (body?.retraction === "absent") return "absent";
+        throw Object.assign(new Error("The leaderboard retraction failed: 200 unexpected_response."),
+          { code: "unexpected_response", status: 200 });
+      }
       throw await failure(response, "retraction");
     };
   }

@@ -114,7 +114,7 @@ No storage account, role assignment, or key vault. Nothing needs `roleAssignment
 | `GET /` | public | Board page. Shows "Updated HH:MM:SS"; if it goes offline it keeps the last board and says it is stale. No mascot art. |
 | `GET /api/board[?handle=&ref=]` | public | Top 20, true total and `asOf`. The attendee's own place (`you`) needs **both** `handle` and the opaque publication `ref`; a handle alone identifies nobody and returns `you: null`. |
 | `POST /api/entries` | booth key | Re-scored and re-moderated with the booth's own modules. Receipt echoes `handle, id, name, score` |
-| `POST /api/retractions` | staff key | Body `{ id }`. Deletes and **reserves the ID** as an HMAC fingerprint. 404 still reserves. The ID never appears in a URL, so web-server logs hold no removed name. |
+| `POST /api/retractions` | staff key | Body `{ id }`. Deletes and **reserves the ID** as an HMAC fingerprint: `204`. An ID not on the board is still reserved: `200 {"retraction":"absent"}`, never a 404, so a missing route cannot pass for a settled takedown. The ID never appears in a URL, so web-server logs hold no removed name. |
 | `GET /healthz` | public | `{ ok, moderation }`. Reads the board, so it returns 503 if `/home` becomes unreadable and App Service sees an unhealthy instance. |
 
 ### Security decisions

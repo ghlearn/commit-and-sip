@@ -123,7 +123,9 @@ test("reading is open, but writing needs the right key for the right action", as
   assert.equal((await del(url, sent.id, null)).status, 401);
   assert.equal((await del(url, sent.id, BOOTH_KEY)).status, 401, "a booth key cannot delete entries");
   assert.equal((await del(url, sent.id)).status, 204);
-  assert.equal((await del(url, sent.id)).status, 404, "a second retraction reports it is already gone");
+  const again = await del(url, sent.id);
+  assert.equal(again.status, 200, "a second retraction reports it is already gone, in the service's own words");
+  assert.deepEqual(await again.json(), { retraction: "absent" });
 });
 
 test("a leaked booth key still cannot post what the booth would not", async t => {
@@ -177,7 +179,7 @@ test("a name taken down at one booth cannot be published from another", async t 
 test("a name caught before it synced is still reserved everywhere", async t => {
   const { url } = await service(t);
   const early = submission("Ducky Dawn Drizzle");
-  assert.equal((await del(url, early.id)).status, 404, "nothing was on the board");
+  assert.deepEqual(await (await del(url, early.id)).json(), { retraction: "absent" }, "nothing was on the board");
   assert.equal((await post(url, submission("Ducky Dawn Drizzle", OTHER_HANDLE))).status, 409,
     "but the name is reserved all the same");
 });
@@ -517,8 +519,13 @@ test("a booth rebuilds its part of a lost board, including drinks served before 
 
   // The service loses everything. The booth still has the authoritative copy.
   const replacement = await service(t);
-  const rebuilt = new BoothEngine({ catalog, rules, store: runs,
+  // Without the staff key the takedown cannot be reserved again, so nothing is sent.
+  const boothOnly = new BoothEngine({ catalog, rules, store: runs,
     leaderboardClient: createLeaderboardClient({ boothKey: BOOTH_KEY, url: replacement.url }) });
+  assert.equal((await boothOnly.republishAll()).blocked, true);
+  assert.equal((await board(replacement.url)).total, 0);
+  const rebuilt = new BoothEngine({ catalog, rules, store: runs,
+    leaderboardClient: createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url: replacement.url }) });
   await rebuilt.republishAll();
   assert.equal((await board(replacement.url)).total, 2);
 });
@@ -698,7 +705,7 @@ test("a takedown queued behind another write still stops a concurrent submission
   const publication = post(url, submission("Mona Moonrise Mocha", OTHER_HANDLE));
   await secondQueued;                        // and the submission is queued behind it
   open();
-  assert.equal((await retraction).status, 404);
+  assert.deepEqual(await (await retraction).json(), { retraction: "absent" });
   const published = await publication;
   assert.equal(published.status, 409, "the submission must see the reservation queued ahead of it");
   assert.equal((await published.json()).error, "unavailable_drink");
@@ -840,7 +847,10 @@ test("rebuilding a lost board restores its reservations before any drink", async
   // A booth without a staff key cannot restore reservations, and says so.
   const boothOnly = new BoothEngine({ catalog, rules, store: runs,
     leaderboardClient: createLeaderboardClient({ boothKey: BOOTH_KEY, url: replacement.url }) });
-  assert.deepEqual((await boothOnly.republishAll()).removals, [{ id: removed.submission.id, published: "not-configured" }]);
+  const unreserved = await boothOnly.republishAll();
+  assert.deepEqual(unreserved.removals, [{ id: removed.submission.id, published: "not-configured" }]);
+  assert.equal(unreserved.blocked, true, "a rebuild that cannot reserve takedowns sends no drink");
+  assert.deepEqual(unreserved.drinks, []);
 });
 
 // --- Review round 2 ----------------------------------------------------------
@@ -2032,4 +2042,70 @@ test("a forced resend on the wire also holds off the wipe", async t => {
   held.open();
   await rebuilding;
   assert.ok((await wiping).archive);
+});
+
+// --- Review round 17 ---------------------------------------------------------
+
+test("only the service's own answer settles a takedown as absent", async t => {
+  const answer = (status, body, type = "application/json") => async () => new Response(
+    typeof body === "string" ? body : JSON.stringify(body), { headers: { "Content-Type": type }, status });
+  const clientFor = fetchImpl => createLeaderboardClient({ boothKey: BOOTH_KEY, fetchImpl, staffKey: STAFF_KEY,
+    url: "https://sip.example.com" });
+  // The build deployed today has no /api/retractions, and its router answers
+  // exactly like this. A stopped app's front end answers 404 in HTML.
+  for (const impostor of [answer(404, { error: "not_found" }), answer(404, "<h1>Not found</h1>", "text/html"),
+    answer(200, "<html>portal</html>", "text/html"), answer(200, { ok: true })]) {
+    await assert.rejects(() => clientFor(impostor).retract("mona-moonrise-mocha"),
+      "an answer that is not the service's does not prove the entry is gone");
+  }
+  const { engine } = await engineWith(t, clientFor(answer(404, { error: "not_found" })));
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.drainPublications();
+  await engine.store.transaction(data => { data.runs["booth-1"].sync = { state: "confirmed" }; });
+  const removal = await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
+  assert.equal(removal.published, "failed", "a missing route is a failure, retried later");
+  assert.equal(removal.owed, true, "and staff are still warned the drink may be public");
+
+  // The real service's answer for an ID it never held is absent, and reserves it.
+  const { url } = await service(t);
+  const real = createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url });
+  assert.equal(await real.retract(served.submission.id), "absent");
+  assert.equal((await post(url, submission("Mona Moonrise Mocha", OTHER_HANDLE))).status, 409);
+});
+
+test("a rebuild sends no drink until every takedown is reserved again", async t => {
+  const lost = await service(t);
+  const replacement = await service(t);
+  const to = url => createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url });
+  let target = to(lost.url);
+  let reachable = true;
+  const client = { publish: sent => target.publish(sent),
+    retract: id => (reachable ? target.retract(id) : Promise.reject(new Error("unreachable"))) };
+  const { engine } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  await engine.dispatch("booth-1", "submit_name", { name: "Ducky Dawn Drizzle" });
+  await engine.dispatch("booth-1", "complete", {});
+  await engine.open({ runId: "booth-2" });
+  const removed = await engine.dispatch("booth-2", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.dispatch("booth-2", "complete", {});
+  await engine.drainPublications();
+  const removal = await engine.removeDrink({ id: removed.submission.id, reason: "test", removedBy: "lead" });
+  assert.ok(["retracted", "absent"].includes(removal.published), "settled on the board that is about to be lost");
+
+  // The board is lost, and the takedown replay cannot reach its replacement.
+  target = to(replacement.url);
+  reachable = false;
+  const blocked = await engine.republishAll();
+  assert.equal(blocked.blocked, true);
+  assert.deepEqual(blocked.removals, [{ id: removed.submission.id, published: "failed" }]);
+  assert.deepEqual(blocked.drinks, [], "no drink is sent while a removed name is unreserved");
+  assert.equal((await board(replacement.url)).total, 0, "and none reached the replacement board");
+
+  reachable = true;
+  const rebuilt = await engine.republishAll();
+  assert.equal(rebuilt.blocked, false);
+  assert.deepEqual(rebuilt.removals, [{ id: removed.submission.id, published: "absent" }]);
+  assert.deepEqual(rebuilt.drinks.map(result => result.state), ["confirmed"]);
+  assert.equal((await post(replacement.url, submission("Mona Moonrise Mocha", OTHER_HANDLE))).status, 409);
 });

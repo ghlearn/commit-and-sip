@@ -189,9 +189,13 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
 
     // Deletes the entry and reserves the name at every booth. What is kept is
     // a keyed fingerprint of the ID and nothing else: the name, the reason and
-    // who removed it stay in the booth's local ledger. 404 still reserves,
-    // because staff often catch a name before it has synced. The ID arrives in
-    // the body of a fixed route, so web-server logs never record it.
+    // who removed it stay in the booth's local ledger. An ID that is not on
+    // the board is still reserved, because staff often catch a name before it
+    // has synced. That answer is a 200 with its own body, not a 404: a 404
+    // also comes from a build without this route or a front end with the app
+    // stopped, and a client that read it as "absent" would settle a takedown
+    // that never happened. The ID arrives in the body of a fixed route, so
+    // web-server logs never record it.
     async "POST /api/retractions"(request) {
       requireKey(request, staffKey);
       const body = await readJson(request);
@@ -199,7 +203,7 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
       if (!shaped || typeof body.id !== "string" || !ID.test(body.id)) {
         throw new HttpError(400, "invalid_id", "Send exactly { id } with a drink ID.");
       }
-      return (await store.retract(body.id, fingerprint(body.id))) ? [204, null] : [404, { error: "not_found" }];
+      return (await store.retract(body.id, fingerprint(body.id))) ? [204, null] : [200, { retraction: "absent" }];
     },
 
     // Reads the board, because that is what every other route needs. If the
