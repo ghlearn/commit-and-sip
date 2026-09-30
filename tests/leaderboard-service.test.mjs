@@ -2298,3 +2298,111 @@ test("a reservation that is not a fingerprint is refused, never loaded as a no-o
   await assert.rejects(() => new MemoryStore().retract("mona-a", "fp-a"), TypeError);
   assert.equal(await store.retract("mona-a", fp("mona-a")), false, "a real fingerprint is accepted");
 });
+
+// --- Review round 21 ---------------------------------------------------------
+
+test("a takedown answered while its drink was still being sent stays owed across a crash", async t => {
+  const onWire = gate();
+  const answers = [];
+  const client = {
+    async publish() { onWire.open(); return new Promise(() => {}); },     // the process dies mid-send
+    async retract() { answers.push("absent"); return "absent"; },
+  };
+  const { engine, store } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  void engine.publish("booth-1");
+  await onWire.opened;
+  const removal = await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
+  assert.equal(removal.published, "in-doubt", "the service said absent, but the send could still land after");
+  assert.equal(removal.owed, true, "so staff are told it may be public");
+
+  // Restart. The dead send's claim is still in the ledger and still live.
+  const restarted = new BoothEngine({ catalog, leaderboardClient: client, rules, store: new RunStore(store.directory) });
+  await restarted.retryRetractions();
+  assert.equal((await restarted.owedPublicTakedowns()).length, 1, "not settled while that send could still land");
+  await assert.rejects(() => restarted.archiveAndWipe({ archivedBy: "lead", confirm: "wipe" }), /./);
+
+  // Once the claim has expired, no send can still land, and a retry settles it.
+  await store.transaction(data => {
+    const sending = data.runs["booth-1"].sync.sending;
+    for (const key of Object.keys(sending)) sending[key] = new Date(Date.now() - 61_000).toISOString();
+  });
+  await restarted.retryRetractions();
+  assert.deepEqual(await restarted.owedPublicTakedowns(), []);
+  assert.equal((await store.read()).removals[0].published, "absent");
+});
+
+test("a retraction that left before a send ended does not settle the takedown", async t => {
+  const publishHeld = gate();
+  const onWire = gate();
+  const firstRetraction = gate();
+  const firstAsked = gate();
+  let calls = 0;
+  const client = {
+    async publish(sent) { onWire.open(); await publishHeld.opened; return { ...sent, entries: 1, rank: 1 }; },
+    async retract() {
+      calls += 1;
+      if (calls === 1) { firstAsked.open(); await firstRetraction.opened; return "absent"; }   // answered before the send landed
+      throw new Error("process stopped");                                                     // the follow-up never lands
+    },
+  };
+  const { engine, store } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const publishing = engine.publish("booth-1");
+  await onWire.opened;
+  const removing = engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
+  await firstAsked.opened;
+  publishHeld.open();                  // the send lands and ends; its follow-up retraction fails
+  await publishing;
+  firstRetraction.open();              // the first answer arrives last
+  const removal = await removing;
+  assert.notEqual(removal.published, "absent", "an answer from before the send landed says nothing about after");
+  assert.equal(removal.owed, true);
+  assert.equal((await store.read()).runs["booth-1"].sync.sendsEnded, 1);
+});
+
+test("a saved attendee link survives a rebuild that reverses who holds the plain handle", async t => {
+  const { canonicalHandle } = await import("../.github/extensions/commit-and-sip/services/leaderboard.mjs");
+  const { url } = await service(t);
+  // Originally A held HANDLE and B was given its canonical form. The rebuild
+  // replays B's booth first, so now B holds the plain handle.
+  const b = submission("Ducky Dawn Drizzle", HANDLE);
+  const a = submission("Mona Moonrise Mocha", HANDLE);
+  assert.equal((await post(url, b)).status, 201);
+  assert.equal((await post(url, a)).status, 201);
+  const saved = new URLSearchParams({ handle: canonicalHandle(HANDLE, b.id), ref: publicRef(tokenHashOf(b.token)) });
+  assert.equal((await board(url, `?${saved}`)).you?.name, "Ducky Dawn Drizzle");
+  // The reference still decides whose row it is: A's reference finds A, never B,
+  // and a reference nobody holds finds nobody.
+  const other = new URLSearchParams({ handle: canonicalHandle(HANDLE, b.id), ref: publicRef(tokenHashOf(a.token)) });
+  assert.equal((await board(url, `?${other}`)).you?.name, "Mona Moonrise Mocha");
+  const unknown = new URLSearchParams({ handle: canonicalHandle(HANDLE, b.id), ref: publicRef(fp("nobody")) });
+  assert.equal((await board(url, `?${unknown}`)).you, null);
+});
+
+test("a send that outlives its claim still reopens a takedown that settled meanwhile", async t => {
+  const publishHeld = gate();
+  const onWire = gate();
+  let calls = 0;
+  const client = {
+    async publish(sent) { onWire.open(); await publishHeld.opened; return { ...sent, entries: 1, rank: 1 }; },
+    async retract() { calls += 1; if (calls === 1) return "absent"; throw new Error("process stopped"); },
+  };
+  const { engine, store } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const publishing = engine.publish("booth-1");
+  await onWire.opened;
+  // A send slow enough that its claim has expired.
+  await store.transaction(data => {
+    const sending = data.runs["booth-1"].sync.sending;
+    for (const key of Object.keys(sending)) sending[key] = new Date(Date.now() - 61_000).toISOString();
+  });
+  assert.equal((await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" })).published, "absent");
+  publishHeld.open();                  // it lands after all, and its follow-up retraction fails
+  await publishing;
+  assert.notEqual((await store.read()).removals[0].published, "absent", "the landing reopened the takedown");
+  assert.equal((await engine.owedPublicTakedowns()).length, 1);
+});

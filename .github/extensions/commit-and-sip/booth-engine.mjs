@@ -127,7 +127,13 @@ export class BoothEngine {
   // removal record: "retracted", "absent" (it was never published there), or
   // "failed". "not-configured" means this booth has no staff key for the
   // service, which is a real gap in a takedown and is reported as one.
+  // "in-doubt" means the service answered, but a send of the same drink may
+  // have landed after that answer, so the takedown is retried rather than
+  // settled.
   async retract(id) {
+    // What had been sent before this retraction left. A send that ends after
+    // this point may have reached the service after the retraction did.
+    const sendsEndedBefore = this.sendsEnded(await this.store.read(), id);
     let published;
     if (!this.leaderboardClient?.retract) {
       published = "not-configured";
@@ -142,9 +148,21 @@ export class BoothEngine {
     return this.store.transaction(data => {
       const record = this.removalLog(data).findLast(item => item.id === id);
       if (!record) return published;
+      // Settled only if no send of this drink can still land after it: none is
+      // claimed now (a claim left by a crash stops counting once it expires),
+      // and none ended while this retraction was on the wire.
+      const sync = data.runs[record.runId]?.sync;
+      const inDoubt = liveClaims(sync) > 0 || this.sendsEnded(data, id) !== sendsEndedBefore;
+      if (SETTLED.includes(published) && inDoubt) published = "in-doubt";
       if (!SETTLED.includes(record.published) || SETTLED.includes(published)) record.published = published;
       return record.published;
     });
+  }
+
+  // How many sends of this drink have finished, across its runs.
+  sendsEnded(data, id) {
+    return Object.values(data.runs).filter(run => run.submission?.id === id)
+      .reduce((total, run) => total + (run.sync?.sendsEnded ?? 0), 0);
   }
 
   // Retries every takedown that has not reached the public board. Only
@@ -532,6 +550,14 @@ export class BoothEngine {
       const { [attempt]: _done, ...others } = current.sync.sending ?? {};
       if (Object.keys(others).length) current.sync.sending = others;
       else delete current.sync.sending;
+      current.sync.sendsEnded = (current.sync.sendsEnded ?? 0) + 1;
+      // A send of a removed drink may just have put it back on the board. Its
+      // takedown is owed again until the retraction below lands, so a stop
+      // before then leaves it to be retried, not recorded as done.
+      if (current.removed) {
+        const record = this.removalLog(stored).findLast(item => item.id === entry.id);
+        if (record && SETTLED.includes(record.published)) record.published = "in-doubt";
+      }
       return Boolean(current.removed);
     });
     // Staff can take a drink down while its publish is still in flight. The

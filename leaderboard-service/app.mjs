@@ -136,13 +136,16 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
         // With a publication reference the lookup is exact. A QR scanned
         // before the booth's publish was confirmed carries the handle the
         // booth issued, while the drink may be stored under its canonical
-        // form, so either matches. The reference is opaque: the drink ID
+        // form, so either matches. A rebuild can also reverse which of two
+        // colliding publications holds the plain handle, so the relation is
+        // accepted both ways. The reference is opaque: the drink ID
         // would put the name in the logs.
         // A handle alone identifies nobody: another booth may have issued it.
         const ref = url.searchParams.get("ref");
         const own = ref === null ? undefined
           : entries.find(entry => entry.tokenHash && publicRef(entry.tokenHash) === ref
-            && (entry.handle === handle || entry.handle === canonicalHandle(handle, entry.id)));
+            && [handle, canonicalHandle(handle, entry.id)].some(form => form === entry.handle
+              || form === canonicalHandle(entry.handle, entry.id)));
         const mine = HANDLE.test(handle) && own ? board.find(row => row.handle === own.handle && row.name === own.name) : undefined;
         body.you = mine ? publicRow(mine) : null;
       }
