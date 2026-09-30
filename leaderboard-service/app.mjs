@@ -181,9 +181,10 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
         const same = existing.tokenHash === tokenHash && handles.includes(existing.handle)
           && existing.name === submission.name && existing.score === submission.score;
         if (!same) throw new HttpError(409, "duplicate_drink", "Another barista already published a drink with this name.");
-        return [200, receiptFor(existing, await store.list())];
+        return [200, receiptFor(existing, admitted.entries)];
       }
-      return [201, receiptFor(admitted.entry, await store.list())];
+      // Ranked from the board as it stood at admission, not from a later read.
+      return [201, receiptFor(admitted.entry, admitted.entries)];
     },
 
     // Deletes the entry and reserves the name at every booth. What is kept is

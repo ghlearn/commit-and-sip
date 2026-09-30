@@ -73,16 +73,20 @@ export class MemoryStore {
   // Returns the stored entry when the ID already exists, for the caller to
   // judge as a retry or a clash; otherwise stores it under the first handle in
   // `handles` that no other entry uses.
+  // `entries` is the whole board as it stood at this admission, taken inside
+  // the same step. A receipt ranked from a later read could find the entry
+  // already retracted by a takedown queued behind this one.
   async admit(entry, { fingerprint, handles }) {
     if (this.reserved.has(fingerprint)) throw new ReservedError();
+    const board = () => [...this.entries.values()].map(item => ({ ...item }));
     const existing = this.entries.get(entry.id);
-    if (existing) return { created: false, entry: { ...existing } };
+    if (existing) return { created: false, entries: board(), entry: { ...existing } };
     const used = new Set([...this.entries.values()].map(item => item.handle));
     const handle = handles.find(candidate => !used.has(candidate));
     if (!handle) throw new HandleTakenError();
     const stored = { ...entry, handle };
     this.entries.set(entry.id, stored);
-    return { created: true, entry: { ...stored } };
+    return { created: true, entries: board(), entry: { ...stored } };
   }
 
   // Reserves even when nothing was published: staff often catch a name before

@@ -1249,3 +1249,37 @@ test("renewing a lease never refreshes a lease someone else now holds", async t 
   await new Promise(resolve => setTimeout(resolve, 120));
   assert.ok(Date.now() - (await stat(lock)).mtimeMs < 1_000, "its own lease is renewed");
 });
+
+// --- Review round 6 ----------------------------------------------------------
+
+test("a takedown queued behind an admission cannot turn its receipt into a 500", async t => {
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory });
+  // Hold the admission at the disk write, and queue a retraction behind it.
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  let atDisk;
+  const reachedDisk = new Promise(resolve => { atDisk = resolve; });
+  const persist = store.persist.bind(store);
+  let first = true;
+  store.persist = async (text, owner) => {
+    if (first) { first = false; atDisk(); await held; }
+    return persist(text, owner);
+  };
+  const app = createApp({ boothKey: BOOTH_KEY, reservationKey: RESERVATION_KEY, rules, staffKey: STAFF_KEY, store, words });
+  const server = createServer(app).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const url = `http://127.0.0.1:${server.address().port}`;
+
+  const sent = submission("Mona Moonrise Mocha");
+  const publication = post(url, sent);
+  await reachedDisk;
+  const retraction = del(url, sent.id);          // queued behind the admission
+  release();
+  const response = await publication;
+  assert.equal(response.status, 201, "the admission succeeded, so its receipt must not fail");
+  assert.equal(validateReceipt(await response.json(), sent).rank, 1, "ranked from the board as it stood at admission");
+  assert.equal((await retraction).status, 204);
+  assert.equal((await board(url)).total, 0, "and the takedown still happened");
+});
