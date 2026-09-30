@@ -1917,7 +1917,8 @@ test("the attendee's link is personal from the first screen, before any send", a
 
 test("the served screen keeps polling while its drink is being confirmed", async () => {
   const script = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/booth.js", import.meta.url), "utf8");
-  assert.match(script, /confirming = state\.phase === "served" && state\.sync\?\.state === "pending"/);
+  assert.match(script, /confirming = state\.phase === "served" && \["pending", "failed"\]\.includes\(state\.sync\?\.state\)/,
+    "a failed publish is still retryable, so the screen keeps checking; confirmed and rejected are final");
   assert.match(script, /phase === "idle" \|\| confirming\)\) void load\(false\)/);
 });
 
@@ -1935,4 +1936,100 @@ test("the template accepts exactly the event IDs the service can start with", as
   }
   const committed = JSON.parse(await readFile(new URL("../infra/main.parameters.json", import.meta.url), "utf8")).parameters.eventId.value;
   assert.match(committed, /^[a-z0-9-]{1,63}$/);
+});
+
+
+// --- Review round 16 ---------------------------------------------------------
+
+test("the event cannot be wiped while a publish is on the wire", async t => {
+  const { WIPE_CONFIRMATION } = await import("../.github/extensions/commit-and-sip/services/event-archive.mjs");
+  // The reviewed sequence: hold the publish, remove the drink, complete, wipe,
+  // then let the publish land.
+  const held = gate();
+  const retracted = [];
+  const client = {
+    async publish(sent) { await held.opened; return { ...sent, entries: 1, rank: 1 }; },
+    async retract(id) { retracted.push(id); return retracted.length === 1 ? "absent" : "retracted"; },
+  };
+  const { engine, store } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const publishing = engine.publish("booth-1");
+  while (!engine.inFlight?.size) await new Promise(resolve => setImmediate(resolve));
+  await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
+  await engine.dispatch("booth-1", "complete", {});
+  const wiping = engine.archiveAndWipe({ archivedBy: "lead", confirm: WIPE_CONFIRMATION });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.ok((await store.read()).runs["booth-1"], "the wipe is waiting for the publish, not racing it");
+  held.open();
+  await publishing;
+  assert.ok((await wiping).archive);
+  assert.deepEqual(retracted, [served.submission.id, served.submission.id],
+    "the late landing was noticed while its run still existed, and taken down again");
+});
+
+test("a wipe refuses if a publish starts after the drain", async t => {
+  const { WIPE_CONFIRMATION } = await import("../.github/extensions/commit-and-sip/services/event-archive.mjs");
+  const { engine } = await engineWith(t, null);
+  await engine.open({ runId: "booth-1" });
+  await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.dispatch("booth-1", "complete", {});
+  const never = new Promise(() => {});
+  engine.drainPublications = async () => { engine.inFlight = new Set([never]); };   // one starts just after
+  await assert.rejects(() => engine.archiveAndWipe({ archivedBy: "lead", confirm: WIPE_CONFIRMATION }),
+    { code: "publications_in_flight" });
+});
+
+test("a publish whose response was lost is still followed by a second retraction", async t => {
+  const held = gate();
+  const retracted = [];
+  const client = {
+    // The service stores the drink, but the answer never arrives.
+    async publish() { await held.opened; throw new Error("socket hang up"); },
+    async retract(id) { retracted.push(id); return retracted.length === 1 ? "absent" : "retracted"; },
+  };
+  const { engine, store } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const publishing = engine.publish("booth-1");
+  while (!engine.inFlight?.size) await new Promise(resolve => setImmediate(resolve));
+  await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
+  held.open();
+  await publishing;
+  assert.equal(retracted.length, 2, "a failed response is not proof the drink did not land");
+  assert.equal((await store.read()).removals[0].published, "retracted");
+});
+
+test("by default a write waits long enough to recover a lock a crashed creator left half-written", async t => {
+  const directory = await tempDirectory(t);
+  await writeFile(join(directory, "default.json.lock"), '{"at":');
+  const store = await FileStore.open({ directory, staleLockMs: 150 });   // lockTimeoutMs left to its default
+  assert.ok(store.lockTimeoutMs > store.staleLockMs, "a waiter outlasts the stale interval");
+  await store.create(entry("mona-recovered"));
+  assert.deepEqual((await store.list()).map(item => item.id), ["mona-recovered"]);
+  const production = await FileStore.open({ directory: await tempDirectory(t) });
+  assert.ok(production.lockTimeoutMs > production.staleLockMs, "and so do the production defaults");
+});
+
+test("a forced resend on the wire also holds off the wipe", async t => {
+  const { WIPE_CONFIRMATION } = await import("../.github/extensions/commit-and-sip/services/event-archive.mjs");
+  const held = gate();
+  let calls = 0;
+  const client = {
+    async publish(sent) { calls += 1; if (calls > 1) await held.opened; return { ...sent, entries: 1, rank: 1 }; },
+    async retract() { return "retracted"; },
+  };
+  const { engine, store } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.publish("booth-1");
+  await engine.dispatch("booth-1", "complete", {});
+  const rebuilding = engine.republishAll();                 // a rebuild's forced resend, held on the wire
+  while (calls < 2) await new Promise(resolve => setImmediate(resolve));
+  const wiping = engine.archiveAndWipe({ archivedBy: "lead", confirm: WIPE_CONFIRMATION });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.ok((await store.read()).runs["booth-1"], "the wipe waits for the forced resend too");
+  held.open();
+  await rebuilding;
+  assert.ok((await wiping).archive);
 });

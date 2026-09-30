@@ -302,9 +302,15 @@ export class BoothEngine {
       `Type ${WIPE_CONFIRMATION} to confirm. Nothing was changed.`, 400);
     // A takedown that has not reached the public board is recorded only in
     // this ledger. Wiping it would leave the drink public with nothing left to
-    // retry it from, so give every owed takedown one more try first...
+    // retry it from. A publish still on the wire can also land after the wipe
+    // with no run left to notice it was removed. So let publications finish,
+    // give every owed takedown one more try...
+    await this.drainPublications();
     await this.retryRetractions().catch(() => {});
     return this.store.transaction(async data => {
+      // ...and refuse if a publish started in the meantime.
+      requireValue(!this.inFlight?.size, "publications_in_flight",
+        "A drink is still being sent to the public leaderboard. Try again in a few seconds. Nothing was changed.", 409);
       // ...and refuse to wipe while any is still owed.
       const owed = this.removalLog(data).filter(record => !SETTLED.includes(record.published) && mayBePublic(data, record));
       requireValue(owed.length === 0, "takedowns_owed",
@@ -445,12 +451,25 @@ export class BoothEngine {
   // both send it. A forced resend (`again`) is never merged, because a
   // rebuild must report its own attempt.
   publish(runId, options = {}) {
-    if (options.again) return this.publishOnce(runId, options);
+    if (options.again) return this.tracked(this.publishOnce(runId, options));
     this.publishing ??= new Map();
     if (!this.publishing.has(runId)) {
-      this.publishing.set(runId, this.publishOnce(runId, options).finally(() => this.publishing.delete(runId)));
+      this.publishing.set(runId, this.tracked(this.publishOnce(runId, options)).finally(() => this.publishing.delete(runId)));
     }
     return this.publishing.get(runId);
+  }
+
+  // Every publish attempt still on the wire. The event cannot be wiped while
+  // one is: its outcome, and any retraction it turns out to need, would have
+  // no run or removal record left to land in.
+  tracked(attempt) {
+    this.inFlight ??= new Set();
+    this.inFlight.add(attempt);
+    return attempt.finally(() => this.inFlight.delete(attempt));
+  }
+
+  async drainPublications() {
+    while (this.inFlight?.size) await Promise.allSettled([...this.inFlight]);
   }
 
   async publishOnce(runId, { again = false } = {}) {
@@ -493,8 +512,11 @@ export class BoothEngine {
     // Staff can take a drink down while its publish is still in flight. The
     // retraction may then reach the service before the submission does, and
     // the submission would put the drink straight back on the public board.
-    // The receipt is proof it landed, so take it down again.
-    if (outcome.ok && removedMeanwhile) await this.retract(entry.id);
+    // A failed response does not prove the submission did not land (the
+    // service may have stored it and the answer been lost), so take it down
+    // again whatever this attempt reported. A retraction of something absent
+    // is harmless, and still reserves the name.
+    if (removedMeanwhile) await this.retract(entry.id);
     // What this attempt did, separately from what is recorded. A forced
     // resend that fails leaves an earlier "confirmed" in place, which is
     // right for the record and wrong for a report on the resend.

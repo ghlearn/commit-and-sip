@@ -6,7 +6,8 @@
   let busy = false;
   let phase = null;
   // The drink is published in the background, so the served screen keeps
-  // checking until the event leaderboard has answered.
+  // checking while the outcome is still open: pending, or failed and due for
+  // a retry (the panel retries on its poll). Confirmed and rejected are final.
   let confirming = false;
   let populated = false;
 
@@ -182,7 +183,7 @@
 
   function render(state) {
     phase = state.phase === "complete" ? "served" : state.phase;
-    confirming = state.phase === "served" && state.sync?.state === "pending" && !state.removed;
+    confirming = state.phase === "served" && ["pending", "failed"].includes(state.sync?.state) && !state.removed;
     for (const view of VIEWS) $(`view-${view}`).hidden = view !== phase;
     fillMenu(state);
     if (phase === "naming") fillNaming(state);

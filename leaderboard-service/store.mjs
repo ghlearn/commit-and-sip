@@ -147,7 +147,12 @@ export class ConcurrentWriteError extends Error {
 export class FileStore extends MemoryStore {
   // The event ID names the file, so it is held to a charset that cannot walk
   // out of the data directory.
-  static async open({ directory, event = "default", lockTimeoutMs = 10_000, staleLockMs = 15_000 }) {
+  // A waiter must be able to outlast the stale interval, or a lease left
+  // half-written by a crashed creator could never be taken over: every request
+  // would give up first, and the next would restart the watch. So by default a
+  // write waits the stale interval plus a margin. Tests pass shorter values
+  // on purpose, to observe a wait that has not yet run out.
+  static async open({ directory, event = "default", staleLockMs = 15_000, lockTimeoutMs = staleLockMs + 5_000 }) {
     if (!(staleLockMs >= 30)) throw new Error("staleLockMs must be at least 30ms.");
     if (!EVENT.test(event)) throw new Error("EVENT_ID must be 1-63 lowercase letters, digits, or hyphens.");
     await mkdir(directory, { recursive: true });
