@@ -1312,11 +1312,13 @@ test("taking over a stale lease never removes the live lease that replaced it", 
   await assert.rejects(() => readFile(lock, "utf8"), { code: "ENOENT" });
 });
 
-test("a half-written lease is treated as live, never as stale", async t => {
+test("a half-written lease is waited on while its creator may still be writing", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory, lockTimeoutMs: 120, staleLockMs: 60 });
-  await writeFile(join(directory, "default.json.lock"), '{"at":');
+  const store = await FileStore.open({ directory, lockTimeoutMs: 120, staleLockMs: 5_000 });
+  const lease = '{"at":';
+  await writeFile(join(directory, "default.json.lock"), lease);
   await assert.rejects(() => store.create(entry("mona-x")), { code: "board_locked" });
+  assert.equal(await readFile(join(directory, "default.json.lock"), "utf8"), lease, "not taken over yet");
 });
 
 
@@ -1778,4 +1780,85 @@ test("the idle poll starts at most one retry sweep per interval", async t => {
   panel.sweepInBackground(1_000_000 + 29_999);
   panel.sweepInBackground(1_000_000 + 30_000);
   assert.equal(sweeps, 2, "the network is not hit on every five-second poll");
+});
+
+
+// --- Review round 14 ---------------------------------------------------------
+
+test("a lease left half-written by a dead creator is taken over, not waited on forever", async t => {
+  const directory = await tempDirectory(t);
+  const lock = join(directory, "default.json.lock");
+  for (const partial of ["", '{"at":17', "{"]) {
+    await writeFile(lock, partial);
+    const store = await FileStore.open({ directory, lockTimeoutMs: 2_000, staleLockMs: 80 });
+    await store.create(entry(`mona-${partial.length}`));
+    await assert.rejects(() => readFile(lock, "utf8"), { code: "ENOENT" }, `${JSON.stringify(partial)} was cleared`);
+  }
+  assert.equal((await (await FileStore.open({ directory })).list()).length, 3, "and the board works again");
+});
+
+test("a half-written lease that its creator then completes is never taken over", async t => {
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory, staleLockMs: 60 });
+  const partial = '{"at":';
+  const complete = JSON.stringify({ at: Date.now(), owner: "creator" });
+  store.malformed = { lastObserved: Date.now(), since: Date.now() - 60_000, text: partial };   // watched long enough
+  await writeFile(join(directory, "default.json.lock"), complete);                            // but it completed
+  await store.takeOver({ at: Infinity, owner: null, text: partial });
+  assert.equal(await readFile(join(directory, "default.json.lock"), "utf8"), complete, "the exact-text swap keeps it");
+});
+
+test("the watch on a malformed lease restarts after any gap, so a new creator is not mistaken for a dead one", async t => {
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory, staleLockMs: 60 });
+  const lease = { at: Infinity, owner: null, text: "" };
+  const t0 = 1_000_000;
+  assert.equal(await store.seenAlive(lease, t0), t0);
+  assert.equal(await store.seenAlive(lease, t0 + 40), t0, "watched continuously: the clock runs");
+  assert.equal(await store.seenAlive(lease, t0 + 40 + 1_000), t0 + 1_040, "after a gap the same text is a new sighting");
+  assert.equal(await store.seenAlive({ ...lease, text: "{" }, t0 + 1_050), t0 + 1_050, "and different text restarts it too");
+});
+
+test("a rebuild whose resend fails is reported as failed, even for a drink confirmed before", async t => {
+  let online = true;
+  const client = { async publish(sent) { if (!online) throw new Error("replacement unreachable"); return { ...sent, entries: 1, rank: 1 }; } };
+  const { engine, store } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.publish("booth-1");
+  assert.equal((await store.read()).runs["booth-1"].sync.state, "confirmed");
+  online = false;
+  const { drinks } = await engine.republishAll();
+  assert.deepEqual(drinks.map(result => result.state), ["failed"], "nothing reached the replacement service");
+  assert.match(drinks[0].reason, /replacement unreachable/);
+  assert.equal((await store.read()).runs["booth-1"].sync.state, "confirmed", "the record keeps the earlier confirmation");
+});
+
+test("the dashboard flags an interrupted removal, and never a drink that was not public", async t => {
+  const boothOnly = { async publish(sent) { return { ...sent, entries: 1, rank: 1 }; } };
+  const { engine, store } = await engineWith(t, boothOnly);
+  await engine.open({ runId: "booth-1" });
+  const published = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.publish("booth-1");
+  await engine.dispatch("booth-1", "complete", {});
+  await engine.open({ runId: "booth-2" });
+  const unpublished = await engine.dispatch("booth-2", "submit_name", { name: "Ducky Dawn Drizzle" });
+  await store.transaction(data => { data.runs["booth-2"].sync = { attempts: 0, state: "disabled" }; });
+  await engine.dispatch("booth-2", "complete", {});
+  // Both removals interrupted before any outcome was recorded.
+  await store.transaction(data => {
+    for (const drink of [published, unpublished]) {
+      data.menu.splice(data.menu.findIndex(item => item.id === drink.submission.id), 1);
+      data.removals.push({ id: drink.submission.id, name: drink.submission.name, reason: "test",
+        removedAt: "2026-01-01T00:00:00Z", removedBy: "lead", runId: drink.runId });
+    }
+  });
+  const { removals } = await engine.adminOverview();
+  assert.deepEqual(removals.map(record => [record.id, record.published, record.owed]), [
+    [published.submission.id, undefined, true],
+    [unpublished.submission.id, undefined, false],
+  ]);
+  const renderer = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/admin.js", import.meta.url), "utf8");
+  assert.match(renderer, /return PUBLIC_BOARD\[published\] \?\? PUBLIC_BOARD\.unrecorded;/, "a missing outcome is shown as unresolved");
+  assert.match(renderer, /if \(!owed\) return "";/, "and a drink that was never public raises no alarm");
 });

@@ -180,14 +180,25 @@
     failed: "is NOT yet off the public leaderboard. Refresh to retry",
     "not-configured": "is NOT off the public leaderboard: this booth has no staff key. To finish it, copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <a staff machine's booth/local-config.json>, then retry with Refresh",
     retracted: "was taken off the public leaderboard",
+    unrecorded: "may still be on the public leaderboard: the removal stopped before it reached the board. Refresh to retry",
   };
+
+  // Settled outcomes are always shown. An unsettled one is a warning only when
+  // the drink may be public (`owed`, decided by the booth); a drink that was
+  // never published owes nothing and gets no false alarm. A removal whose
+  // outcome was never recorded is unresolved, not fine.
+  function boardStatus({ owed, published }) {
+    if (published === "retracted" || published === "absent") return PUBLIC_BOARD[published];
+    if (!owed) return "";
+    return PUBLIC_BOARD[published] ?? PUBLIC_BOARD.unrecorded;
+  }
 
   function removals(state) {
     const list = $("admin-removals");
     list.replaceChildren();
     $("admin-removals-empty").hidden = state.removals.length > 0;
     for (const record of state.removals) {
-      const board = PUBLIC_BOARD[record.published];
+      const board = boardStatus(record);
       line(list, `${record.name} - removed by ${record.removedBy} on ${new Date(record.removedAt).toLocaleString()} - ${record.reason}${board ? ` - ${board}` : ""}`);
     }
   }
@@ -206,7 +217,7 @@
     if (state.notice.kind === "closed") box.textContent = `Station ${state.notice.handle} was closed.`;
     else if (state.notice.kind === "exported") box.textContent = `Results exported to ${state.notice.path}`;
     else if (state.notice.kind === "removed") {
-      const board = PUBLIC_BOARD[state.notice.published];
+      const board = boardStatus(state.notice);
       box.textContent = `${state.notice.name} was removed from the house menu${board ? ` and ${board}` : ""}.`;
     }
     else if (state.notice.kind === "wiped") {

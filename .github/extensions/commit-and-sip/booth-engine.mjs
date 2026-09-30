@@ -223,9 +223,13 @@ export class BoothEngine {
       .map(entry => entry.runId);
     const results = [];
     for (const runId of runIds) {
-      await this.publish(runId, { again: true });
+      const attempt = await this.publish(runId, { again: true });
       const run = (await this.store.read()).runs[runId];
-      results.push({ runId, name: run.submission?.name, state: run.sync.state, reason: run.sync.reason });
+      // Reported from the attempt, not the record: a rebuild that did not
+      // land must fail even when the drink was confirmed on the lost board.
+      results.push(attempt?.sent
+        ? { name: run.submission?.name, reason: attempt.reason, runId, state: attempt.state }
+        : { name: run.submission?.name, reason: run.sync.reason, runId, state: run.sync.state });
     }
     return { drinks: results, removals };
   }
@@ -247,7 +251,11 @@ export class BoothEngine {
       houseMenu: menu.map(({ example, handle, id, name, score }) => ({ example, handle, id, name, score })),
       leaderboard: leaderboard(menu),
       leaderboardUrl: this.leaderboardUrl,
-      removals: this.removalLog(data),
+      // `owed`: not settled, and the drink may be public. The dashboard must
+      // warn about these, including one whose outcome was never recorded.
+      removals: this.removalLog(data).map(record => ({
+        ...record, owed: !SETTLED.includes(record.published) && mayBePublic(data, record),
+      })),
       summary: eventSummary(data),
     };
   }
@@ -474,6 +482,13 @@ export class BoothEngine {
     // the submission would put the drink straight back on the public board.
     // The receipt is proof it landed, so take it down again.
     if (outcome.ok && removedMeanwhile) await this.retract(entry.id);
+    // What this attempt did, separately from what is recorded. A forced
+    // resend that fails leaves an earlier "confirmed" in place, which is
+    // right for the record and wrong for a report on the resend.
+    return outcome.ok
+      ? { sent: true, state: "confirmed" }
+      : { reason: failedSync({ attempts: 0 }, outcome.error).reason, sent: true,
+        state: failedSync({ attempts: 0 }, outcome.error).state };
   }
 
   async dispatch(runId, action, input = {}) {

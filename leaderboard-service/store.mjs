@@ -99,6 +99,9 @@ export class MemoryStore {
 
 const EVENT = /^[a-z0-9-]{1,63}$/;
 const STORED_ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
+// Longest pause between two looks at a malformed lease that still counts as
+// watching it continuously. Waiters poll every 20-50ms.
+const MALFORMED_WATCH_GAP_MS = 250;
 
 export class LockLostError extends Error {
   constructor() {
@@ -211,7 +214,8 @@ export class FileStore extends MemoryStore {
       const { at, owner } = JSON.parse(text);
       return typeof owner === "string" && Number.isFinite(at) ? { at, owner, text } : { at: Infinity, owner: null, text };
     } catch {
-      // Unparseable: a write in progress, most likely. Treat it as live.
+      // Unparseable: a write in progress, or a creator that died mid-write.
+      // seenAlive decides which, by watching it.
       return { at: Infinity, owner: null, text };
     }
   }
@@ -228,8 +232,9 @@ export class FileStore extends MemoryStore {
         if (error.code !== "EEXIST") throw error;
       }
       const held = await this.readLease();
-      if (held && Date.now() - await this.lastSeen(held) > this.staleLockMs) {
+      if (held && Date.now() - await this.seenAlive(held) > this.staleLockMs) {
         await this.takeOver(held);
+        this.malformed = null;
         continue;
       }
       if (held && Date.now() > deadline) {
@@ -292,9 +297,31 @@ export class FileStore extends MemoryStore {
     }
   }
 
+  // How recently the lease's holder was known to be alive.
+  //
+  // A malformed lease carries no time: its creator was stopped between the
+  // exclusive create and finishing the write. Treating it as live forever
+  // would block the board for good. So this instance times its own watch of
+  // that exact text, and only while it watches continuously: a gap longer
+  // than a few polls means it may have missed the lease changing and coming
+  // back identical (an empty file from a new creator), so the clock restarts.
+  // A creator mid-write finishes in milliseconds; one that stays malformed
+  // for the whole stale period is dead. Takeover still compares the exact
+  // text, so a lease that has since been completed is never removed.
+  async seenAlive(lease, now = Date.now()) {
+    if (lease.owner !== null) {
+      this.malformed = null;
+      return this.lastSeen(lease);
+    }
+    const watching = this.malformed?.text === lease.text && now - this.malformed.lastObserved <= MALFORMED_WATCH_GAP_MS;
+    this.malformed = watching ? { ...this.malformed, lastObserved: now } : { lastObserved: now, since: now, text: lease.text };
+    return this.malformed.since;
+  }
+
   // Removes the lease judged stale, and only that one, then its heartbeat.
   async takeOver(lease) {
-    if (await this.swapLease(lease.text)) await rm(this.beatFile(lease.owner), { force: true }).catch(() => {});
+    const removed = await this.swapLease(lease.text);
+    if (removed && lease.owner !== null) await rm(this.beatFile(lease.owner), { force: true }).catch(() => {});
   }
 
   // One heartbeat. Never throws: a missed beat is simply not a renewal, and

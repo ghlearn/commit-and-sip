@@ -35,7 +35,7 @@ export class AdminPanel {
       const record = await this.engine.removeDrink({
         id: input.id, reason: input.reason, removedBy: input.removedBy,
       });
-      return { ...(await this.get()), notice: { kind: "removed", name: record.name, published: record.published } };
+      return { ...(await this.get()), notice: { kind: "removed", name: record.name, owed: record.owed, published: record.published } };
     }
     if (action === "close_station") {
       exactInput(input, ["runId", "closedBy"]);
