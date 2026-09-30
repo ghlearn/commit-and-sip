@@ -220,7 +220,15 @@ export class FileStore extends MemoryStore {
     const unreadable = reason => new Error(`${this.file} is not a readable board (${reason}). Move it aside to start empty, or restore it.`);
     let saved;
     try { saved = JSON.parse(text); } catch { saved = null; }
-    if (!Array.isArray(saved?.entries) || !Array.isArray(saved.reserved ?? [])) throw unreadable("wrong shape");
+    // A field written before it existed may be missing. One that is present
+    // must be well formed: `"reserved": null` read as "none" would release
+    // every takedown and drop them from the next write.
+    if (!Array.isArray(saved?.entries) || (saved.reserved !== undefined && !Array.isArray(saved.reserved))) {
+      throw unreadable("wrong shape");
+    }
+    if (saved.version !== undefined && (!Number.isSafeInteger(saved.version) || saved.version < 0)) {
+      throw unreadable("a malformed version");
+    }
     // Every row must be loadable as itself. Two rows with one ID would load
     // "successfully" as one, and the next write would drop the other for good.
     const entries = new Map();
@@ -238,14 +246,14 @@ export class FileStore extends MemoryStore {
       throw unreadable("malformed reservations");
     }
     // Likewise a mangled key binding must not read as "unbound".
-    if (saved.keyId != null && (typeof saved.keyId !== "string" || !KEY_ID.test(saved.keyId))) {
+    if (saved.keyId !== undefined && (typeof saved.keyId !== "string" || !KEY_ID.test(saved.keyId))) {
       throw unreadable("a malformed reservation key ID");
     }
     return {
       entries,
       keyId: saved.keyId ?? null,
       reserved,
-      version: Number.isSafeInteger(saved.version) ? saved.version : 0,
+      version: saved.version ?? 0,
     };
   }
 

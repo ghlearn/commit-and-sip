@@ -1366,7 +1366,7 @@ test("promoting a booth to staff copies the deployed keys and never mints a new 
   assert.deepEqual(promoted.copied, ["staffKey"]);
   assert.equal(promoted.next.leaderboardApi.staffKey, deployed.staffKey);
   await assert.rejects(() => configure({ configFile: join(directory, "other.json"), from: booth.replace("booth", "missing"), url }),
-    /has no leaderboardApi keys to copy/);
+    /does not exist/);
 });
 
 
@@ -2405,4 +2405,67 @@ test("a send that outlives its claim still reopens a takedown that settled meanw
   await publishing;
   assert.notEqual((await store.read()).removals[0].published, "absent", "the landing reopened the takedown");
   assert.equal((await engine.owedPublicTakedowns()).length, 1);
+});
+
+// --- Review round 22 ---------------------------------------------------------
+
+test("keys are copied only from an owner-only file, and the operator is told to delete it", async t => {
+  const { chmod } = await import("node:fs/promises");
+  const { configure, report } = await import("../scripts/configure-leaderboard.mjs");
+  const directory = await tempDirectory(t);
+  const url = "https://commit-and-sip-leaderboard.azurewebsites.net";
+  const staffMachine = join(directory, "staff.json");
+  await configure({ configFile: staffMachine, url });
+  const copy = join(directory, "transferred.json");
+  await writeFile(copy, await readFile(staffMachine, "utf8"), { mode: 0o644 });
+  await chmod(copy, 0o644);                                  // what a copy tool commonly leaves
+  const booth = join(directory, "booth.json");
+  await assert.rejects(() => configure({ configFile: booth, from: copy, url, access: { platform: "darwin" } }),
+    /can be read by other users.*chmod 600/);
+  await assert.rejects(() => readFile(booth), { code: "ENOENT" }, "and nothing was written");
+  await chmod(copy, 0o600);
+  const done = await configure({ configFile: booth, from: copy, url, access: { platform: "darwin" } });
+  assert.deepEqual(done.copied, ["boothKey", "staffKey"]);
+  assert.match(report({ ...done, from: copy, parametersFile: null, staff: true }), new RegExp(`Delete ${copy} now`));
+  assert.doesNotMatch(report({ ...done, copied: [], from: null, parametersFile: null, staff: true }), /Delete .* now: it is a second copy/);
+});
+
+test("a config that is valid JSON but not an object is reported, not a crash", async t => {
+  const { configure } = await import("../scripts/configure-leaderboard.mjs");
+  const url = "https://commit-and-sip-leaderboard.azurewebsites.net";
+  for (const [label, text] of [["null", "null"], ["an array", "[]"], ["a string", "\"x\""],
+    ["a null leaderboardApi", "{\"leaderboardApi\":null}"], ["a text leaderboardApi", "{\"leaderboardApi\":\"x\"}"]]) {
+    const directory = await tempDirectory(t);
+    const target = join(directory, "booth.json");
+    await writeFile(target, text, { mode: 0o600 });
+    await assert.rejects(() => configure({ configFile: target, url }), { code: "invalid_config" }, `${label} as the target`);
+    assert.equal(await readFile(target, "utf8"), text, `${label}: left as found`);
+    const source = join(directory, "source.json");
+    await writeFile(source, text, { mode: 0o600 });
+    await assert.rejects(() => configure({ configFile: join(directory, "other.json"), from: source, url }),
+      { code: "invalid_config" }, `${label} as the source`);
+  }
+});
+
+test("a board field that is present must be well formed, even if older boards lack it", async t => {
+  for (const [label, board] of [
+    ["reserved: null", { entries: [], reserved: null, version: 1 }],
+    ["reserved as text", { entries: [], reserved: fp("x"), version: 1 }],
+    ["keyId: null", { entries: [], keyId: null, reserved: [], version: 1 }],
+    ["version as text", { entries: [], reserved: [], version: "3" }],
+    ["a negative version", { entries: [], reserved: [], version: -1 }],
+  ]) {
+    const directory = await tempDirectory(t);
+    const file = join(directory, "default.json");
+    const text = JSON.stringify(board);
+    await writeFile(file, text);
+    await assert.rejects(() => FileStore.open({ directory }), /is not a readable board/, label);
+    assert.equal(await readFile(file, "utf8"), text, `${label}: the file is left exactly as found`);
+  }
+  // Exactly what the build deployed today writes: no version, no keyId.
+  const directory = await tempDirectory(t);
+  await writeFile(join(directory, "default.json"), JSON.stringify({ entries: [entry("mona-a")], reserved: [fp("gone")] }));
+  const store = await FileStore.open({ directory });
+  assert.equal(await store.isReserved(fp("gone")), true);
+  assert.equal((await store.list()).length, 1);
 });

@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { promisify } from "node:util";
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { guardNodeVersion } from "./require-node.mjs";
-import { validateStaffConfig } from "../.github/extensions/commit-and-sip/domain.mjs";
+import { DomainError, validateStaffConfig } from "../.github/extensions/commit-and-sip/domain.mjs";
 import { validateLeaderboardApi } from "../.github/extensions/commit-and-sip/services/leaderboard-client.mjs";
 
 guardNodeVersion();
@@ -25,10 +25,44 @@ const execFileAsync = promisify(execFile);
 const newKey = () => randomBytes(32).toString("hex");
 
 async function readJson(file) {
-  try { return JSON.parse(await readFile(file, "utf8")); }
+  let value;
+  try { value = JSON.parse(await readFile(file, "utf8")); }
   catch (error) {
     if (error.code === "ENOENT") return {};
     throw error;
+  }
+  // Checked before any property is read: `null` or an array is valid JSON,
+  // and would otherwise surface as a TypeError instead of saying what is wrong.
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new DomainError("invalid_config", `${file} must hold a JSON object.`, 400);
+  }
+  return value;
+}
+
+// A present but malformed leaderboardApi is an error, not a machine with no
+// keys: reading it as empty would mint keys the deployed service rejects.
+function apiOf(config, file) {
+  const api = config.leaderboardApi;
+  if (api === undefined) return {};
+  if (api === null || typeof api !== "object" || Array.isArray(api)) {
+    throw new DomainError("invalid_config", `${file} has a leaderboardApi that is not an object.`, 400);
+  }
+  return api;
+}
+
+// The file keys are copied from is a second copy of them. It must be readable
+// by its owner only while it exists, and deleted once they are copied. On
+// Windows, POSIX modes say nothing about ACLs, so this cannot be checked there.
+async function assertPrivateSource(file, platform) {
+  let mode;
+  try { ({ mode } = await stat(file)); }
+  catch (error) {
+    if (error.code === "ENOENT") throw new Error(`${file} does not exist.`);
+    throw error;
+  }
+  if (platform !== "win32" && (mode & 0o077)) {
+    throw new Error(`${file} can be read by other users of this machine, and it holds the service keys. `
+      + `Restrict it first (chmod 600 ${file}), run this again, then delete it.`);
   }
 }
 
@@ -68,10 +102,11 @@ async function writePrivate(file, value, access = {}) {
 
 export async function configure({ url, staff = true, configFile, parametersFile, from = null, key = newKey, access = {} }) {
   const config = await readJson(configFile);
-  const existing = config.leaderboardApi ?? {};
+  const existing = apiOf(config, configFile);
   let source = existing;
   if (from !== null) {
-    source = (await readJson(from)).leaderboardApi ?? {};
+    await assertPrivateSource(from, access.platform ?? process.platform);
+    source = apiOf(await readJson(from), from);
     if (!source.boothKey || (staff && !source.staffKey)) {
       throw new Error(`${from} has no ${source.boothKey ? "staffKey" : "leaderboardApi keys"} to copy. Use the booth/local-config.json of a staff machine.`);
     }
@@ -80,7 +115,7 @@ export async function configure({ url, staff = true, configFile, parametersFile,
   if (!fresh && staff && !source.staffKey) {
     throw new Error("This machine has a booth key but no staff key. A new staff key would not match the deployed "
       + "service, and redeploying to add one would lock out every other staff machine. Copy the keys from a staff "
-      + "machine instead: npm run leaderboard:configure -- --url <url> --from <that machine's booth/local-config.json>");
+      + "machine instead: npm run leaderboard:configure -- --url <url> --from <an owner-only (chmod 600) copy of that machine's booth/local-config.json>, then delete that copy.");
   }
   const api = {
     url,
@@ -124,6 +159,21 @@ export function parseArguments(argv) {
   return args;
 }
 
+// What the command tells the operator, including what to delete afterwards.
+export function report({ copied, from, generated, parametersFile, removed, staff }) {
+  const kept = ["boothKey", "staffKey"].filter(key => !generated.includes(key) && !removed.includes(key)
+    && !copied.includes(key) && (key === "boothKey" || staff));
+  return (generated.length
+    ? `Generated ${generated.join(" and ")} in booth/local-config.json. Redeploy the infrastructure so the service accepts ${generated.length === 1 ? "it" : "them"}.\n`
+    : "")
+    + (copied.length ? `Copied ${copied.join(" and ")} from ${from}. They match the deployed service; no redeploy is needed.\n` : "")
+    + (from ? `Delete ${from} now: it is a second copy of the keys, and this machine no longer needs it.\n` : "")
+    + (kept.length ? `Kept the existing ${kept.join(" and ")}.\n` : "")
+    + (removed.length ? "Removed the staffKey: this machine can now publish but not take drinks down.\n" : "")
+    + (parametersFile ? "Wrote dist/leaderboard.secure.parameters.json for the deployment. Delete it once deployed.\n" : "")
+    + "leaderboardUrl (the attendee QR code) was not changed.\n";
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
     const args = parseArguments(process.argv.slice(2));
@@ -131,16 +181,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const { copied, generated, removed } = await configure({
       configFile: resolve(root, "booth", "local-config.json"), from: args.from, parametersFile, staff: args.staff, url: args.url,
     });
-    const kept = ["boothKey", "staffKey"].filter(key => !generated.includes(key) && !removed.includes(key)
-      && !copied.includes(key) && (key === "boothKey" || args.staff));
-    process.stdout.write((generated.length
-      ? `Generated ${generated.join(" and ")} in booth/local-config.json. Redeploy the infrastructure so the service accepts ${generated.length === 1 ? "it" : "them"}.\n`
-      : "")
-      + (copied.length ? `Copied ${copied.join(" and ")} from ${args.from}. They match the deployed service; no redeploy is needed.\n` : "")
-      + (kept.length ? `Kept the existing ${kept.join(" and ")}.\n` : "")
-      + (removed.length ? "Removed the staffKey: this machine can now publish but not take drinks down.\n" : "")
-      + (parametersFile ? "Wrote dist/leaderboard.secure.parameters.json for the deployment. Delete it once deployed.\n" : "")
-      + "leaderboardUrl (the attendee QR code) was not changed.\n");
+    process.stdout.write(report({ copied, from: args.from, generated, parametersFile, removed, staff: args.staff }));
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;

@@ -179,7 +179,7 @@
     absent: "was not on the public leaderboard",
     failed: "is NOT yet off the public leaderboard. Refresh to retry",
     "in-doubt": "may still be on the public leaderboard: it was still being published when it was taken down. Refresh to retry",
-    "not-configured": "is NOT off the public leaderboard: this booth has no staff key. To finish it, copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <a staff machine's booth/local-config.json>, then retry with Refresh",
+    "not-configured": "is NOT off the public leaderboard: this booth has no staff key. To finish it, copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <an owner-only (chmod 600) copy of a staff machine's booth/local-config.json>, then delete that copy, then retry with Refresh",
     retracted: "was taken off the public leaderboard",
     unrecorded: "may still be on the public leaderboard: the removal stopped before it reached the board. Refresh to retry",
   };

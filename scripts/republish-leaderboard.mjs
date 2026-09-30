@@ -32,7 +32,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       // The removals are recorded only in this booth's ledger, so no other
       // machine can replay them.
       process.stdout.write("This booth has no staff key, so removed names are NOT reserved. "
-        + "To fix it, copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <a staff machine's booth/local-config.json>, then run this again here.\n");
+        + "To fix it, copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <an owner-only (chmod 600) copy of a staff machine's booth/local-config.json>, then delete that copy, then run this again here.\n");
     }
     if (blocked) {
       // Sending drinks while a removed name is unreserved would let the

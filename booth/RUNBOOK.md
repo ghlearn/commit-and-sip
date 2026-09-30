@@ -154,7 +154,7 @@ When the booth publishes to the leaderboard service, removal also takes the drin
 | taken off the public leaderboard | Removed there, and the name is reserved | None |
 | was not on the public leaderboard | It had not synced yet; the name is still reserved there | None |
 | **NOT yet off the public leaderboard** | The service was unreachable | Press **Refresh** on the dashboard, or run `npm run remove -- --retry` once the network is back |
-| **no staff key** / NOT off the public leaderboard | This machine can publish but not delete | Copy the **deployed** keys to this machine from a staff machine: move that machine's `booth/local-config.json` here over a private channel, then run `npm run leaderboard:configure -- --url … --from <that file>`, and press **Refresh** or run `npm run remove -- --retry`. Another machine cannot finish it, because the removal is recorded only in this booth's ledger. |
+| **no staff key** / NOT off the public leaderboard | This machine can publish but not delete | Copy the **deployed** keys to this machine from a staff machine, as in [copying the keys to another machine](#copying-the-keys-to-another-machine): an owner-only copy, `--from`, then delete the copy. Then press **Refresh** or run `npm run remove -- --retry`. Another machine cannot finish it, because the removal is recorded only in this booth's ledger. |
 
 A takedown whose outcome was never recorded, for example because the machine stopped mid-removal, is retried the same way. Only "taken off" and "was not on" are final.
 
@@ -229,9 +229,26 @@ az webapp deploy --subscription 6aab8b26-48c5-4cfd-ac82-6b5efcc2e441 \
 
 Then open `/healthz`. `moderation: "placeholder"` means the service is running with the unreviewed blocklist. That is fine for staff testing and a reason not to set `leaderboardUrl`.
 
-Every infrastructure deployment needs the keys again (step 1 keeps the existing ones). Give each additional booth machine the **same deployed keys**: move a staff machine's `booth/local-config.json` over a private channel and run `npm run leaderboard:configure -- --url … --from <that file>` (add `--no-staff-key` on machines that should not take drinks down). **Never run `leaderboard:configure` without `--from` on a machine that already has a booth key but no staff key:** it refuses, because a newly minted staff key would not match the service, and redeploying to accept it would lock out every other staff machine. To rotate the keys, delete `leaderboardApi` from the file, rerun steps 1 and 2, and copy the new file to every booth.
+Every infrastructure deployment needs the keys again (step 1 keeps the existing ones). Give each additional booth machine the **same deployed keys**, as below (add `--no-staff-key` on machines that should not take drinks down).
 
 The board is a JSON file on the app's persistent `/home` storage, beside `reservation.key`, the key that fingerprints taken-down names. **Keep the two together:** if the key is lost while the board holds reservations, the service refuses to start rather than mint a new key that would let every taken-down name be published again. Restore the key; do not delete the board to get past it. The plan runs **one instance**, and there is no reason to scale it out. The store stays correct if the platform briefly runs a second instance, because writes are locked and version-checked on the shared disk, but it is not built for sustained scale-out. To start a fresh board for a new event, change `eventId` in `infra/main.parameters.json` and redeploy the infrastructure. The old board stays on disk.
+
+#### Copying the keys to another machine
+
+The staff machine's `booth/local-config.json` holds both keys, so every copy of it is a credential. `--from` reads only a copy that other users of the machine cannot read, and refuses anything else. On macOS or Linux:
+
+```bash
+umask 077 && tmp=$(mktemp -d)                 # a private directory
+# move the file into "$tmp" over a private channel (AirDrop, scp), then:
+chmod 600 "$tmp/local-config.json"
+npm run leaderboard:configure -- --url https://… --from "$tmp/local-config.json"
+rm -rf "$tmp"                                  # delete the copy straight away
+```
+
+The command reminds you to delete the copy. It does not delete it for you: `--from` could name a file you still need, such as the staff machine's own config on a mounted share. On Windows, POSIX modes say nothing about ACLs, so the owner-only check cannot run there. Keep the copy in a folder only you can open, and delete it straight after.
+
+**Never run `leaderboard:configure` without `--from` on a machine that already has a booth key but no staff key:** it refuses, because a newly minted staff key would not match the service, and redeploying to accept it would lock out every other staff machine. To rotate the keys, delete `leaderboardApi` from the file, rerun steps 1 and 2, and copy the new keys to every booth the same way.
+
 
 ## Leaderboard and QR readiness
 
