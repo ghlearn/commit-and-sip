@@ -11,7 +11,10 @@
     "check": "node scripts/check-syntax.mjs",
     "qr": "node scripts/generate-qr.mjs",
     "remove": "node scripts/remove-drink.mjs",
-    "blocklist": "node scripts/check-blocklist.mjs"
+    "blocklist": "node scripts/check-blocklist.mjs",
+    "leaderboard:configure": "node scripts/configure-leaderboard.mjs",
+    "leaderboard:package": "node scripts/package-leaderboard.mjs",
+    "leaderboard:republish": "node scripts/republish-leaderboard.mjs"
   },
   "engines": { "node": ">=22" },
   "devDependencies": {

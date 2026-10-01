@@ -1,0 +1,13 @@
+{
+  "name": "commit-and-sip-leaderboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Public read-only leaderboard for the Commit & Sip booth. Node built-ins only.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}

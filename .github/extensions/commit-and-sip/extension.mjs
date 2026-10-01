@@ -1,21 +1,16 @@
 import { joinSession, createCanvas, CanvasError } from "@github/copilot-sdk/extension";
-import { readFile } from "node:fs/promises";
-import { DomainError, loadCatalog, validateStaffConfig } from "./domain.mjs";
+import { DomainError, loadCatalog, loadStaffConfig } from "./domain.mjs";
 import { dataDirectory, RunStore } from "./store.mjs";
 import { BoothEngine } from "./booth-engine.mjs";
 import { loadNameRules } from "./services/coffee-name.mjs";
 import { blocklistStatus } from "./services/moderation.mjs";
+import { leaderboardClientFromConfig } from "./services/leaderboard-client.mjs";
 import { qrEncoderAvailable } from "./services/qr.mjs";
 import { boothCanvasDefinition } from "./canvas.mjs";
 import { adminCanvasDefinition } from "./admin-canvas.mjs";
 
 const catalog = await loadCatalog();
-let config = {};
-try {
-  config = validateStaffConfig(JSON.parse(await readFile(new URL("../../../booth/local-config.json", import.meta.url), "utf8")));
-} catch (error) {
-  if (error.code !== "ENOENT") throw error;
-}
+const config = await loadStaffConfig();
 const directory = dataDirectory();
 const store = new RunStore(directory);
 let session;
@@ -30,7 +25,14 @@ async function guarded(fn) {
 }
 
 const rules = await loadNameRules();
-const engine = new BoothEngine({ store, catalog, rules, leaderboardUrl: config.leaderboardUrl ?? null });
+// Publishing to the service (leaderboardApi) and advertising it to attendees
+// (leaderboardUrl, which drives the QR code) are configured separately on
+// purpose. The service can be proven end to end with staff entries while the
+// QR stays off until moderation and brand review allow a public destination.
+const engine = new BoothEngine({
+  store, catalog, rules, leaderboardUrl: config.leaderboardUrl ?? null,
+  leaderboardClient: leaderboardClientFromConfig(config),
+});
 
 const reportError = error =>
   session?.log(`Commit & Sip HTTP service error: ${error.name}; check staff configuration.`, { level: "error" });

@@ -38,11 +38,11 @@ One booth is authoritative only for its own menu and cannot know what was invent
 
 Booth standings rank by score with equal scores sharing a rank: `1 + the number of entries with a strictly higher score`. A service should use the same convention so a booth and the event never disagree about what a tie means.
 
-Handles are unique within a booth. `generateHandle` draws from curated word lists and, once the phrase pool is exhausted, keeps the curated phrase with a deterministic eight-hex suffix. Global uniqueness across booths is the service's responsibility; a service that reassigns a handle must return the canonical value in its receipt rather than expecting the booth to regenerate one.
+Handles are unique within a booth. `generateHandle` draws from curated word lists and, once the phrase pool is exhausted, keeps the curated phrase with a deterministic eight-hex suffix. Global uniqueness across booths is the service's responsibility. The service keeps the first entry under a phrase, and stores a later one under `canonicalHandle(handle, id)` (`services/leaderboard.mjs`): the phrase plus eight hex characters derived from the drink ID. It returns that value in its receipt. `validateReceipt` accepts the submitted handle or exactly that canonical form, the attendee's QR link uses the confirmed handle, and the booth never regenerates one.
 
-`services/leaderboard.mjs` is the client seam. A client implements `publish(submission)` and owns its own timeout; none is shipped, because no destination is deployed, and `leaderboardClient` defaults to null. The flow is local-first: `submit_name` commits the drink inside the store transaction, the lock is released, and only then is the entry published. A slow or unreachable service therefore cannot hold up the counter, fail an attendee's submission, or lose a drink that was already earned.
+`services/leaderboard.mjs` is the client seam. A client implements `publish(submission)` and owns its own timeout, and may implement `retract(id)`. `services/leaderboard-client.mjs` is the HTTP client for [the leaderboard service](leaderboard-service.md); it is built only when staff configure `leaderboardApi`, and `leaderboardClient` is null otherwise. The flow is local-first: `submit_name` commits the drink inside the store transaction, the lock is released, and only then is the entry published. A slow or unreachable service therefore cannot hold up the counter, fail an attendee's submission, or lose a drink that was already earned.
 
-A receipt is accepted only when its handle, name, and score match what was sent; anything else is recorded as a failure rather than shown, so a service answering about a different entry can never rank this attendee. Failures are retried on the next refresh, so a network blip recovers without staff. The submitted payload is deliberately minimal — handle, ID, name, score — carrying no run ID, device, or booth identity, since an anonymous handle is all a public board needs.
+A receipt is accepted only when its handle, ID, name, and score match what was sent (the handle may instead be its canonical form, when another booth used the phrase first); anything else is recorded as a failure rather than shown, so a service answering about a different entry can never rank this attendee. Failures are retried on the next refresh, so a network blip recovers without staff. The submitted payload is deliberately minimal — handle, ID, name, score, and a random per-publication token that stays the same across retries, so the service can tell a retry from another attendee who drew the same handle and name — carrying no run ID, device, or booth identity, since an anonymous handle is all a public board needs.
 
 `syncView` keeps two facts apart that are easy to conflate: the booth standing is local and the booth owns it, while an event rank exists only once the service confirms it. Until then the canvas says the place is still being confirmed, and the booth rank is labelled "at this booth" so it cannot be read as an event-wide placing.
 
@@ -96,15 +96,15 @@ Every screen under `renderer/` must be driven through a browser before it is con
 
 API-level tests do not exercise HTML form validation or default-selected `<option>` semantics. Static checks now assert that neither picker is `required` and that both keep an empty-value default. Treat form-bearing canvas UI as unverified until it has been driven through a browser.
 
-### Not yet built
+### Launch gates
 
-Four gaps remain, and none of them is code.
+The code is built and the leaderboard service is deployed. Four gates stand between this and attendees, and none of them is code.
 
 The moderation blocklist needs reviewed content. The mechanism is built, the gap is reported at every start, and staff can now take a name down after the fact, but no list has been approved, and nothing in this repository certifies a list as adequate.
 
-No leaderboard service is deployed. The client seam exists, is local-first, and defaults to null, so its absence cannot fail an attendee; but nothing receives submissions and no public destination exists. Do not present a placeholder QR as a production link. Any service built against this seam must also accept retractions, or staff takedown will stop at the booth boundary.
+The leaderboard service is deployed (`leaderboard-service/`, <https://commit-and-sip-leaderboard.azurewebsites.net>), but no attendee-facing QR code points at it. Publishing (`leaderboardApi`) and the attendee QR (`leaderboardUrl`) are configured separately, so the service can be proven with staff entries while the QR stays off. Do not present a placeholder QR as a production link.
 
-Brand and trademark review of the mascot names and artwork has not happened. The cup illustration is original work carried over from the retired review page, but the froth now carries the official Mona mascot (`renderer/mona.png`), so unapproved official brand art is on the attendee screen today. Unlike the other three gaps, this one is not something the repository merely withholds: it ships, and a negative review would require removing it. Provenance, modifications, and the outstanding decision are recorded in [the asset checklist](../.github/images/README.md).
+Brand and trademark review of the mascot names and artwork has not happened. The cup illustration is original work carried over from the retired review page, but the froth now carries the official Mona mascot (`renderer/mona.png`), so unapproved official brand art is on the attendee screen today. Unlike the other three gates, this one is not something the repository merely withholds: it ships, and a negative review would require removing it. Provenance, modifications, and the outstanding decision are recorded in [the asset checklist](../.github/images/README.md).
 
 Making the repository a public template is a visibility change requiring its own review.
 
@@ -129,13 +129,13 @@ Publication happens after the store transaction commits and the lock is released
 
 ## Implementer requirements for a leaderboard service
 
-[Leaderboard service design](leaderboard-service.md) works these requirements into a concrete proposal — hosting, booth authentication, retraction, and server-side moderation. It is a proposal; nothing is deployed.
+[The leaderboard service](leaderboard-service.md) implements these requirements and records the decisions taken: hosting, booth authentication, retraction, and server-side moderation. It is deployed and was verified end to end with a staff test entry.
 
 A client implements `publish(submission)` and owns its own timeout. The booth must never wait on a slow service.
 
-The submitted payload is deliberately minimal — handle, drink ID, name, and score. It carries no run ID, device, or booth identity, because an anonymous handle is all a public board needs.
+The submitted payload is deliberately minimal — handle, drink ID, name, score, and a random per-publication token that stays the same across retries, so the service can tell a retry from another attendee who drew the same handle and name. The booth saves the token before the first send. It carries no run ID, device, or booth identity, because an anonymous handle is all a public board needs.
 
-A receipt is accepted only when its handle, name, and score match what was sent. Anything else is recorded as a failure and never displayed, so a service answering about a different entry cannot be shown as this attendee's rank. Failed publications retry on the next refresh.
+A receipt is accepted only when its handle, ID, name, and score match what was sent (the handle may instead be its canonical form, when another booth used the phrase first). Anything else is recorded as a failure and never displayed, so a service answering about a different entry cannot be shown as this attendee's rank. Failed publications retry on the next refresh.
 
 Cross-booth uniqueness and global ranking belong to the service. One booth is authoritative only for its own menu and cannot know what was invented elsewhere. `addDrink` takes the menu as input, so a caller may merge remotely known IDs before calling and have the same duplicate check cover both. Equal scores share a rank.
 
@@ -143,4 +143,4 @@ Any configured URL must pass `validateLeaderboardUrl` in `services/public-url.mj
 
 `syncView` keeps two facts apart that are easy to conflate: the booth standing is local and the booth owns it, while an event rank exists only once the service confirms it. Until then the canvas says the place is still being confirmed, and the booth rank is labelled "at this booth" so it cannot be read as an event-wide placing.
 
-**A service must offer retraction.** Staff can take a drink off a booth menu, but the current client interface is publish-only, so an entry the service already accepted stays there. That is a live moderation hole for any deployed leaderboard: the booth can repudiate a name locally while the public board still shows it. An implementation must accept a retraction for a previously published handle and drink ID, and `validateLeaderboardClient` must grow a matching method alongside `publish`. Until it does, the takedown command tells staff to remove the entry at the service by hand, and the canvas stops displaying a confirmed rank for a removed drink rather than advertising one the booth has withdrawn.
+**A service must offer retraction, and this one does.** A takedown commits locally first, then calls `retract(id)`. The outcome (`retracted`, `absent`, `failed`, or `not-configured`) is recorded on the removal and shown to staff, and failures are retried on admin **Refresh** or with `npm run remove -- --retry`. A publish still in flight when staff remove the drink is retracted again once its receipt arrives. The service reserves the retracted ID, keeping only a keyed fingerprint, so another booth cannot republish the name. The canvas stops displaying a confirmed rank for a removed drink rather than advertising one the booth has withdrawn.

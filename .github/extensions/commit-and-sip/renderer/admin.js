@@ -3,6 +3,8 @@
   const $ = id => document.getElementById(id);
   const ticket = new URLSearchParams(window.location.search).get("ticket");
   let busy = false;
+  let retrying = false;
+  let poll = null;
 
   function fail(message) {
     $("admin-error-message").textContent = message;
@@ -13,6 +15,7 @@
     $("admin").setAttribute("aria-busy", String(busy));
     for (const id of ["export-fields", "takedown-fields", "wipe-fields", "close-fields"]) $(id).disabled = busy;
     $("admin-retry").disabled = busy || !ticket;
+    $("admin-refresh").disabled = busy || retrying || !ticket;
   }
 
   async function request(path, body) {
@@ -145,9 +148,17 @@
     line(list, state.blocklist.ready
       ? "Moderation blocklist: reviewed and ready."
       : `Moderation blocklist: NOT event-ready. ${state.blocklist.reason}`);
+    // Publishing and the attendee link are separate settings: a booth can
+    // publish to the board well before attendees are given a link to it.
+    const publishing = state.publishing ?? {};
+    line(list, !publishing.enabled
+      ? "Event leaderboard publishing: off. Drinks stay on this booth only."
+      : publishing.takedowns
+        ? "Event leaderboard publishing: on. This machine publishes drinks and can take them down."
+        : "Event leaderboard publishing: on, without a staff key. This machine publishes drinks but cannot take them down.");
     line(list, state.leaderboardUrl
-      ? `Event leaderboard: configured (${state.leaderboardUrl}).`
-      : "Event leaderboard: not configured. Attendees are told there is nothing to scan.");
+      ? `Attendee link (QR): set (${state.leaderboardUrl}).`
+      : "Attendee link (QR): not set. Attendees are told there is nothing to scan.");
   }
 
   function menu(state) {
@@ -174,12 +185,37 @@
     if (chosen && invented.some(entry => entry.id === chosen)) select.value = chosen;
   }
 
+  // A takedown that did not reach the public board must not read as done.
+  const PUBLIC_BOARD = {
+    absent: "was not on the public leaderboard",
+    failed: "is NOT yet off the public leaderboard. Press Refresh and retry",
+    replaying: "may not be reserved on the rebuilt public leaderboard: the rebuild stopped before replaying this takedown. Press Refresh and retry",
+    "in-doubt": "may still be on the public leaderboard: it was still being published when it was taken down. Press Refresh and retry",
+    "not-configured": "is NOT off the public leaderboard: this booth has no staff key. To finish it, copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <an owner-only (chmod 600) copy of a staff machine's booth/local-config.json>, then delete that copy, then press Refresh and retry",
+    retracted: "was taken off the public leaderboard",
+    unrecorded: "may still be on the public leaderboard: the removal stopped before it reached the board. Press Refresh and retry",
+  };
+
+  // Settled outcomes are always shown. An unsettled one is a warning only when
+  // the drink may be public (`owed`, decided by the booth); a drink that was
+  // never published owes nothing and gets no false alarm. A removal whose
+  // outcome was never recorded is unresolved, not fine.
+  function boardStatus({ cause, owed, published }) {
+    if (published === "retracted" || published === "absent") return PUBLIC_BOARD[published];
+    if (!owed) return "";
+    // A failure names its cause: a refused key or an outdated service is not
+    // fixed by waiting for the network.
+    if (published === "failed" && cause) return `is NOT yet off the public leaderboard: ${cause}. Press Refresh and retry once that is fixed`;
+    return PUBLIC_BOARD[published] ?? PUBLIC_BOARD.unrecorded;
+  }
+
   function removals(state) {
     const list = $("admin-removals");
     list.replaceChildren();
     $("admin-removals-empty").hidden = state.removals.length > 0;
     for (const record of state.removals) {
-      line(list, `${record.name} - removed by ${record.removedBy} on ${new Date(record.removedAt).toLocaleString()} - ${record.reason}`);
+      const board = boardStatus(record);
+      line(list, `${record.name} - removed by ${record.removedBy} on ${new Date(record.removedAt).toLocaleString()} - ${record.reason}${board ? ` - ${board}` : ""}`);
     }
   }
 
@@ -196,7 +232,10 @@
     if (!state.notice) { box.hidden = true; return; }
     if (state.notice.kind === "closed") box.textContent = `Station ${state.notice.handle} was closed.`;
     else if (state.notice.kind === "exported") box.textContent = `Results exported to ${state.notice.path}`;
-    else if (state.notice.kind === "removed") box.textContent = `${state.notice.name} was removed from the house menu.`;
+    else if (state.notice.kind === "removed") {
+      const board = boardStatus(state.notice);
+      box.textContent = `${state.notice.name} was removed from the house menu${board ? ` and ${board}` : ""}.`;
+    }
     else if (state.notice.kind === "wiped") {
       box.textContent = `Event archived to ${state.notice.archive} and the booth was reset. ${state.notice.was.invented} drink(s) and ${state.notice.was.removals} removal(s) are in that file and nowhere else. Copy it off this machine.`;
     }
@@ -204,6 +243,12 @@
   }
 
   function render(state) {
+    // A retry sweep still running in the booth: say so, and look again until
+    // it has finished, so the list shown is never one about to change.
+    retrying = Boolean(state.retrying);
+    $("admin-retrying").hidden = !retrying;
+    clearTimeout(poll);
+    poll = retrying ? setTimeout(() => { void load(); }, 2000) : null;
     totals(state);
     stations(state);
     health(state);
@@ -243,6 +288,9 @@
   }
 
   $("admin-retry").addEventListener("click", load);
+  // Reading the state never retries anything. This does: it is the dashboard's
+  // way to send takedowns and drinks that did not reach the public board.
+  $("admin-refresh").addEventListener("click", () => act("refresh", {}));
 
   $("export-form").addEventListener("submit", async event => {
     event.preventDefault();
