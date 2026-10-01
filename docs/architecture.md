@@ -62,7 +62,7 @@ Publication is local-first. The engine commits the served result inside the stor
 
 Receipts are accepted only when the handle, ID, name, and score match what was submitted (the handle may instead be its canonical form, when another booth used the phrase first). A mismatched receipt is recorded as a failure and never displayed. The payload deliberately excludes the run ID, device, and booth identity.
 
-Takedown reaches the public board: the removal commits locally, then `retract(id)` runs, and its outcome is recorded on the removal and retried if it failed. The client is built only when `leaderboardApi` is configured, and is null otherwise. The service is deployed at <https://commit-and-sip-leaderboard.azurewebsites.net>, and no attendee-facing QR code points at it.
+Takedown reaches the public board: the removal commits locally, then `retract(id)` runs, and its outcome is recorded on the removal and retried if it failed. The client is built only when `leaderboardApi` is configured, and is null otherwise. The service is deployed at <https://commit-and-sip-leaderboard.azurewebsites.net>, and the attendee QR (`leaderboardUrl`) stays unset until the blocklist is reviewed.
 
 Publishing (`leaderboardApi`) and the attendee QR (`leaderboardUrl`) are separate settings, so the service can be proven end to end while no QR is shown. Any configured URL must pass `validateLeaderboardUrl`: HTTPS only, no credentials, fragment, or nonstandard port, and no private, loopback, reserved, or reserved-suffix host. Do not present a placeholder QR as a production destination.
 

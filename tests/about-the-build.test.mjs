@@ -123,3 +123,17 @@ test("the setup docs keep the attendee QR gated on the blocklist review", async 
   const readiness = runbook.slice(runbook.indexOf("## Leaderboard and QR readiness"));
   assert.match(readiness, /stays gated on the blocklist review/);
 });
+
+// Status statements go stale silently. These are the ones that were once true
+// and are not now: the live build refusing the client, a private repository,
+// no public destination at all. None may come back into the operator docs.
+test("the operator docs describe the current deployment, not an earlier one", async () => {
+  const stale = [/predates (most of )?this document/i, /Redeploy before first use/, /refuses the current booth client/,
+    /current booth client does not work/i, /repository it opens is private/, /there is no public QR destination/i,
+    /no attendee-facing QR code points at it/i, /gated on the blocklist review and the service redeploy/];
+  for (const file of ["../README.md", "../booth/RUNBOOK.md", "../docs/leaderboard-service.md", "../docs/integration-contract.md",
+    "../docs/architecture.md", "../.github/images/README.md"]) {
+    const text = await readFile(new URL(file, import.meta.url), "utf8");
+    for (const phrase of stale) assert.doesNotMatch(text, phrase, `${file}: ${phrase}`);
+  }
+});

@@ -2,7 +2,7 @@
 
 **The booth runs entirely in the canvas.** Attendees never open GitHub, a terminal, or an editor. Commands below are staff-only and run from the repository root unless stated otherwise.
 
-**Not event-ready.** The moderation blocklist is an unreviewed placeholder, the leaderboard service is deployed but must not be advertised to attendees yet, there is no public QR destination, and brand review has not happened. See those sections before running a public booth.
+**Not event-ready.** The moderation blocklist is an unreviewed placeholder, and brand review has not happened. The leaderboard service is live and accepts the current booth client, but the attendee QR (`leaderboardUrl`) stays unset until the blocklist is reviewed. See those sections before running a public booth.
 
 ## Exercise shape
 
@@ -205,7 +205,7 @@ Read ranks carefully when helping an attendee. "Rank 1 of 1 at this booth" is th
 
 ## Leaderboard service operations
 
-> ⚠️ **Redeploy before first use.** The live service runs a build from before this branch's review fixes, and it refuses the current booth client: the client sends a publication token and retracts through `POST /api/retractions`. Run the code-deploy steps below from an identity with Contributor before configuring any booth.
+> **Current deployment (2026-10-01).** The live service was redeployed from this repository's leaderboard branch and accepts the current booth client. A change to `leaderboard-service/` reaches the site only when the code-deploy steps below are run from an identity with Contributor, followed by the version check. At the time of writing one such change is waiting: the board page's 24 px quiet zone around the repository QR (commit 308c7b4), because the deployer's access lapsed to Reader before it could ship.
 
 The service lives in `leaderboard-service/`, and its design and decisions are in [docs/leaderboard-service.md](../docs/leaderboard-service.md). It runs at <https://commit-and-sip-leaderboard.azurewebsites.net> as one App Service B1 instance in subscription **GitHub - NonProd - skills**, region `westus2`, resource group `rg-commit-and-sip-lb-westus2`. Every submission is re-checked there with this repository's own rubric and blocklist, so **redeploy the service whenever `booth/blocked-terms.json` or the rubric changes**. Otherwise booths and service disagree and submissions fail with `score_mismatch`.
 

@@ -102,11 +102,11 @@ The code is built and the leaderboard service is deployed. Four gates stand betw
 
 The moderation blocklist needs reviewed content. The mechanism is built, the gap is reported at every start, and staff can now take a name down after the fact, but no list has been approved, and nothing in this repository certifies a list as adequate.
 
-The leaderboard service is deployed (`leaderboard-service/`, <https://commit-and-sip-leaderboard.azurewebsites.net>), but no attendee-facing QR code points at it. Publishing (`leaderboardApi`) and the attendee QR (`leaderboardUrl`) are configured separately, so the service can be proven with staff entries while the QR stays off. Do not present a placeholder QR as a production link.
+The leaderboard service is deployed (`leaderboard-service/`, <https://commit-and-sip-leaderboard.azurewebsites.net>) and serves the current booth client. The attendee QR (`leaderboardUrl`) is gated on the blocklist review: leave it unset until then. The event owner has switched it on for one booth machine ahead of the review, for staff testing. Publishing (`leaderboardApi`) and the attendee QR are configured separately, so the service can be proven with staff entries while the QR stays off. Do not present a placeholder QR as a production link.
 
 Brand and trademark review of the mascot names and artwork has not happened. The cup illustration is original work carried over from the retired review page, but the froth now carries the official Mona mascot (`renderer/mona.png`), so unapproved official brand art is on the attendee screen today. Unlike the other three gates, this one is not something the repository merely withholds: it ships, and a negative review would require removing it. Provenance, modifications, and the outstanding decision are recorded in [the asset checklist](../.github/images/README.md).
 
-Making the repository a public template is a visibility change requiring its own review.
+The repository is public. Making it a template repository is a separate change requiring its own review.
 
 ## Supported canvas boundary
 
