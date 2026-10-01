@@ -166,7 +166,8 @@ test("the runbook opens a fresh board directly only after every booth is archive
   const fresh = runbook.split("\n").find(line => line.startsWith("| Starting a new event on a fresh board |"));
   assert.ok(fresh, "the new-event case has its own row");
   const resetAll = fresh.indexOf("archive and reset) on every booth machine");
-  assert.ok(resetAll >= 0 && resetAll < fresh.indexOf("republish -- --open"), "reset every booth, then open");
+  assert.ok(resetAll >= 0 && resetAll < fresh.indexOf("change `eventId`") && resetAll < fresh.indexOf("republish -- --open"),
+    "reset every booth, then change eventId, then open");
   assert.match(fresh, /If any booth was not archived and reset, do not take this shortcut/);
   const carried = runbook.split("\n").find(line => line.startsWith("| Public board lost, or `EVENT_ID` changed while booths still hold the event |"));
   assert.ok(carried, "the carried-over case keeps its row");
@@ -175,8 +176,13 @@ test("the runbook opens a fresh board directly only after every booth is archive
   const start = runbook.indexOf("To start a fresh board for a new event");
   assert.ok(start >= 0, "the operations section explains a fresh board");
   const ops = runbook.slice(start, runbook.indexOf("\n\n", start));
-  const reset = ops.indexOf("archive and reset every booth first");
-  assert.ok(reset >= 0 && reset < ops.indexOf("republish -- --open"), "reset every booth before the --open shortcut");
+  const reset = ops.indexOf("archive and reset) on every booth machine while the service still serves the old board");
+  assert.ok(reset >= 0 && reset < ops.indexOf("change `eventId`") && reset < ops.indexOf("republish -- --open"),
+    "every booth is reset before eventId changes, and so before the board is opened");
+  assert.match(ops, /If `eventId` was changed before every booth was reset, do not open the new board/);
+  const deploy = runbook.split(/\n\s*\n/).find(block => block.startsWith("Then open `/healthz`."));
+  assert.match(deploy, /archived and reset before `eventId` changed/, "the deploy check does not ask for a reset after the change");
+  assert.doesNotMatch(deploy, /first \*\*archive and reset every booth\*\*/);
   assert.ok(ops.indexOf("--takedowns") >= 0 && ops.indexOf("--takedowns") < ops.lastIndexOf("--drinks"), "and the full sequence otherwise");
   assert.doesNotMatch(runbook, /open it with `npm run leaderboard:republish -- --open`/, "no unconditional open");
 });
@@ -196,7 +202,7 @@ test("no doc tells an operator to open a board before its prerequisite", async (
       while (at >= 0) {
         checked += 1;
         const before = block.slice(0, at).toLowerCase();
-        assert.ok(/archive and reset every booth|archive and reset\) on every booth|republish -- --takedowns|`--takedowns`/.test(before),
+        assert.ok(/archive and reset every booth|archive and reset\) on every booth|archived and reset before `eventid` changed|every booth already reset|republish -- --takedowns|`--takedowns`/.test(before),
           `${doc}: an --open instruction lacks its prerequisite: ${block.slice(Math.max(0, at - 160), at + 40)}`);
         at = block.indexOf("republish -- --open", at + 1);
       }
