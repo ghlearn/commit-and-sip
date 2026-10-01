@@ -1,4 +1,7 @@
+import { execFile } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { randomInt, randomUUID } from "node:crypto";
 
 export class DomainError extends Error {
@@ -58,11 +61,47 @@ export function validateStaffConfig(config) {
   return config;
 }
 
-// Whether a file can be read by anyone but its owner. On Windows, POSIX modes
-// say nothing about ACLs, so this cannot be judged there and is not claimed.
-export async function readableByOthers(file, { platform = process.platform } = {}) {
-  if (platform === "win32") return false;
-  return ((await stat(file)).mode & 0o077) !== 0;
+// On Windows a file's mode says nothing about who can read it; its ACL does.
+// The path travels in an environment variable, never inside the script, so no
+// file name can change what runs. Identities are compared as SIDs, which do
+// not change with the system language the way group names do.
+const WINDOWS_ACL = [
+  "$ErrorActionPreference = 'Stop'",
+  "$acl = Get-Acl -LiteralPath $env:SIP_ACL_FILE",
+  "$me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+  "$aces = @($acl.Access | ForEach-Object { @{ sid = $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value; type = [string]$_.AccessControlType } })",
+  "ConvertTo-Json -Compress -Depth 3 -InputObject @{ me = $me; aces = $aces }",
+].join("\n");
+// LocalSystem and the local Administrators group can read any file anyway.
+const WINDOWS_PRIVILEGED = ["S-1-5-18", "S-1-5-32-544"];
+
+// Whether a file can be read by anyone but its owner (and, on Windows, the
+// accounts that can read everything regardless). Anything that cannot be
+// verified counts as readable: the answer guards keys, so it fails closed.
+export async function readableByOthers(file, { platform = process.platform, run = promisify(execFile), env = process.env } = {}) {
+  const { mode } = await stat(file);
+  if (platform !== "win32") return (mode & 0o077) !== 0;
+  let acl;
+  try {
+    const path = file instanceof URL ? fileURLToPath(file) : String(file);
+    const { stdout } = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_ACL],
+      { env: { ...env, SIP_ACL_FILE: path } });
+    acl = JSON.parse(stdout);
+  } catch {
+    return true;
+  }
+  const me = acl?.me;
+  const aces = [].concat(acl?.aces ?? []);
+  if (typeof me !== "string" || !/^S-1-[0-9-]+$/.test(me) || aces.length === 0) return true;
+  return aces.some(ace => typeof ace?.sid !== "string" || !["Allow", "Deny"].includes(ace?.type)
+    || (ace.type === "Allow" && ace.sid !== me && !WINDOWS_PRIVILEGED.includes(ace.sid)));
+}
+
+// How to make a key file owner-only again, in the terms of the platform.
+export function restrictAdvice(file, platform = process.platform) {
+  return platform === "win32"
+    ? `icacls "${file}" /inheritance:r /grant:r "%USERDOMAIN%\\%USERNAME%:F"`
+    : `chmod 600 ${file}`;
 }
 
 // Shared by the extension and the staff scripts, so a takedown from the
@@ -83,7 +122,8 @@ export async function loadStaffConfig(file = new URL("../../../booth/local-confi
   }
   if (config.leaderboardApi !== undefined && await readableByOthers(file, access)) {
     throw new DomainError("config_exposed", "booth/local-config.json holds the leaderboard keys and can be read by other "
-      + "users of this machine, so it was not loaded. Restrict it: chmod 600 booth/local-config.json. If anyone else "
+      + "users of this machine, or that could not be verified, so it was not loaded. Restrict it: "
+      + `${restrictAdvice("booth/local-config.json", access.platform)}. If anyone else `
       + "could have read it, treat the keys as exposed and rotate them (booth/RUNBOOK.md, Copying the keys to another machine).", 400);
   }
   return config;

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CONTENT_SECURITY_POLICY, createApp, handleIsCurated } from "../leaderboard-service/app.mjs";
@@ -2542,13 +2542,14 @@ test("the staff config is loaded only while its keys are readable by its owner a
   await chmod(file, 0o600);
   assert.equal((await loadStaffConfig(file, { platform: "darwin" })).leaderboardApi.boothKey, "b".repeat(64));
 
-  // No keys, nothing to expose; and Windows ACLs cannot be judged from a mode.
+  // No keys, nothing to expose; and on Windows the ACL decides, not the mode.
   await writeFile(file, JSON.stringify({ leaderboardUrl: "https://example.org/board" }));
   await chmod(file, 0o644);
   assert.equal((await loadStaffConfig(file, { platform: "darwin" })).leaderboardUrl, "https://example.org/board");
   await writeFile(file, JSON.stringify(withKeys));
   await chmod(file, 0o644);
-  assert.ok((await loadStaffConfig(file, { platform: "win32" })).leaderboardApi);
+  const ownerOnly = async () => ({ stdout: JSON.stringify({ aces: [{ sid: "S-1-5-21-1-2-3-1001", type: "Allow" }], me: "S-1-5-21-1-2-3-1001" }) });
+  assert.ok((await loadStaffConfig(file, { platform: "win32", run: ownerOnly })).leaderboardApi);
 });
 
 test("the takedown command refuses mixed modes and repeated flags", async () => {
@@ -2621,4 +2622,82 @@ test("an instance bound to a key cannot write or stay healthy once the board's b
   await openReservationKey(directory, restarted);
   const fresh = await service(t, { store: restarted });
   assert.equal((await fetch(`${fresh.url}/healthz`)).status, 200);
+});
+
+// --- Review round 26 ---------------------------------------------------------
+
+test("on Windows the key file's ACL decides, and anything unverifiable fails closed", async t => {
+  const { readableByOthers, loadStaffConfig } = await import("../.github/extensions/commit-and-sip/domain.mjs");
+  const directory = await tempDirectory(t);
+  const file = join(directory, "local-config.json");
+  await writeFile(file, JSON.stringify({ leaderboardApi: { boothKey: "b".repeat(64), staffKey: "s".repeat(64), url: "https://example.org" } }));
+  const ME = "S-1-5-21-1-2-3-1001";
+  const calls = [];
+  const acl = answer => async (command, args, options) => {
+    calls.push({ args, command, options });
+    if (answer instanceof Error) throw answer;
+    return { stdout: typeof answer === "string" ? answer : JSON.stringify(answer) };
+  };
+  const exposed = answer => readableByOthers(file, { env: {}, platform: "win32", run: acl(answer) });
+
+  assert.equal(await exposed({ aces: [{ sid: ME, type: "Allow" }], me: ME }), false, "what restrictToOwner leaves");
+  assert.equal(await exposed({ aces: [{ sid: ME, type: "Allow" }, { sid: "S-1-5-18", type: "Allow" },
+    { sid: "S-1-5-32-544", type: "Allow" }], me: ME }), false, "SYSTEM and Administrators can read anything anyway");
+  assert.equal(await exposed({ aces: { sid: ME, type: "Allow" }, me: ME }), false, "a single ACE serialised as an object");
+  assert.equal(await exposed({ aces: [{ sid: ME, type: "Allow" }, { sid: "S-1-5-32-545", type: "Deny" }], me: ME }), false,
+    "a deny for others exposes nothing");
+  for (const [label, answer] of [
+    ["the Users group can read it", { aces: [{ sid: ME, type: "Allow" }, { sid: "S-1-5-32-545", type: "Allow" }], me: ME }],
+    ["Everyone can read it", { aces: [{ sid: "S-1-1-0", type: "Allow" }], me: ME }],
+    ["PowerShell could not run", new Error("spawn powershell.exe ENOENT")],
+    ["the answer is not JSON", "Access is denied."],
+    ["no identity came back", { aces: [{ sid: ME, type: "Allow" }] }],
+    ["no ACEs came back", { aces: [], me: ME }],
+    ["an ACE of an unknown kind", { aces: [{ sid: ME, type: "Audit" }], me: ME }],
+  ]) {
+    assert.equal(await exposed(answer), true, label);
+  }
+  // The path reaches PowerShell only through the environment, never the script.
+  const last = calls.at(-1);
+  assert.equal(last.command, "powershell.exe");
+  assert.equal(last.options.env.SIP_ACL_FILE, file);
+  assert.ok(!last.args.join(" ").includes(file), "a file name cannot change what runs");
+
+  await assert.rejects(() => loadStaffConfig(file, { platform: "win32", run: acl(new Error("no PowerShell")) }),
+    { code: "config_exposed" });
+  await assert.rejects(() => loadStaffConfig(file, { platform: "win32", run: acl(new Error("no PowerShell")) }), /icacls/);
+});
+
+test("packaging names the archiver it needs up front, and Windows uses the tar it ships with", async t => {
+  const { archiveCommand, assertArchiver } = await import("../scripts/package-leaderboard.mjs");
+  assert.deepEqual(archiveCommand("win32", "out.zip", ["leaderboard-service", "package.json"]),
+    ["tar", ["-a", "-c", "-f", "out.zip", "leaderboard-service", "package.json"]]);
+  assert.deepEqual(archiveCommand("linux", "out.zip", ["package.json"]), ["zip", ["-qr", "out.zip", "package.json"]]);
+  const missing = () => { throw Object.assign(new Error("spawn zip ENOENT"), { code: "ENOENT" }); };
+  assert.throws(() => assertArchiver("linux", missing), /needs the zip command.*Nothing was packaged/);
+  assert.throws(() => assertArchiver("win32", missing), /needs tar\.exe.*Windows 10/);
+  assert.doesNotThrow(() => assertArchiver("linux", () => {}));
+  const packager = await readFile(new URL("../scripts/package-leaderboard.mjs", import.meta.url), "utf8");
+  assert.match(packager, /async function build\(\) \{\n  assertArchiver\(\);/, "checked before anything is staged");
+  assert.match(packager, /archiveCommand\(process\.platform, zip,/, "and the archive is made with the platform's command");
+
+  // Windows' tar.exe is bsdtar. Where bsdtar is available, run the exact
+  // Windows command and check the zip holds the same entries, with no "./".
+  const { execFileSync } = await import("node:child_process");
+  let version = "";
+  try { version = execFileSync("tar", ["--version"], { encoding: "utf8" }); } catch { /* no tar */ }
+  if (!version.includes("bsdtar")) { t.diagnostic("bsdtar not available here; Windows archive format not exercised"); return; }
+  const stage = await tempDirectory(t);
+  await mkdir(join(stage, "leaderboard-service", "public"), { recursive: true });
+  await writeFile(join(stage, "package.json"), "{}");
+  await writeFile(join(stage, "leaderboard-service", "server.mjs"), "x");
+  await writeFile(join(stage, "leaderboard-service", "public", "index.html"), "y");
+  const zip = join(stage, "..", `${stage.split("/").at(-1)}.zip`);
+  t.after(() => rm(zip, { force: true }));
+  const [command, args] = archiveCommand("win32", zip, ["leaderboard-service", "package.json"]);
+  execFileSync(command, args, { cwd: stage });
+  const header = (await readFile(zip)).subarray(0, 4);
+  assert.deepEqual([...header], [0x50, 0x4b, 0x03, 0x04], "a zip, not a tar");
+  const listing = execFileSync("unzip", ["-Z1", zip], { encoding: "utf8" }).trim().split("\n").filter(name => !name.endsWith("/")).sort();
+  assert.deepEqual(listing, ["leaderboard-service/public/index.html", "leaderboard-service/server.mjs", "package.json"]);
 });

@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
@@ -101,7 +101,30 @@ async function smokeTest(stage) {
   }
 }
 
+// How the staged copy becomes a zip. Windows 10 (1803) and later ship bsdtar
+// as tar.exe, which writes a zip when the name ends in .zip, with forward
+// slashes in entry names; `zip` is not part of Windows. Elsewhere `zip` is the
+// usual tool. Entries are named rather than ".", so none starts with "./".
+export function archiveCommand(platform, zip, entries) {
+  return platform === "win32"
+    ? ["tar", ["-a", "-c", "-f", zip, ...entries]]
+    : ["zip", ["-qr", zip, ...entries]];
+}
+
+// Checked before anything is staged, so a missing tool is named up front
+// rather than surfacing as ENOENT after the smoke test.
+export function assertArchiver(platform = process.platform, run = execFileSync) {
+  const [command, args] = platform === "win32" ? ["tar", ["--version"]] : ["zip", ["-v"]];
+  try { run(command, args, { stdio: "ignore" }); }
+  catch {
+    throw new Error(platform === "win32"
+      ? "npm run leaderboard:package needs tar.exe, which ships with Windows 10 (1803) and later. Nothing was packaged."
+      : "npm run leaderboard:package needs the zip command (for example: apt install zip). Nothing was packaged.");
+  }
+}
+
 async function build() {
+  assertArchiver();
   const stage = join(root, "dist", "leaderboard");
   const zip = join(root, "dist", "leaderboard.zip");
   // Only this script's own outputs: dist/ also holds the secure deployment
@@ -126,7 +149,8 @@ async function build() {
   await writeFile(join(stage, "package.json"), `${JSON.stringify(service, null, 2)}\n`);
 
   await smokeTest(stage);
-  execFileSync("zip", ["-qr", zip, "."], { cwd: stage });
+  const [archiver, args] = archiveCommand(process.platform, zip, (await readdir(stage)).sort());
+  execFileSync(archiver, args, { cwd: stage });
   process.stdout.write(`Packaged ${manifest.length} repository files and no dependencies.\n`
     + `Smoke test passed against the staged copy.\n${relative(root, zip)}\n`);
 }

@@ -5,7 +5,7 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { guardNodeVersion } from "./require-node.mjs";
-import { DomainError, readableByOthers, validateStaffConfig } from "../.github/extensions/commit-and-sip/domain.mjs";
+import { DomainError, readableByOthers, restrictAdvice, validateStaffConfig } from "../.github/extensions/commit-and-sip/domain.mjs";
 import { validateLeaderboardApi } from "../.github/extensions/commit-and-sip/services/leaderboard-client.mjs";
 
 guardNodeVersion();
@@ -52,17 +52,18 @@ function apiOf(config, file) {
 
 // The file keys are copied from is a second copy of them. It must be readable
 // by its owner only while it exists, and deleted once they are copied. On
-// Windows, POSIX modes say nothing about ACLs, so this cannot be checked there.
-async function assertPrivateSource(file, platform) {
+// Windows its ACL is read instead of its mode, and an unverifiable one fails.
+async function assertPrivateSource(file, access) {
+  const platform = access.platform ?? process.platform;
   let exposed;
-  try { exposed = await readableByOthers(file, { platform }); }
+  try { exposed = await readableByOthers(file, access); }
   catch (error) {
     if (error.code === "ENOENT") throw new Error(`${file} does not exist.`);
     throw error;
   }
   if (exposed) {
-    throw new Error(`${file} can be read by other users of this machine, and it holds the service keys. `
-      + `Restrict it first (chmod 600 ${file}), run this again, then delete it.`);
+    throw new Error(`${file} can be read by other users of this machine, or that could not be verified, and it holds the service keys. `
+      + `Restrict it first (${restrictAdvice(file, platform)}), run this again, then delete it.`);
   }
 }
 
@@ -105,7 +106,7 @@ export async function configure({ url, staff = true, configFile, parametersFile,
   const existing = apiOf(config, configFile);
   let source = existing;
   if (from !== null) {
-    await assertPrivateSource(from, access.platform ?? process.platform);
+    await assertPrivateSource(from, access);
     source = apiOf(await readJson(from), from);
     if (!source.boothKey || (staff && !source.staffKey)) {
       throw new Error(`${from} has no ${source.boothKey ? "staffKey" : "leaderboardApi keys"} to copy. Use the booth/local-config.json of a staff machine.`);

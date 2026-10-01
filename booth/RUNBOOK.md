@@ -219,6 +219,7 @@ az deployment sub create --subscription 6aab8b26-48c5-4cfd-ac82-6b5efcc2e441 --l
 rm dist/leaderboard.secure.parameters.json
 
 # 3. Code. The packager starts the staged copy and loads every page before zipping.
+#    It needs `zip` on macOS/Linux, or tar.exe (built into Windows 10 1803+) on Windows.
 npm run leaderboard:package
 az webapp deploy --subscription 6aab8b26-48c5-4cfd-ac82-6b5efcc2e441 \
   --resource-group rg-commit-and-sip-lb-westus2 --name commit-and-sip-leaderboard \
@@ -245,7 +246,7 @@ npm run leaderboard:configure -- --url https://… --from "$tmp/local-config.jso
 rm -rf "$tmp"                                  # delete the copy straight away
 ```
 
-The booth itself holds to the same rule: the canvases and the staff commands refuse to load a `booth/local-config.json` that holds keys and can be read by other users (`config_exposed`). `chmod 600 booth/local-config.json` fixes the file. If anyone else could have read it, treat the keys as exposed and rotate them. The command reminds you to delete the copy. It does not delete it for you: `--from` could name a file you still need, such as the staff machine's own config on a mounted share. On Windows, POSIX modes say nothing about ACLs, so the owner-only check cannot run there. Keep the copy in a folder only you can open, and delete it straight after.
+The booth itself holds to the same rule: the canvases and the staff commands refuse to load a `booth/local-config.json` that holds keys and can be read by other users (`config_exposed`), or whose permissions cannot be verified. `chmod 600 booth/local-config.json` fixes the file; on Windows, `icacls "booth\local-config.json" /inheritance:r /grant:r "%USERDOMAIN%\%USERNAME%:F"`. If anyone else could have read it, treat the keys as exposed and rotate them. The command reminds you to delete the copy. It does not delete it for you: `--from` could name a file you still need, such as the staff machine's own config on a mounted share. On Windows the check reads the file's ACL (through PowerShell `Get-Acl`) instead of its mode. Only your account, SYSTEM and Administrators may have access, and if the ACL cannot be read the file is refused. Keep the copy in a folder only you can open, and delete it straight after. *This Windows path is tested with a simulated PowerShell answer, not yet on a Windows machine.*
 
 **Never run `leaderboard:configure` without `--from` on a machine that already has a booth key but no staff key:** it refuses, because a newly minted staff key would not match the service, and redeploying to accept it would lock out every other staff machine. To rotate the keys, delete `leaderboardApi` from the file, rerun steps 1 and 2, and copy the new keys to every booth the same way.
 
