@@ -2905,3 +2905,26 @@ test("permission checks follow a symbolic link to the file actually read", { ski
   execFileSync("/bin/chmod", ["-N", target]);
   assert.equal(await readableByOthers(link), false);
 });
+
+// --- Review round 30 ---------------------------------------------------------
+
+test("the credential file is never packaged under any spelling of its case", async () => {
+  const { win32, posix } = await import("node:path");
+  const { isNeverPackaged } = await import("../scripts/package-leaderboard.mjs");
+  for (const file of ["C:\\repo\\BOOTH\\LOCAL-CONFIG.JSON", "C:\\repo\\booth\\Local-Config.json", "c:\\REPO\\booth\\local-config.json"]) {
+    assert.equal(isNeverPackaged(file, { paths: win32, root: "C:\\repo" }), true, file);
+  }
+  for (const file of ["/repo/BOOTH/local-config.json", "/repo/booth/LOCAL-CONFIG.JSON"]) {   // macOS volumes ignore case too
+    assert.equal(isNeverPackaged(file, { paths: posix, root: "/repo" }), true, file);
+  }
+  assert.equal(isNeverPackaged("C:\\repo\\booth\\handle-words.json", { paths: win32, root: "C:\\repo" }), false);
+});
+
+test("the runbook gives a supported way to back up and to recover a lost reservation key", async () => {
+  const runbook = await readFile(new URL("../booth/RUNBOOK.md", import.meta.url), "utf8");
+  const section = runbook.slice(runbook.indexOf("#### Backing up and recovering the reservation key"));
+  assert.match(section, /cat \/home\/data\/commit-and-sip\/reservation\.key/);
+  assert.match(section, /mv \/home\/data\/commit-and-sip\/<EVENT_ID>\.json/, "the board is preserved, not deleted");
+  assert.match(section, /On \*\*every\*\* booth machine, run `npm run leaderboard:republish`/);
+  assert.match(section, /archived and wiped.*blocklist/s, "and the limit is stated with its remedy");
+});

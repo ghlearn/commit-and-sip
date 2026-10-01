@@ -235,7 +235,22 @@ Then open `/healthz`. `moderation: "placeholder"` means the service is running w
 
 Every infrastructure deployment needs the keys again (step 1 keeps the existing ones). Give each additional booth machine the **same deployed keys**, as below (add `--no-staff-key` on machines that should not take drinks down).
 
-The board is a JSON file on the app's persistent `/home` storage, beside `reservation.key`, the key that fingerprints taken-down names. **Keep the two together:** if the key is lost while the board holds reservations, the service refuses to start rather than mint a new key that would let every taken-down name be published again. Restore the key; do not delete the board to get past it. The plan runs **one instance**, and there is no reason to scale it out. The store stays correct if the platform briefly runs a second instance, because writes are locked and version-checked on the shared disk, but it is not built for sustained scale-out. To start a fresh board for a new event, change `eventId` in `infra/main.parameters.json` and redeploy the infrastructure. The old board stays on disk.
+The board is a JSON file on the app's persistent `/home` storage, beside `reservation.key`, the key that fingerprints taken-down names. **Keep the two together:** if the key is lost while the board holds reservations, the service refuses to start rather than mint a new key that would let every taken-down name be published again. Do not delete the board to get past it; follow [backing up and recovering the reservation key](#backing-up-and-recovering-the-reservation-key). The plan runs **one instance**, and there is no reason to scale it out. The store stays correct if the platform briefly runs a second instance, because writes are locked and version-checked on the shared disk, but it is not built for sustained scale-out. To start a fresh board for a new event, change `eventId` in `infra/main.parameters.json` and redeploy the infrastructure. The old board stays on disk.
+
+#### Backing up and recovering the reservation key
+
+Nothing backs the key up automatically: the Bicep provisions no App Service backup. Both steps below need an identity with Contributor on the app. They have not been run against the live service, because the deployer here holds Reader only.
+
+**Back it up** once, after the first start, and again after any recovery. Open an SSH session to the app (Azure portal → the app → **SSH**, or `az webapp ssh --subscription 6aab8b26-48c5-4cfd-ac82-6b5efcc2e441 -g rg-commit-and-sip-lb-westus2 -n commit-and-sip-leaderboard`). Run `cat /home/data/commit-and-sip/reservation.key`, and store the value where the team keeps secrets, never in the repository. To restore it, write that value back to the same path with mode 0600, then restart the app.
+
+**If the key is lost and there is no backup**, rebuild the board from the booths. They hold the authoritative copy of every drink and every takedown:
+
+1. In an SSH session, preserve the board rather than deleting it: `mv /home/data/commit-and-sip/<EVENT_ID>.json /home/data/commit-and-sip/<EVENT_ID>.json.lost-key-$(date +%Y%m%d%H%M)`.
+2. Restart the app (`az webapp restart` with the same `--subscription`, `-g` and `-n`). It mints a new key and starts an empty board bound to it. Back that key up now.
+3. On **every** booth machine, run `npm run leaderboard:republish`. It replays the booth's takedowns first, so each removed name is reserved again under the new key, and it sends no drink until all of them are. A booth-only machine stops and says so: give it the staff key (see below), then run it again there.
+4. Keep the preserved file until every booth has republished, then compare `/api/board` with the booths' menus.
+
+**The limit:** a takedown exists only in the ledger of the booth that made it. If that booth's event was already archived and wiped, step 3 cannot reserve its removed names again. Take them from the `removals` in that booth's archive file and add them to the moderation blocklist. The booths and the service both enforce the blocklist, after the service is redeployed with it.
 
 #### Copying the keys to another machine
 

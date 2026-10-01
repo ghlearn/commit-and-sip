@@ -32,10 +32,13 @@ export const NEVER_PACKAGE = ["booth/local-config.json"];
 // Compared as resolved absolute paths, never as relative strings: on Windows
 // `relative()` returns `booth\\local-config.json`, which would not match the
 // entry above and would put both API keys into the zip. `paths` is injectable
-// so the Windows behaviour is tested on any platform.
+// so the Windows behaviour is tested on any platform. Compared without regard
+// to case, on every platform: Windows and macOS's default volumes resolve
+// `BOOTH/LOCAL-CONFIG.JSON` to the same file, and excluding a file whose name
+// differs only in case costs nothing.
 export function isNeverPackaged(file, { root: base = root, paths = path } = {}) {
-  const target = paths.resolve(file);
-  return NEVER_PACKAGE.some(entry => paths.resolve(base, ...entry.split("/")) === target);
+  const target = paths.resolve(file).toLowerCase();
+  return NEVER_PACKAGE.some(entry => paths.resolve(base, ...entry.split("/")).toLowerCase() === target);
 }
 
 // Manifest entries are always forward-slash relative paths, whatever the OS.
