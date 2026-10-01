@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { promisify } from "node:util";
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { guardNodeVersion } from "./require-node.mjs";
-import { DomainError, validateStaffConfig } from "../.github/extensions/commit-and-sip/domain.mjs";
+import { DomainError, readableByOthers, validateStaffConfig } from "../.github/extensions/commit-and-sip/domain.mjs";
 import { validateLeaderboardApi } from "../.github/extensions/commit-and-sip/services/leaderboard-client.mjs";
 
 guardNodeVersion();
@@ -54,13 +54,13 @@ function apiOf(config, file) {
 // by its owner only while it exists, and deleted once they are copied. On
 // Windows, POSIX modes say nothing about ACLs, so this cannot be checked there.
 async function assertPrivateSource(file, platform) {
-  let mode;
-  try { ({ mode } = await stat(file)); }
+  let exposed;
+  try { exposed = await readableByOthers(file, { platform }); }
   catch (error) {
     if (error.code === "ENOENT") throw new Error(`${file} does not exist.`);
     throw error;
   }
-  if (platform !== "win32" && (mode & 0o077)) {
+  if (exposed) {
     throw new Error(`${file} can be read by other users of this machine, and it holds the service keys. `
       + `Restrict it first (chmod 600 ${file}), run this again, then delete it.`);
   }

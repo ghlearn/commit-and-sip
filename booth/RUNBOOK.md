@@ -245,7 +245,7 @@ npm run leaderboard:configure -- --url https://… --from "$tmp/local-config.jso
 rm -rf "$tmp"                                  # delete the copy straight away
 ```
 
-The command reminds you to delete the copy. It does not delete it for you: `--from` could name a file you still need, such as the staff machine's own config on a mounted share. On Windows, POSIX modes say nothing about ACLs, so the owner-only check cannot run there. Keep the copy in a folder only you can open, and delete it straight after.
+The booth itself holds to the same rule: the canvases and the staff commands refuse to load a `booth/local-config.json` that holds keys and can be read by other users (`config_exposed`). `chmod 600 booth/local-config.json` fixes the file. If anyone else could have read it, treat the keys as exposed and rotate them. The command reminds you to delete the copy. It does not delete it for you: `--from` could name a file you still need, such as the staff machine's own config on a mounted share. On Windows, POSIX modes say nothing about ACLs, so the owner-only check cannot run there. Keep the copy in a folder only you can open, and delete it straight after.
 
 **Never run `leaderboard:configure` without `--from` on a machine that already has a booth key but no staff key:** it refuses, because a newly minted staff key would not match the service, and redeploying to accept it would lock out every other staff machine. To rotate the keys, delete `leaderboardApi` from the file, rerun steps 1 and 2, and copy the new keys to every booth the same way.
 

@@ -2523,3 +2523,45 @@ test("every takedown outcome has words in the remove command, and none prints un
     assert.match(text, /--retry/);
   }
 });
+
+// --- Review round 24 ---------------------------------------------------------
+
+test("the staff config is loaded only while its keys are readable by its owner alone", async t => {
+  const { chmod } = await import("node:fs/promises");
+  const { loadStaffConfig } = await import("../.github/extensions/commit-and-sip/domain.mjs");
+  const directory = await tempDirectory(t);
+  const file = join(directory, "local-config.json");
+  const withKeys = { leaderboardApi: { boothKey: "b".repeat(64), staffKey: "s".repeat(64), url: "https://example.org" } };
+  await writeFile(file, JSON.stringify(withKeys));
+  await chmod(file, 0o644);                                   // restored from a backup, or copied in
+  await assert.rejects(() => loadStaffConfig(file, { platform: "darwin" }), { code: "config_exposed" });
+  await assert.rejects(() => loadStaffConfig(file, { platform: "darwin" }), /chmod 600.*rotate/);
+  await chmod(file, 0o640);                                   // group-readable only is still other users
+  await assert.rejects(() => loadStaffConfig(file, { platform: "darwin" }), { code: "config_exposed" });
+  await chmod(file, 0o600);
+  assert.equal((await loadStaffConfig(file, { platform: "darwin" })).leaderboardApi.boothKey, "b".repeat(64));
+
+  // No keys, nothing to expose; and Windows ACLs cannot be judged from a mode.
+  await writeFile(file, JSON.stringify({ leaderboardUrl: "https://example.org/board" }));
+  await chmod(file, 0o644);
+  assert.equal((await loadStaffConfig(file, { platform: "darwin" })).leaderboardUrl, "https://example.org/board");
+  await writeFile(file, JSON.stringify(withKeys));
+  await chmod(file, 0o644);
+  assert.ok((await loadStaffConfig(file, { platform: "win32" })).leaderboardApi);
+});
+
+test("the takedown command refuses mixed modes and repeated flags", async () => {
+  const { parseArguments } = await import("../scripts/remove-drink.mjs");
+  for (const argv of [
+    ["--retry", "--id", "mona-x", "--by", "lead", "--reason", "reported"],   // would have retried and removed nothing
+    ["--list", "--id", "mona-x", "--by", "lead", "--reason", "reported"],
+    ["--list", "--retry"],
+    ["--retry", "--by", "lead"],
+  ]) {
+    assert.throws(() => parseArguments(argv), /Choose one of --list, --retry, or a removal/, argv.join(" "));
+  }
+  assert.throws(() => parseArguments(["--id", "a", "--id", "b", "--by", "lead", "--reason", "x"]), /--id was given twice/);
+  assert.throws(() => parseArguments(["--retry", "--retry"]), /given twice/);
+  assert.equal(parseArguments(["--retry"]).retry, true);
+  assert.equal(parseArguments(["--id", "a", "--by", "lead", "--reason", "x"]).id, "a");
+});

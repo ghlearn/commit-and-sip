@@ -16,10 +16,18 @@ guardNodeVersion();
 // It writes through the same engine and the same ledger lock as the booth, so a
 // removal during a live run cannot interleave with an attendee's submission.
 
+const USAGE = 'Usage: npm run remove -- --list | --retry | --id <drink-id> --by "<name>" --reason "<why>"';
+
+// The three modes are alternatives. A takedown typed alongside --list or
+// --retry, or a flag given twice, is refused rather than quietly ignored: a
+// moderation command that silently did something else is worse than none.
 export function parseArguments(argv) {
   const args = { by: null, id: null, list: false, reason: null, retry: false };
+  const seen = new Set();
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
+    if (seen.has(flag)) throw new Error(`${flag} was given twice. ${USAGE}`);
+    seen.add(flag);
     if (flag === "--list") { args.list = true; continue; }
     if (flag === "--retry") { args.retry = true; continue; }
     const value = argv[index + 1];
@@ -30,9 +38,13 @@ export function parseArguments(argv) {
     else if (flag === "--reason") args.reason = value;
     else throw new Error(`Unknown option ${flag}.`);
   }
+  const removal = args.id !== null || args.by !== null || args.reason !== null;
+  if ([args.list, args.retry, removal].filter(Boolean).length > 1) {
+    throw new Error(`Choose one of --list, --retry, or a removal (--id, --by, --reason). ${USAGE}`);
+  }
   if (args.list || args.retry) return args;
   if (!args.id || !args.by || !args.reason) {
-    throw new Error('Usage: npm run remove -- --list | --retry | --id <drink-id> --by "<name>" --reason "<why>"');
+    throw new Error(USAGE);
   }
   return args;
 }
