@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { randomInt, randomUUID } from "node:crypto";
@@ -79,8 +79,11 @@ const WINDOWS_PRIVILEGED = ["S-1-5-18", "S-1-5-32-544"];
 // accounts that can read everything regardless). Anything that cannot be
 // verified counts as readable: the answer guards keys, so it fails closed.
 export async function readableByOthers(file, { platform = process.platform, run = promisify(execFile), env = process.env } = {}) {
-  const { mode } = await stat(file);
-  const path = file instanceof URL ? fileURLToPath(file) : String(file);
+  // Both checks look at the file the keys are actually read from. stat and
+  // readFile follow a symbolic link but ls does not, so the link is resolved
+  // first: otherwise the link's own (empty) ACL would vouch for its target.
+  const path = await realpath(file instanceof URL ? fileURLToPath(file) : String(file));
+  const { mode } = await stat(path);
   if (platform !== "win32") return (mode & 0o077) !== 0 || posixAclMayGrant(path, platform, run);
   let acl;
   try {

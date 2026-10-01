@@ -2664,8 +2664,9 @@ test("on Windows the key file's ACL decides, and anything unverifiable fails clo
   // The path reaches PowerShell only through the environment, never the script.
   const last = calls.at(-1);
   assert.equal(last.command, "powershell.exe");
-  assert.equal(last.options.env.SIP_ACL_FILE, file);
-  assert.ok(!last.args.join(" ").includes(file), "a file name cannot change what runs");
+  const { realpath } = await import("node:fs/promises");
+  assert.equal(last.options.env.SIP_ACL_FILE, await realpath(file), "the resolved file, the one actually read");
+  assert.ok(!last.args.join(" ").includes(file) && !last.args.join(" ").includes(await realpath(file)), "a file name cannot change what runs");
 
   await assert.rejects(() => loadStaffConfig(file, { platform: "win32", run: acl(new Error("no PowerShell")) }),
     { code: "config_exposed" });
@@ -2859,4 +2860,48 @@ test("a key file whose ACL could not be stripped is never written to", async t =
   await assert.rejects(() => restrictToOwner(file, { platform: "linux", run }), /Could not make .* private.*no keys were written/);
   const clean = async command => (command === "setfacl" ? { stdout: "" } : { stdout: `-rw------- 1 me me 0 Jan 1 00:00 ${file}\n` });
   await restrictToOwner(file, { platform: "linux", run: clean });
+});
+
+// --- Review round 29 ---------------------------------------------------------
+
+test("a late success never overwrites a refusal, and the resend reports the refusal that won", async t => {
+  const lostBoard = gate();
+  const onWire = gate();
+  let sends = 0;
+  const client = {
+    async publish(sent) {
+      sends += 1;
+      if (sends === 1) { onWire.open(); await lostBoard.opened; return { ...sent, entries: 1, rank: 1 }; }   // the lost board, answering late
+      throw Object.assign(new Error("409 duplicate_drink"), { code: "duplicate_drink", status: 409 });     // the replacement
+    },
+  };
+  const { engine, store } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const stale = engine.publish("booth-1", { again: true });
+  await onWire.opened;
+  const refused = await engine.publish("booth-1", { again: true });
+  assert.equal(refused.state, "rejected");
+  lostBoard.open();
+  const late = await stale;
+  const sync = (await store.read()).runs["booth-1"].sync;
+  assert.equal(sync.state, "rejected", "the late success did not bring the lost board's rank back");
+  assert.equal(sync.receipt, undefined);
+  assert.equal(late.state, "rejected", "and the late attempt reports the state that won, not success");
+});
+
+test("permission checks follow a symbolic link to the file actually read", { skip: process.platform !== "darwin" && "macOS ACLs" }, async t => {
+  const { execFileSync } = await import("node:child_process");
+  const { symlink } = await import("node:fs/promises");
+  const { loadStaffConfig, readableByOthers } = await import("../.github/extensions/commit-and-sip/domain.mjs");
+  const directory = await tempDirectory(t);
+  const target = join(directory, "real-config.json");
+  await writeFile(target, JSON.stringify({ leaderboardApi: { boothKey: "b".repeat(64), staffKey: "s".repeat(64), url: "https://example.org" } }), { mode: 0o600 });
+  execFileSync("/bin/chmod", ["+a", "everyone allow read", target]);   // 0600, but readable through its ACL
+  const link = join(directory, "local-config.json");
+  await symlink(target, link);
+  assert.equal(await readableByOthers(link), true, "the target's ACL is what counts");
+  await assert.rejects(() => loadStaffConfig(link), { code: "config_exposed" });
+  execFileSync("/bin/chmod", ["-N", target]);
+  assert.equal(await readableByOthers(link), false);
 });

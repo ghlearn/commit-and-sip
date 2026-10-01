@@ -566,9 +566,9 @@ export class BoothEngine {
     } catch (error) {
       outcome = { ok: false, error };
     }
-    const removedMeanwhile = await this.store.transaction(stored => {
+    const { recorded, removedMeanwhile } = await this.store.transaction(stored => {
       const current = stored.runs[runId];
-      if (!current?.sync) return false;
+      if (!current?.sync) return { recorded: null, removedMeanwhile: false };
       // Overlapping attempts: a late failure from an earlier try must not undo
       // a confirmation or a final refusal that another try already recorded.
       // A definitive refusal is the exception: it comes from the service as it
@@ -579,7 +579,10 @@ export class BoothEngine {
       // A failure carries no receipt: one from a lost board must not survive
       // into a refusal and be read as a rank.
       const { receipt: _lost, ...failure } = outcome.ok ? {} : failedSync(current.sync, outcome.error);
-      if (outcome.ok) current.sync = confirmedSync(current.sync, outcome.receipt);
+      // And a refusal is final: a run is never sent again once refused, so a
+      // success arriving after one is from an attempt that started earlier,
+      // possibly to a board since lost, and must not bring back its rank.
+      if (outcome.ok) { if (current.sync.state !== "rejected") current.sync = confirmedSync(current.sync, outcome.receipt); }
       else if (!settled || failure.state === "rejected") current.sync = failure;
       const { [attempt]: _done, ...others } = current.sync.sending ?? {};
       if (Object.keys(others).length) current.sync.sending = others;
@@ -592,7 +595,7 @@ export class BoothEngine {
         const record = this.removalLog(stored).findLast(item => item.id === entry.id);
         if (record && SETTLED.includes(record.published)) record.published = "in-doubt";
       }
-      return Boolean(current.removed);
+      return { recorded: { reason: current.sync.reason, state: current.sync.state }, removedMeanwhile: Boolean(current.removed) };
     });
     // Staff can take a drink down while its publish is still in flight. The
     // retraction may then reach the service before the submission does, and
@@ -604,9 +607,10 @@ export class BoothEngine {
     if (removedMeanwhile) await this.retract(entry.id);
     // What this attempt did, separately from what is recorded. A forced
     // resend that fails leaves an earlier "confirmed" in place, which is
-    // right for the record and wrong for a report on the resend.
+    // right for the record and wrong for a report on the resend. A success
+    // that lost to a refusal already recorded reports the refusal that won.
     return outcome.ok
-      ? { sent: true, state: "confirmed" }
+      ? (recorded?.state === "rejected" ? { reason: recorded.reason, sent: true, state: "rejected" } : { sent: true, state: "confirmed" })
       : { reason: failedSync({ attempts: 0 }, outcome.error).reason, sent: true,
         state: failedSync({ attempts: 0 }, outcome.error).state };
   }
