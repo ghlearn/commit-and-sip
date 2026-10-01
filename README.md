@@ -32,12 +32,15 @@ This is a canvas-led adaptation of a GitHub Skills exercise: one learner step wi
 
 Commit & Sip is a project-local Copilot App canvas extension, registered as `commit-and-sip`. The booth flow runs end to end today: handle, name validation, rubric score, house menu, standings, and hand-over all work locally and persist across panel closure and extension reload.
 
-It is **not** event-ready. Four things are missing and none of them is code:
+It is **not** event-ready. Two human reviews are outstanding, and neither is code:
 
 - **The moderation blocklist is an unreviewed placeholder.** `booth/blocked-terms.json` ships with no real terms, and the extension logs a warning on every start while that is true. A human must review and approve the list before attendee names go on a public menu. Staff can take a drink down after the fact with `npm run remove`, which is what makes an imperfect list survivable, but that is a response and not a substitute.
+- **Brand, trademark, and privacy review** of the mascot names and artwork has not happened, and the attendee screen already carries the official Mona mascot in the cup. See [the asset checklist](.github/images/README.md) for its provenance and what happens if review says no.
+
+Already in place:
+
 - **The leaderboard service is live, but its moderation is not.** [The service](docs/leaderboard-service.md) runs at <https://commit-and-sip-leaderboard.azurewebsites.net> (short link <https://gh.io/commit-and-sip-leader>). It was redeployed on 2026-10-01 from this branch and verified end to end through the canvases, so the current booth client works against it. Changes to `leaderboard-service/` made after that deploy reach the live site only when someone with Contributor redeploys (see the runbook). The board and the names on it are moderated with the same placeholder blocklist, so **the attendee QR (`leaderboardUrl`) stays a gated setting: leave it unset until the blocklist is reviewed.** The event owner has switched it on for one booth machine, ahead of that review, as a deliberate exception for staff testing; staff takedown is the only moderation there until the review is done. Publishing is local-first, so an unreachable service never blocks an attendee.
 - **Both short links resolve.** <https://gh.io/commit-and-sip-leader> redirects to the leaderboard service and keeps the query string, so each attendee's personal code (`?handle=…&ref=…`) still opens their own row once `leaderboardUrl` is set. <https://gh.io/commit-and-sip> points at this repository, which is public.
-- **Brand, trademark, and privacy review** of the mascot names and artwork has not happened, and the attendee screen already carries the official Mona mascot in the cup. See [the asset checklist](.github/images/README.md) for its provenance and what happens if review says no.
 
 The earlier pull-request review flow, its live and canvas-pilot modes, and its provisioning scripts have been removed. No code path in this repository reads or writes GitHub.
 

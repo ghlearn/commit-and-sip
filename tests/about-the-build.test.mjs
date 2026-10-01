@@ -137,3 +137,21 @@ test("the operator docs describe the current deployment, not an earlier one", as
     for (const phrase of stale) assert.doesNotMatch(text, phrase, `${file}: ${phrase}`);
   }
 });
+
+// A readiness count that disagrees with its own list makes the launch
+// criteria ambiguous. Count the items, do not trust the sentence.
+test("the readiness sections count exactly the gates they list", async () => {
+  const words = { Two: 2, Three: 3, Four: 4 };
+  const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  const intro = /It is \*\*not\*\* event-ready\. (\w+) human reviews are outstanding[^\n]*\n\n((?:- [^\n]*\n)+)/.exec(readme);
+  assert.ok(intro, "the README states how many reviews are outstanding, then lists them");
+  assert.equal(intro[2].trim().split("\n").length, words[intro[1]], "README: the count matches the list");
+
+  const contract = await readFile(new URL("../docs/integration-contract.md", import.meta.url), "utf8");
+  const gates = contract.slice(contract.indexOf("### Launch gates"), contract.indexOf("\n## ", contract.indexOf("### Launch gates")));
+  const stated = /(\w+) gates stand between this and attendees/.exec(gates);
+  assert.ok(stated);
+  const paragraphs = gates.split("\n\n").slice(2).filter(p => p.trim() && !p.startsWith("Not a gate") && !/^The leaderboard service is deployed/.test(p));
+  assert.equal(paragraphs.length, words[stated[1]], "contract: one paragraph per stated gate");
+  assert.doesNotMatch(gates, /other three gates|Four gates/);
+});
