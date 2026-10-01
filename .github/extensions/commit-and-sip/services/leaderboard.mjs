@@ -152,3 +152,29 @@ export function validateLeaderboardClient(client) {
     "invalid_leaderboard_client", "A leaderboard client's retract must be a function when present.");
   return client;
 }
+
+// What went wrong with a retraction, kept on the removal record. A refused
+// key, an outdated service and an outage each need a different fix, and
+// "failed" alone suggests only the last.
+export function retractionFailure(error) {
+  return {
+    code: typeof error?.code === "string" && /^[a-z_]{1,40}$/.test(error.code) ? error.code : null,
+    status: Number.isInteger(error?.status) ? error.status : null,
+  };
+}
+
+// The cause in words, for the dashboard and the staff commands alike. Each
+// surface adds its own way to retry.
+export function retractionCause(failure) {
+  const { code = null, status = null } = failure ?? {};
+  if (status === 401 || status === 403) {
+    return "the service refused this machine's staff key. Copy the deployed keys to this machine "
+      + "(an owner-only copy with npm run leaderboard:configure -- --url <url> --from <file>, then delete the copy)";
+  }
+  if (code === "reservation_key_mismatch") return "a service instance is on an outdated reservation key and is being restarted";
+  if (status === 404 || code === "unexpected_response") {
+    return "the service did not answer as the current build does, so it may need redeploying (booth/RUNBOOK.md)";
+  }
+  if (status !== null) return `the service refused it (${status}${code ? ` ${code}` : ""})`;
+  return "the service could not be reached";
+}

@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { guardNodeVersion } from "./require-node.mjs";
 import { loadCatalog, loadStaffConfig } from "../.github/extensions/commit-and-sip/domain.mjs";
 import { leaderboardClientFromConfig } from "../.github/extensions/commit-and-sip/services/leaderboard-client.mjs";
+import { retractionCause } from "../.github/extensions/commit-and-sip/services/leaderboard.mjs";
 import { dataDirectory, RunStore } from "../.github/extensions/commit-and-sip/store.mjs";
 import { BoothEngine } from "../.github/extensions/commit-and-sip/booth-engine.mjs";
 import { loadNameRules } from "../.github/extensions/commit-and-sip/services/coffee-name.mjs";
@@ -75,7 +76,7 @@ export async function retryReport(engine) {
   return {
     exitCode: results.some(result => !["retracted", "absent"].includes(result.published)) ? 1 : 0,
     text: results.length
-      ? `${results.map(result => `${result.id}\t${publicBoardText(result.published)}`).join("\n")}\n`
+      ? `${results.map(result => `${result.id}\t${publicBoardText(result.published, result.failure)}`).join("\n")}\n`
       : "No takedowns are waiting to reach the public leaderboard.\n",
   };
 }
@@ -90,7 +91,10 @@ export const PUBLIC_BOARD = {
 
 // Every outcome gets words. One this table does not know is reported as
 // unresolved, never printed as "undefined".
-export function publicBoardText(published) {
+export function publicBoardText(published, failure = null) {
+  if (published === "failed") {
+    return `It is NOT yet off the public leaderboard: ${retractionCause(failure)}. Run npm run remove -- --retry once that is fixed.`;
+  }
   return Object.hasOwn(PUBLIC_BOARD, published) ? PUBLIC_BOARD[published]
     : "It may still be on the public leaderboard: the outcome was not recorded. Run npm run remove -- --retry.";
 }
@@ -122,7 +126,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       process.stdout.write(`Removed ${record.name} (${record.id}) entered by ${record.handle}.\n`
         + `Recorded by ${record.removedBy} at ${record.removedAt}: ${record.reason}\n`
         + "The name stays reserved and cannot be re-entered at this booth.\n"
-        + `${publicBoardText(record.published)}\n`);
+        + `${publicBoardText(record.published, record.failure)}\n`);
       // Any takedown that may still be public is unfinished, not a success.
       if (record.owed) process.exitCode = 1;
     }

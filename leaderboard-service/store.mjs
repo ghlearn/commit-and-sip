@@ -232,11 +232,16 @@ export class FileStore extends MemoryStore {
     // Every row must be loadable as itself. Two rows with one ID would load
     // "successfully" as one, and the next write would drop the other for good.
     const entries = new Map();
+    const handles = new Set();
     for (const entry of saved.entries) {
       const problem = storedEntryProblem(entry);
       if (problem) throw unreadable(problem);
       if (entries.has(entry.id)) throw unreadable(`two entries with ID ${entry.id}`);
+      // Handles are unique across the board; two rows with one would make the
+      // public board, and an attendee's own link, ambiguous.
+      if (handles.has(entry.handle)) throw unreadable(`two entries with handle ${entry.handle}`);
       entries.set(entry.id, entry);
+      handles.add(entry.handle);
     }
     // A reservation that is not a fingerprint (a readable ID, a truncated
     // hash) would load, pass /healthz and match nothing, releasing the name.

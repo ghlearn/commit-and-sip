@@ -153,7 +153,10 @@ When the booth publishes to the leaderboard service, removal also takes the drin
 | --- | --- | --- |
 | taken off the public leaderboard | Removed there, and the name is reserved | None |
 | was not on the public leaderboard | It had not synced yet; the name is still reserved there | None |
-| **NOT yet off the public leaderboard** | The service was unreachable | Press **Refresh** on the dashboard, or run `npm run remove -- --retry` once the network is back |
+| **NOT yet off the public leaderboard: the service could not be reached** | Network or service outage | Press **Refresh** on the dashboard, or run `npm run remove -- --retry` once the network is back |
+| **…: the service refused this machine's staff key** | This machine's keys do not match the deployed service | Copy the deployed keys here (see *Copying the keys to another machine*), then **Refresh** |
+| **…: a service instance is on an outdated reservation key** | The service's key changed under a running instance, which is being recycled | Wait a minute, then **Refresh** |
+| **…: the service did not answer as the current build does** | The deployed service predates this booth's code | Redeploy the service (runbook, code deploy), then **Refresh** |
 | **no staff key** / NOT off the public leaderboard | This machine can publish but not delete | Copy the **deployed** keys to this machine from a staff machine, as in [copying the keys to another machine](#copying-the-keys-to-another-machine): an owner-only copy, `--from`, then delete the copy. Then press **Refresh** or run `npm run remove -- --retry`. Another machine cannot finish it, because the removal is recorded only in this booth's ledger. |
 
 A takedown whose outcome was never recorded, for example because the machine stopped mid-removal, is retried the same way. Only "taken off" and "was not on" are final.

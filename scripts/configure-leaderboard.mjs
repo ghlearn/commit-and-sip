@@ -113,6 +113,16 @@ export async function configure({ url, staff = true, configFile, parametersFile,
     }
   }
   const fresh = !source.boothKey;
+  // Keys kept from this machine's own file are only as private as that file
+  // has been. If others could read it, they may have them: hardening the file
+  // now does not take them back, so they are not kept. A file without keys is
+  // simply rewritten owner-only.
+  if (from === null && !fresh && await readableByOthers(configFile, access).catch(() => true)) {
+    throw new DomainError("config_exposed", `${configFile} holds leaderboard keys and can be read by other users of this `
+      + "machine, or that could not be verified, so its keys may be exposed and were not kept. Rotate them: delete "
+      + "leaderboardApi from the file, rerun this command and the infrastructure deployment, then copy the new keys to "
+      + "every booth (booth/RUNBOOK.md, Copying the keys to another machine).", 400);
+  }
   if (!fresh && staff && !source.staffKey) {
     throw new Error("This machine has a booth key but no staff key. A new staff key would not match the deployed "
       + "service, and redeploying to add one would lock out every other staff machine. Copy the keys from a staff "

@@ -4,8 +4,7 @@ import { PLACEMENTS } from "./services/coffee-name.mjs";
 import { validateLeaderboardUrl } from "./services/public-url.mjs";
 import { addDrink, leaderboard, removeDrink, seedMenu, standingFor } from "./services/booth-menu.mjs";
 import {
-  confirmedSync, failedSync, initialSync, newPublicationToken, publicRef, submissionFor, syncView, tokenHashOf,
-  validateLeaderboardClient, validateReceipt
+  confirmedSync, failedSync, initialSync, newPublicationToken, publicRef, retractionCause, retractionFailure, submissionFor, syncView, tokenHashOf, validateLeaderboardClient, validateReceipt,
 } from "./services/leaderboard.mjs";
 import {
   archiveMatches, archivePayload, artifactName, emptyLedger, eventSummary, exportPayload, WIPE_CONFIRMATION
@@ -127,7 +126,8 @@ export class BoothEngine {
     // `owed` says whether the drink may still be public because of it.
     const published = await this.retract(record.id);
     const data = await this.store.read();
-    return { ...record, owed: !SETTLED.includes(published) && mayBePublic(data, record, Boolean(this.leaderboardClient)), published };
+    const recorded = this.removalLog(data).findLast(item => item.id === record.id) ?? record;
+    return this.takedownView({ ...recorded, owed: !SETTLED.includes(published) && mayBePublic(data, record, Boolean(this.leaderboardClient)), published });
   }
 
   // Takes a removed drink off the public board and records the outcome on the
@@ -142,11 +142,12 @@ export class BoothEngine {
     // this point may have reached the service after the retraction did.
     const sendsEndedBefore = this.sendsEnded(await this.store.read(), id);
     let published;
+    let failure = null;
     if (!this.leaderboardClient?.retract) {
       published = "not-configured";
     } else {
       try { published = await this.leaderboardClient.retract(id); }
-      catch { published = "failed"; }
+      catch (error) { published = "failed"; failure = retractionFailure(error); }
     }
     // Attempts can overlap (a dashboard refresh while an earlier try is still
     // waiting on the network). A settled outcome is never replaced by an
@@ -161,9 +162,27 @@ export class BoothEngine {
       const sync = data.runs[record.runId]?.sync;
       const inDoubt = liveClaims(sync) > 0 || this.sendsEnded(data, id) !== sendsEndedBefore;
       if (SETTLED.includes(published) && inDoubt) published = "in-doubt";
-      if (!SETTLED.includes(record.published) || SETTLED.includes(published)) record.published = published;
+      if (!SETTLED.includes(record.published) || SETTLED.includes(published)) {
+        record.published = published;
+        // Why it failed, while it is failing, so staff are given the right fix.
+        if (failure) record.failure = failure;
+        else delete record.failure;
+      }
       return record.published;
     });
+  }
+
+  // A takedown as staff are shown it: its outcome and, while it is failing,
+  // the cause in words.
+  takedownView(record) {
+    return { ...record, cause: record.published === "failed" ? retractionCause(record.failure) : null };
+  }
+
+  // Retracts, then reports the outcome as recorded, with its failure if any.
+  async retractReport(id) {
+    const published = await this.retract(id);
+    const record = this.removalLog(await this.store.read()).findLast(item => item.id === id);
+    return { id, published, ...(published === "failed" && record?.failure ? { failure: record.failure } : {}) };
   }
 
   // How many sends of this drink have finished, across its runs.
@@ -196,7 +215,7 @@ export class BoothEngine {
     const data = await this.store.read();
     const pending = this.removalLog(data).filter(record => !SETTLED.includes(record.published));
     const results = [];
-    for (const record of pending) results.push({ id: record.id, published: await this.retract(record.id) });
+    for (const record of pending) results.push(await this.retractReport(record.id));
     return results;
   }
 
@@ -242,13 +261,11 @@ export class BoothEngine {
         continue;
       }
       if (!SETTLED.includes(record.published)) {
-        removals.push({ id: record.id, published: await this.retract(record.id) });
+        removals.push(await this.retractReport(record.id));
         continue;
       }
-      let published;
-      try { published = await this.leaderboardClient.retract(record.id); }
-      catch { published = "failed"; }
-      removals.push({ id: record.id, published });
+      try { removals.push({ id: record.id, published: await this.leaderboardClient.retract(record.id) }); }
+      catch (error) { removals.push({ failure: retractionFailure(error), id: record.id, published: "failed" }); }
     }
     // Takedowns first is a guarantee, not a preference. Until every removed ID
     // is reserved again, the replacement board would accept that name, so no
@@ -291,9 +308,12 @@ export class BoothEngine {
       leaderboardUrl: this.leaderboardUrl,
       // `owed`: not settled, and the drink may be public. The dashboard must
       // warn about these, including one whose outcome was never recorded.
-      removals: this.removalLog(data).map(record => ({
+      removals: this.removalLog(data).map(record => this.takedownView({
         ...record, owed: !SETTLED.includes(record.published) && mayBePublic(data, record, Boolean(this.leaderboardClient)),
       })),
+      // Publishing (leaderboardApi) and the attendee link (leaderboardUrl) are
+      // configured separately, so they are reported separately.
+      publishing: { enabled: Boolean(this.leaderboardClient), takedowns: Boolean(this.leaderboardClient?.retract) },
       summary: eventSummary(data),
     };
   }
@@ -355,7 +375,7 @@ export class BoothEngine {
       const owed = this.removalLog(data).filter(record => !SETTLED.includes(record.published) && mayBePublic(data, record, Boolean(this.leaderboardClient)));
       requireValue(owed.length === 0, "takedowns_owed",
         `${owed.length === 1 ? "One takedown has" : `${owed.length} takedowns have`} not reached the public leaderboard, `
-        + "so wiping would leave it public with no record to retry from. Refresh once the network is back, "
+        + "so wiping would leave it public with no record to retry from. The dashboard shows why each has not landed: fix that and Refresh, "
         + "or copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <an owner-only (chmod 600) copy of a staff machine's booth/local-config.json>, then delete that copy. Nothing was changed.", 409);
       const summary = eventSummary(data);
       // An attendee mid-order would lose the drink on the screen in front of

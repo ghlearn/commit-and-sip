@@ -380,7 +380,8 @@ async function tempDirectory(t) {
 
 // A reservation as the service stores it: a 64-hex HMAC-SHA256 fingerprint.
 const fp = label => createHash("sha256").update(label).digest("hex");
-const entry = (id, score = 1000) => ({ createdAt: "2026-01-01T00:00:00Z", handle: HANDLE, id, name: id, score });
+// Each row its own handle, as the service guarantees: the phrase plus a suffix from the ID.
+const entry = (id, score = 1000) => ({ createdAt: "2026-01-01T00:00:00Z", handle: `${HANDLE}-${fp(id).slice(0, 8)}`, id, name: id, score });
 
 test("the file store survives a restart and never overwrites on create", async t => {
   const directory = await tempDirectory(t);
@@ -2106,7 +2107,7 @@ test("a rebuild sends no drink until every takedown is reserved again", async t 
   reachable = false;
   const blocked = await engine.republishAll();
   assert.equal(blocked.blocked, true);
-  assert.deepEqual(blocked.removals, [{ id: removed.submission.id, published: "failed" }]);
+  assert.deepEqual(blocked.removals, [{ failure: { code: null, status: null }, id: removed.submission.id, published: "failed" }]);
   assert.deepEqual(blocked.drinks, [], "no drink is sent while a removed name is unreserved");
   assert.equal((await board(replacement.url)).total, 0, "and none reached the replacement board");
 
@@ -2700,4 +2701,89 @@ test("packaging names the archiver it needs up front, and Windows uses the tar i
   assert.deepEqual([...header], [0x50, 0x4b, 0x03, 0x04], "a zip, not a tar");
   const listing = execFileSync("unzip", ["-Z1", zip], { encoding: "utf8" }).trim().split("\n").filter(name => !name.endsWith("/")).sort();
   assert.deepEqual(listing, ["leaderboard-service/public/index.html", "leaderboard-service/server.mjs", "package.json"]);
+});
+
+// --- Review round 27 ---------------------------------------------------------
+
+test("configure will not keep keys from a file others could read, but hardens one without keys", async t => {
+  const { chmod, stat } = await import("node:fs/promises");
+  const { configure } = await import("../scripts/configure-leaderboard.mjs");
+  const directory = await tempDirectory(t);
+  const url = "https://commit-and-sip-leaderboard.azurewebsites.net";
+  const file = join(directory, "local-config.json");
+  await configure({ configFile: file, url, access: { platform: "darwin" } });
+  await chmod(file, 0o644);                                    // restored from a backup
+  const before = await readFile(file, "utf8");
+  await assert.rejects(() => configure({ configFile: file, url, access: { platform: "darwin" } }),
+    { code: "config_exposed" });
+  await assert.rejects(() => configure({ configFile: file, url, access: { platform: "darwin" } }), /Rotate them/);
+  assert.equal(await readFile(file, "utf8"), before, "the exposed keys were not reported as kept, nor rewritten");
+
+  await chmod(file, 0o600);
+  assert.deepEqual((await configure({ configFile: file, url, access: { platform: "darwin" } })).generated, [], "private keys are kept");
+
+  const urlOnly = join(directory, "url-only.json");
+  await writeFile(urlOnly, JSON.stringify({ leaderboardUrl: "https://example.org/board" }));
+  await chmod(urlOnly, 0o644);
+  const fresh = await configure({ configFile: urlOnly, url, access: { platform: "darwin" } });
+  assert.deepEqual(fresh.generated, ["boothKey", "staffKey"]);
+  assert.equal((await stat(urlOnly)).mode & 0o777, 0o600, "rewritten owner-only");
+});
+
+test("a failed takedown keeps its cause, and staff are told the fix for that cause", async t => {
+  const { publicBoardText } = await import("../scripts/remove-drink.mjs");
+  const causes = [
+    [Object.assign(new Error("401"), { code: "unauthorized", status: 401 }), /refused this machine's staff key.*--from/],
+    [Object.assign(new Error("503"), { code: "reservation_key_mismatch", status: 503 }), /outdated reservation key/],
+    [Object.assign(new Error("404"), { code: "not_found", status: 404 }), /may need redeploying/],
+    [Object.assign(new Error("200"), { code: "unexpected_response", status: 200 }), /may need redeploying/],
+    [Object.assign(new Error("500"), { code: "server_error", status: 500 }), /refused it \(500 server_error\)/],
+    [new TypeError("fetch failed"), /could not be reached/],
+  ];
+  for (const [error, advice] of causes) {
+    let fail = true;
+    const client = { async publish(sent) { return { ...sent, entries: 1, rank: 1 }; },
+      async retract() { if (fail) throw error; return "retracted"; } };
+    const { engine, store } = await engineWith(t, client);
+    await engine.open({ runId: "booth-1" });
+    const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+    await engine.publish("booth-1");
+    const removal = await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
+    assert.equal(removal.published, "failed");
+    assert.match(removal.cause, advice, error.message);
+    assert.match(publicBoardText(removal.published, removal.failure), advice);
+    assert.match((await engine.adminOverview()).removals[0].cause, advice);
+    assert.match(publicBoardText("failed", (await engine.retryRetractions())[0].failure), advice, "and on --retry");
+
+    fail = false;                                              // the cause is fixed
+    await engine.retryRetractions();
+    const settled = (await store.read()).removals[0];
+    assert.equal(settled.published, "retracted");
+    assert.equal(settled.failure, undefined, "a settled takedown carries no stale cause");
+    assert.equal((await engine.adminOverview()).removals[0].cause, null);
+  }
+});
+
+test("the dashboard reports publishing and the attendee link separately", async t => {
+  const publishOnly = { async publish(sent) { return { ...sent, entries: 1, rank: 1 }; } };
+  const staff = { ...publishOnly, async retract() { return "absent"; } };
+  assert.deepEqual((await (await engineWith(t, null)).engine.adminOverview()).publishing, { enabled: false, takedowns: false });
+  assert.deepEqual((await (await engineWith(t, publishOnly)).engine.adminOverview()).publishing, { enabled: true, takedowns: false });
+  const { engine } = await engineWith(t, staff);
+  const overview = await engine.adminOverview();
+  assert.deepEqual(overview.publishing, { enabled: true, takedowns: true });
+  assert.equal(overview.leaderboardUrl, null, "publishing with no attendee link is a real, reported state");
+  const renderer = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/admin.js", import.meta.url), "utf8");
+  assert.match(renderer, /line\(list, !publishing\.enabled/, "publishing is rendered from its own status");
+  assert.match(renderer, /line\(list, state\.leaderboardUrl\s*\? `Attendee link \(QR\)/, "the attendee link from its own");
+  assert.match(renderer, /if \(published === "failed" && cause\) return/, "and a failed takedown shows its cause");
+});
+
+test("a board with two rows under one handle is refused", async t => {
+  const directory = await tempDirectory(t);
+  const file = join(directory, "default.json");
+  const text = JSON.stringify({ entries: [entry("mona-a"), { ...entry("mona-b"), handle: entry("mona-a").handle }], reserved: [], version: 1 });
+  await writeFile(file, text);
+  await assert.rejects(() => FileStore.open({ directory }), /two entries with handle/);
+  assert.equal(await readFile(file, "utf8"), text);
 });

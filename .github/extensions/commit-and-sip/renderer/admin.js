@@ -145,9 +145,17 @@
     line(list, state.blocklist.ready
       ? "Moderation blocklist: reviewed and ready."
       : `Moderation blocklist: NOT event-ready. ${state.blocklist.reason}`);
+    // Publishing and the attendee link are separate settings: a booth can
+    // publish to the board well before attendees are given a link to it.
+    const publishing = state.publishing ?? {};
+    line(list, !publishing.enabled
+      ? "Event leaderboard publishing: off. Drinks stay on this booth only."
+      : publishing.takedowns
+        ? "Event leaderboard publishing: on. This machine publishes drinks and can take them down."
+        : "Event leaderboard publishing: on, without a staff key. This machine publishes drinks but cannot take them down.");
     line(list, state.leaderboardUrl
-      ? `Event leaderboard: configured (${state.leaderboardUrl}).`
-      : "Event leaderboard: not configured. Attendees are told there is nothing to scan.");
+      ? `Attendee link (QR): set (${state.leaderboardUrl}).`
+      : "Attendee link (QR): not set. Attendees are told there is nothing to scan.");
   }
 
   function menu(state) {
@@ -188,9 +196,12 @@
   // the drink may be public (`owed`, decided by the booth); a drink that was
   // never published owes nothing and gets no false alarm. A removal whose
   // outcome was never recorded is unresolved, not fine.
-  function boardStatus({ owed, published }) {
+  function boardStatus({ cause, owed, published }) {
     if (published === "retracted" || published === "absent") return PUBLIC_BOARD[published];
     if (!owed) return "";
+    // A failure names its cause: a refused key or an outdated service is not
+    // fixed by waiting for the network.
+    if (published === "failed" && cause) return `is NOT yet off the public leaderboard: ${cause}. Refresh to retry once that is fixed`;
     return PUBLIC_BOARD[published] ?? PUBLIC_BOARD.unrecorded;
   }
 

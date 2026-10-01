@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { guardNodeVersion } from "./require-node.mjs";
 import { openEngine } from "./remove-drink.mjs";
+import { retractionCause } from "../.github/extensions/commit-and-sip/services/leaderboard.mjs";
 
 guardNodeVersion();
 
@@ -23,7 +24,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const { blocked, drinks, removals } = await engine.republishAll();
     const unsettled = removals.filter(removal => !["retracted", "absent"].includes(removal.published));
     for (const removal of unsettled) {
-      process.stdout.write(`FAILED\t${removal.id}\ttakedown not replayed (${removal.published})\n`);
+      process.stdout.write(`FAILED\t${removal.id}\ttakedown not replayed (${removal.published === "failed" ? retractionCause(removal.failure) : removal.published})\n`);
     }
     process.stdout.write(removals.length
       ? `${removals.length - unsettled.length} of ${removals.length} takedowns are reserved on the public leaderboard.\n`
