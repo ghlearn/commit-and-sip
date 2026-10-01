@@ -29,6 +29,8 @@ const STATIC = {
   "/board.css": { file: new URL("./public/board.css", import.meta.url), type: "text/css; charset=utf-8" },
   "/board.js": { file: new URL("./public/board.js", import.meta.url), type: "text/javascript; charset=utf-8" },
   "/fonts/MonaSansVF.woff2": { file: renderer("fonts/MonaSansVF.woff2"), type: "font/woff2" },
+  // The same code the booth shows, so the two can never point different ways.
+  "/repo-qr.png": { file: renderer("repo-qr.png"), type: "image/png" },
   // The font licence requires the notice to travel with the font.
   "/fonts/OFL.txt": { file: renderer("fonts/OFL.txt"), type: "text/plain; charset=utf-8" },
 };

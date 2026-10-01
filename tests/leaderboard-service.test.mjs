@@ -338,8 +338,10 @@ test("the page never parses attendee text as HTML and carries no mascot art", as
   assert.doesNotMatch(script, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   // The mascot is not cleared for publication (see .github/images/README.md),
   // and this page is public. Adding it belongs to brand sign-off, not here.
+  // The one image allowed is the repository QR the event owner supplied.
   for (const file of ["index.html", "board.css", "board.js"]) {
-    const text = await readFile(new URL(`../leaderboard-service/public/${file}`, import.meta.url), "utf8");
+    const text = (await readFile(new URL(`../leaderboard-service/public/${file}`, import.meta.url), "utf8"))
+      .replaceAll(/<img class="built-qr" src="\/repo-qr\.png"[^>]*>/g, "");
     assert.doesNotMatch(text, /mona\.png|\.png|\.svg|<img/i, `${file} must not carry artwork`);
   }
 });

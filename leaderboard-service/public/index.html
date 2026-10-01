@@ -31,6 +31,13 @@
     </table>
 
     <p id="empty" class="empty" hidden>No drinks yet. Be the first to name one at the booth.</p>
+
+    <section class="built" aria-labelledby="built-heading">
+      <img class="built-qr" src="/repo-qr.png" width="132" height="132" alt="QR code for gh.io/commit-and-sip, the code behind Commit and Sip">
+      <h2 id="built-heading">How this was built</h2>
+      <p>Commit &amp; Sip was built with GitHub Copilot. The booth screen is a canvas: a small web app that runs inside the GitHub Copilot App as an extension. Scores come from a fixed rubric in the code, not from an AI model. This leaderboard is a small Node.js service on Azure App Service, set up with Bicep. Changes were reviewed with Copilot code review before merging, and GitHub Actions checks the repository.</p>
+      <p>See the code: <a href="https://gh.io/commit-and-sip" rel="noreferrer noopener" target="_blank">gh.io/commit-and-sip</a></p>
+    </section>
   </main>
   <footer>Mona Sans is used under the <a href="/fonts/OFL.txt">SIL Open Font License</a>.</footer>
 </body>

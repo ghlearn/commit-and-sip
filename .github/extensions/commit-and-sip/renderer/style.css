@@ -123,7 +123,7 @@ details p { max-width: 70ch; font-size: 15px; margin: 10px 0; }
 .error-notice { background: var(--error-surface); color: var(--error); border-color: var(--error); }
 .result { background: var(--surface); margin-top: 30px; padding: 26px; border: 1px solid var(--line); border-top: 4px solid var(--accent-ink); }
 .result > p { margin-top: 12px; font-size: 14px; }
-.qr { display: block; width: 148px; height: 148px; margin-top: 20px; background: white; padding: 8px; }
+.qr { display: block; width: 148px; height: 148px; margin-top: 20px; background: white; padding: 8px; image-rendering: pixelated; }
 @media (prefers-reduced-motion: no-preference) {
 button { transition: border-color 140ms ease, background-color 140ms ease; }
 }

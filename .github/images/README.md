@@ -22,7 +22,7 @@ Required committed output: `.github/images/leaderboard-qr.png`.
 
 Companion output: `.github/images/leaderboard-qr.png.json`, containing the encoded leaderboard URL, PNG SHA-256 digest, generation timestamp, and alt text. Review and retain the PNG and manifest together.
 
-There is currently no approved public leaderboard URL, so no production QR should be generated or advertised. After approval, run from the repository root:
+The event owner has supplied a static code for `https://gh.io/commit-and-sip-leader`, which redirects to the leaderboard service. It is not committed here, because the booth renders each attendee's own code from `leaderboardUrl`. Advertising it is still gated on the blocklist review and the service redeploy. The supplied image has almost no quiet zone (it decodes only once a white border is added), so print it with a margin. After approval, run from the repository root:
 
 ```sh
 npm ci
@@ -48,6 +48,7 @@ So unapproved official mascot art is on the attendee screen today. That makes br
 | Cup, saucer, steam, chalkboard — inline SVG in `renderer/booth.html` | Original work for this booth | No third-party rights involved. Event copy still needs review |
 | `renderer/mona.png` | Official Mona mascot, from a GitHub brand asset sheet | **Unapproved for this use** |
 | `renderer/fonts/MonaSansVF*.woff2` | Mona Sans upstream release | Licensed: SIL OFL 1.1, bundled as `fonts/OFL.txt` |
+| `renderer/repo-qr.png` | Supplied by the event owner. Encodes `https://gh.io/commit-and-sip` (decoded with jsQR and ZXing), with the GitHub mark at its centre | Shown on the booth's served screen and the public leaderboard. The repository it opens is private |
 
 ### `mona.png` provenance
 

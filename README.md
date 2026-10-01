@@ -2,6 +2,16 @@
 
 **Order Up at the Level Up Lounge:** a five-minute, app-only naming competition. Invent one coffee that carries `mona`, `ducky`, or `copilot`, get it scored out of 5,000 by a local rubric, and put it on the house menu for the rest of the event.
 
+## How this was built
+
+Commit & Sip was built with GitHub Copilot, working in the GitHub Copilot App. It has three parts:
+
+- **The booth canvas.** The screen attendees use is a canvas: a small web app that runs inside the GitHub Copilot App as a project extension ([`.github/extensions/commit-and-sip/`](.github/extensions/commit-and-sip/)), built on the Copilot SDK's canvas API. It runs on the booth machine and keeps its data there.
+- **The score.** A fixed rubric in the code ([`services/name-score.mjs`](.github/extensions/commit-and-sip/services/name-score.mjs)) scores each name out of 5,000. No AI model judges it.
+- **The leaderboard.** A small Node.js service that uses only Node's built-in modules ([`leaderboard-service/`](leaderboard-service/)), hosted on Azure App Service and described in Bicep ([`infra/`](infra/)). Each booth sends its drinks to it, and staff can take one down.
+
+Every pull request was reviewed with Copilot code review, and GitHub Actions validates the repository. The booth's served screen and the public leaderboard both carry this summary and a QR code for <https://gh.io/commit-and-sip>, which leads here.
+
 ## One step, entirely in the App
 
 **Audience:** beginners and GitHub-curious booth attendees. **Goal:** invent a drink name nobody has served here yet. **Duration:** about five minutes, with no speed or hint penalties.
@@ -26,7 +36,7 @@ It is **not** event-ready. Four things are missing and none of them is code:
 
 - **The moderation blocklist is an unreviewed placeholder.** `booth/blocked-terms.json` ships with no real terms, and the extension logs a warning on every start while that is true. A human must review and approve the list before attendee names go on a public menu. Staff can take a drink down after the fact with `npm run remove`, which is what makes an imperfect list survivable, but that is a response and not a substitute.
 - **The leaderboard service is deployed but not yet advertised.** [It](docs/leaderboard-service.md) runs at <https://commit-and-sip-leaderboard.azurewebsites.net> and was verified end to end with a staff test entry. It moderates with the same placeholder blocklist, so **do not set `leaderboardUrl`**, the setting that shows attendees a QR code, until the list is reviewed. Publishing is local-first, so an unreachable service never blocks an attendee. **The live build predates this branch's review fixes and does not accept the current booth client, so redeploy it (see the runbook) before configuring a booth to publish.**
-- **There is no public QR destination.** Do not publish a placeholder QR as a production link.
+- **The short links exist, but not every destination is ready.** <https://gh.io/commit-and-sip-leader> redirects to the leaderboard service and keeps the query string, so it can stand in for the service URL in `leaderboardUrl` once the gates above are cleared. <https://gh.io/commit-and-sip> points at this repository, which is **private**, so anyone not signed in with access gets a 404 until it is made public. That is a visibility change needing its own review.
 - **Brand, trademark, and privacy review** of the mascot names and artwork has not happened, and the attendee screen already carries the official Mona mascot in the cup. See [the asset checklist](.github/images/README.md) for its provenance and what happens if review says no.
 
 The earlier pull-request review flow, its live and canvas-pilot modes, and its provisioning scripts have been removed. No code path in this repository reads or writes GitHub.

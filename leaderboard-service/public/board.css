@@ -72,10 +72,22 @@ tr.mine th, tr.mine .handle { color: var(--text); }
   overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 
+/* For whoever is curious, below the board. The QR is for the monitor; on a
+   phone the link is the way in, so the code is hidden there. */
+.built { margin-top: 2.5em; padding-top: 1em; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.85em; }
+.built::after { content: ""; display: block; clear: both; }
+.built h2 { margin: 0 0 0.4em; color: var(--text); font-size: 1.1em; font-weight: 700; }
+.built p { max-width: 60ch; margin: 0 0 0.6em; }
+.built a { color: var(--accent-ink); font-weight: 600; }
+/* White padding is the code's quiet zone; the image itself has almost none. */
+/* Scanned off a monitor from a step or two away, so it grows with the screen. */
+.built-qr { float: right; margin: 0 0 0.5em 1.5em; padding: 8px; background: #fff; width: clamp(200px, 14vw, 260px); height: auto; image-rendering: pixelated; }
+
 footer { max-width: 64rem; margin: 0 auto; padding: 0 clamp(16px, 4vw, 48px) 32px; color: var(--muted); font-size: 0.7em; }
 footer a { color: var(--accent-ink); }
 
 /* Phones: the handle is the least important column and the first to go. */
 @media (max-width: 34rem) {
+  .built-qr { display: none; }
   thead th:nth-child(3), td.handle { display: none; }
 }

@@ -84,6 +84,13 @@
         <p id="served-qr-removed" hidden>Booth staff removed this drink from the house menu, so it has no leaderboard place. Please speak to staff at the counter.</p>
       </section>
 
+      <section class="notice" aria-labelledby="built-heading">
+        <h2 id="built-heading">How this was built</h2>
+        <p>Commit &amp; Sip was built with GitHub Copilot. This booth screen is a canvas: a small web app that runs inside the GitHub Copilot App as an extension. Your score comes from a fixed rubric in the code, not from an AI model. The public leaderboard is a small Node.js service on Azure App Service, set up with Bicep. Changes were reviewed with Copilot code review before merging, and GitHub Actions checks the repository.</p>
+        <p>See the code: <a href="https://gh.io/commit-and-sip" rel="noreferrer noopener" target="_blank">gh.io/commit-and-sip</a></p>
+        <img class="qr" src="/repo-qr.png" width="148" height="148" alt="QR code for gh.io/commit-and-sip, the code behind Commit and Sip">
+      </section>
+
       <button id="finish" class="primary" type="button">I'm done - hand over to the next barista</button>
     </section>
 
