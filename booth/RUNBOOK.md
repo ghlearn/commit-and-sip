@@ -252,7 +252,7 @@ The board is a JSON file on the app's persistent `/home` storage, beside `reserv
 
 #### Backing up and recovering the reservation key
 
-Nothing backs the key up automatically: the Bicep provisions no App Service backup. Both steps below need an identity with Contributor on the app. They have not been run against the live service, because the deployer here holds Reader only.
+Nothing backs the key up automatically: the Bicep provisions no App Service backup. Both steps below need an identity with Contributor on the app, which the deployer here holds only intermittently (it has lapsed to Reader more than once; check with `az role assignment list` before starting). The key was backed up on 2026-10-01, before that day's deploys, by reading it through the Kudu file API (`/api/vfs/data/commit-and-sip/reservation.key` on the app's `scm` host) rather than SSH. That copy is in the deployer's private working folder and still has to be moved to where the team keeps secrets. Restoring a key has not been exercised against the live service.
 
 **Back it up** once, after the first start, and again after any recovery. Open an SSH session to the app (Azure portal → the app → **SSH**, or `az webapp ssh --subscription 6aab8b26-48c5-4cfd-ac82-6b5efcc2e441 -g rg-commit-and-sip-lb-westus2 -n commit-and-sip-leaderboard`). Run `cat /home/data/commit-and-sip/reservation.key`, and store the value where the team keeps secrets, never in the repository. To restore it, write that value back to the same path with mode 0600, then restart the app.
 

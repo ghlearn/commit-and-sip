@@ -131,7 +131,8 @@ test("the operator docs describe the current deployment, not an earlier one", as
   const stale = [/predates (most of )?this document/i, /Redeploy before first use/, /refuses the current booth client/,
     /current booth client does not work/i, /repository it opens is private/, /there is no public QR destination/i,
     /no attendee-facing QR code points at it/i, /gated on the blocklist review and the service redeploy/,
-    /one such change is waiting/, /change not yet live is the board page's 24 px quiet zone/];
+    /one such change is waiting/, /change not yet live is the board page's 24 px quiet zone/,
+    /deployer here holds Reader only/, /have not been run against the live service/];
   for (const file of ["../README.md", "../booth/RUNBOOK.md", "../docs/leaderboard-service.md", "../docs/integration-contract.md",
     "../docs/architecture.md", "../.github/images/README.md"]) {
     const text = await readFile(new URL(file, import.meta.url), "utf8");
