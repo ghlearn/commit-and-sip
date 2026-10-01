@@ -16,8 +16,17 @@ export class AdminPanel {
 
   // `retrying` tells the dashboard a retry sweep is still running, so it keeps
   // polling instead of showing a result that is about to change.
+  // The flag must describe the data it is sent with: a sweep that finishes
+  // (or starts) while the overview is being read would otherwise pair a
+  // stale overview with "not retrying", and the dashboard would stop polling
+  // on a result that has already changed. So read again until no sweep
+  // started or ended during the read.
   async get() {
-    return { ...(await this.engine.adminOverview()), retrying: Boolean(this.sweep) };
+    for (;;) {
+      const sweep = this.sweep;
+      const overview = await this.engine.adminOverview();
+      if (this.sweep === sweep) return { ...overview, retrying: Boolean(sweep) };
+    }
   }
 
   async dispatch(action, input = {}) {

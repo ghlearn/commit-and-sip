@@ -25,10 +25,10 @@ export const USAGE = "Usage: npm run leaderboard:republish -- --takedowns | --op
   + "  --takedowns  replay this booth's takedowns. With several booths, run this on every booth first.\n"
   + "  --open       open a rebuilt (or new) board to drinks, once every booth has run --takedowns. Any one staff machine.\n"
   + "  --drinks     then send this booth's drinks.\n"
-  + "  --all        both, here: for a single-booth event, or a booth that publishes drinks served before it was configured.";
+  + "  --all        takedowns, open, then drinks, all here: only for a single-booth event, or a booth that publishes drinks served before it was configured.";
 
 export function parsePhase(argv) {
-  const phases = { "--all": { drinks: true, takedowns: true }, "--drinks": { drinks: true, takedowns: false },
+  const phases = { "--all": { drinks: true, open: true, takedowns: true }, "--drinks": { drinks: true, takedowns: false },
     "--open": { open: true }, "--takedowns": { drinks: false, takedowns: true } };
   if (argv.length !== 1 || !Object.hasOwn(phases, argv[0])) throw new Error(USAGE);
   return phases[argv[0]];
@@ -71,7 +71,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       // replacement board accept it, so the rebuild stopped before any drink.
       process.stdout.write(reason === "takedowns_not_replayed"
         ? "No drinks were sent: this booth has not replayed its takedowns for this rebuild. Run --takedowns here (and on every other booth) first.\n"
-        : "No drinks were sent. Every takedown must be reserved first; fix the failures above and run this again.\n");
+        : reason === "cannot_open"
+          ? "No drinks were sent: opening the board needs the staff key on this machine.\n"
+          : "No drinks were sent. Every takedown must be reserved first; fix the failures above and run this again.\n");
     } else if (!phase.drinks) {
       process.stdout.write("Takedowns done. When every booth has run --takedowns, run npm run leaderboard:republish -- --drinks on each booth.\n");
     } else {

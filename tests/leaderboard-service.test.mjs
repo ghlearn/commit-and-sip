@@ -3118,7 +3118,7 @@ test("a multi-booth rebuild runs in two phases, and a booth cannot send drinks b
   const { parsePhase } = await import("../scripts/republish-leaderboard.mjs");
   assert.deepEqual(parsePhase(["--takedowns"]), { drinks: false, takedowns: true });
   assert.deepEqual(parsePhase(["--drinks"]), { drinks: true, takedowns: false });
-  assert.deepEqual(parsePhase(["--all"]), { drinks: true, takedowns: true });
+  assert.deepEqual(parsePhase(["--all"]), { drinks: true, open: true, takedowns: true });
   for (const argv of [[], ["--takedowns", "--drinks"], ["--everything"]]) {
     assert.throws(() => parsePhase(argv), /--takedowns \| --open \| --drinks \| --all/, "the phase is always named");
   }
@@ -3238,4 +3238,74 @@ test("a rebuild holds every booth's ordinary publishing until staff open the boa
   assert.deepEqual([(await boothA.store.read()).runs["a-1"].sync.state, (await boothA.store.read()).runs["a-1"].sync.code],
     ["rejected", "unavailable_drink"], "B's takedown was in place first");
   assert.equal((await board(replacement.url)).total, 0);
+});
+
+// --- Review round 37 ---------------------------------------------------------
+
+test("--all rebuilds a single booth onto a closed board by itself, and a held drinks phase can run again", async t => {
+  const directory = await tempDirectory(t);
+  const replacement = await service(t, { store: await FileStore.open({ directory }) });   // created closed
+  const client = createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url: replacement.url });
+  const lost = await service(t);
+  const { engine } = await engineWith(t, createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url: lost.url }));
+  await engine.open({ runId: "booth-1" });
+  await engine.dispatch("booth-1", "submit_name", { name: "Ducky Dawn Drizzle" });
+  await engine.publish("booth-1");
+  await engine.open({ runId: "booth-2" });
+  const removed = await engine.dispatch("booth-2", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.removeDrink({ id: removed.submission.id, reason: "test", removedBy: "lead" });
+  engine.leaderboardClient = client;
+
+  // Without opening, the drinks phase is held by the gate, and keeps its place.
+  await engine.republishAll({ drinks: false });
+  const held = await engine.republishAll({ takedowns: false });
+  assert.deepEqual(held.drinks.map(result => result.state), ["failed"]);
+  assert.ok((await engine.store.read()).rebuild?.takedownsReplayedAt, "a drinks phase that did not finish keeps the marker");
+  await client.openBoard();
+  const rerun = await engine.republishAll({ takedowns: false });
+  assert.deepEqual(rerun.drinks.map(result => result.state), ["confirmed"], "so it can simply run again");
+  assert.equal((await engine.store.read()).rebuild, undefined, "and is cleared once every drink is final");
+
+  // --all on a fresh closed board: takedowns, open, drinks, in one go.
+  const fresh = await service(t, { store: await FileStore.open({ directory: await tempDirectory(t) }) });
+  engine.leaderboardClient = createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url: fresh.url });
+  const { parsePhase } = await import("../scripts/republish-leaderboard.mjs");
+  const all = await engine.republishAll(parsePhase(["--all"]));
+  assert.equal(all.blocked, false);
+  assert.deepEqual(all.drinks.map(result => result.state), ["confirmed"]);
+  assert.equal((await board(fresh.url)).rebuilding, false);
+  assert.equal((await post(fresh.url, submission("Mona Moonrise Mocha", OTHER_HANDLE))).status, 409, "takedowns went first");
+  // A booth-only machine cannot open it, and says so rather than sending into the gate.
+  const boothOnly = createLeaderboardClient({ boothKey: BOOTH_KEY, url: fresh.url });
+  engine.leaderboardClient = boothOnly;
+  assert.equal((await engine.republishAll({ drinks: true, open: true, takedowns: false })).reason, "takedowns_not_replayed");
+  await engine.store.transaction(data => { data.rebuild = { takedownsReplayedAt: new Date().toISOString() }; });
+  assert.equal((await engine.republishAll({ drinks: true, open: true, takedowns: false })).reason, "cannot_open");
+});
+
+test("the dashboard never pairs a stale overview with 'not retrying'", async () => {
+  const reading = gate();
+  const finished = gate();
+  let reads = 0;
+  let settled = false;
+  const engine = {
+    async adminOverview() {
+      reads += 1;
+      const snapshot = { removals: [{ published: settled ? "retracted" : "failed" }] };
+      if (reads === 1) { reading.open(); await finished.opened; }      // the sweep ends mid-read
+      return snapshot;
+    },
+  };
+  const panel = new AdminPanel(engine);
+  let end;
+  panel.sweep = new Promise(resolve => { end = resolve; });
+  const view = panel.get();
+  await reading.opened;
+  settled = true;
+  panel.sweep = null;                                                    // the sweep finished meanwhile
+  end();
+  finished.open();
+  const shown = await view;
+  assert.equal(reads, 2, "read again because the sweep changed during the read");
+  assert.deepEqual([shown.retrying, shown.removals[0].published], [false, "retracted"]);
 });

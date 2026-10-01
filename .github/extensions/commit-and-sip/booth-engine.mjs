@@ -253,17 +253,21 @@ export class BoothEngine {
   // booth. A retraction of something not on the board still reserves it, so
   // replaying is safe, and settled outcomes on the removal records are kept.
   //
-  // A board shared by several booths is rebuilt in two phases across the
-  // event: every booth replays its takedowns ({ drinks: false }), and only
-  // then does any booth send drinks ({ takedowns: false }). One booth's drinks
-  // must not reach the new board before another booth has reserved the names
-  // it took down. Each booth can enforce its own half: the takedown phase
-  // leaves a marker in this ledger, and the drinks phase refuses without it
-  // (and clears it once done, so the next rebuild starts with takedowns
-  // again). That every other booth finished its takedowns is the operator's
-  // step; the service has no rebuild gate. Calling with neither option off
-  // runs both phases here, for an event with one booth.
-  async republishAll({ drinks: sendDrinks = true, takedowns: replayTakedowns = true } = {}) {
+  // A board shared by several booths is rebuilt in phases across the event:
+  // every booth replays its takedowns ({ drinks: false }), staff open the
+  // board, and then every booth sends its drinks ({ takedowns: false }). One
+  // booth's drinks must not reach the new board before another booth has
+  // reserved the names it took down. The service enforces that: a board it
+  // creates from nothing is closed to drinks until a staff machine opens it
+  // (POST /api/board/open), which is the operator's call once every booth has
+  // replayed. Each booth also enforces its own order: the takedown phase
+  // leaves a marker in this ledger, the drinks phase refuses without it, and
+  // the marker is cleared only once every drink has a final outcome, so a
+  // drinks phase held by the gate can simply be run again.
+  //
+  // `open: true` opens the board between the two phases. It is for a single
+  // booth (`--all`), where this machine's takedowns are all the takedowns.
+  async republishAll({ drinks: sendDrinks = true, open = false, takedowns: replayTakedowns = true } = {}) {
     if (!this.leaderboardClient) return { blocked: false, drinks: [], removals: [] };
     let removals;
     if (replayTakedowns) {
@@ -303,6 +307,10 @@ export class BoothEngine {
       }
     }
     if (!sendDrinks) return { blocked: false, drinks: [], removals };
+    if (open) {
+      if (!this.leaderboardClient.openBoard) return { blocked: true, drinks: [], reason: "cannot_open", removals };
+      await this.leaderboardClient.openBoard();
+    }
     const data = await this.store.read();
     const runIds = this.houseMenu(data).filter(entry => !entry.example && data.runs[entry.runId])
       .map(entry => entry.runId);
@@ -316,7 +324,11 @@ export class BoothEngine {
         ? { name: run.submission?.name, reason: attempt.reason, runId, state: attempt.state }
         : { name: run.submission?.name, reason: run.sync.reason, runId, state: run.sync.state });
     }
-    await this.store.transaction(stored => { delete stored.rebuild; });
+    // Done only when every drink has a final outcome. A drink held by the
+    // gate (or the network) keeps the marker, so --drinks can run again.
+    if (results.every(result => ["confirmed", "rejected"].includes(result.state))) {
+      await this.store.transaction(stored => { delete stored.rebuild; });
+    }
     return { blocked: false, drinks: results, removals };
   }
 
