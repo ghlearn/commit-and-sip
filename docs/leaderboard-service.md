@@ -2,7 +2,7 @@
 
 **Status: deployed at <https://commit-and-sip-leaderboard.azurewebsites.net> (short link <https://gh.io/commit-and-sip-leader>), redeployed on 2026-10-01 and verified end to end through the booth canvases. The attendee QR (`leaderboardUrl`) stays unset until the blocklist is reviewed; the event owner has switched it on for one booth machine ahead of that review, for staff testing.**
 
-> **What is live.** Everything in this document up to and including the captured tally is deployed. The one change not yet live is the board page's 24 px quiet zone around the repository QR (commit 308c7b4); it ships with the next code deploy from an identity with Contributor (`npm run leaderboard:package`, then the `az webapp deploy … --async true` command and the version check in the runbook).
+> **What is live.** Everything in this document is deployed, including the captured tally and the board page's 24 px quiet zone around the repository QR. A later change ships with the next code deploy from an identity with Contributor (`npm run leaderboard:package`, then the `az webapp deploy … --async true` command and the version check in the runbook).
 
 This document began as a proposal. It now records what was built, the decisions taken, and where the build departs from the proposal and why. The booth-side contract is still `services/leaderboard.mjs`. The service is constrained by it, not the other way round.
 

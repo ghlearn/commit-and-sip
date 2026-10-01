@@ -130,7 +130,8 @@ test("the setup docs keep the attendee QR gated on the blocklist review", async 
 test("the operator docs describe the current deployment, not an earlier one", async () => {
   const stale = [/predates (most of )?this document/i, /Redeploy before first use/, /refuses the current booth client/,
     /current booth client does not work/i, /repository it opens is private/, /there is no public QR destination/i,
-    /no attendee-facing QR code points at it/i, /gated on the blocklist review and the service redeploy/];
+    /no attendee-facing QR code points at it/i, /gated on the blocklist review and the service redeploy/,
+    /one such change is waiting/, /change not yet live is the board page's 24 px quiet zone/];
   for (const file of ["../README.md", "../booth/RUNBOOK.md", "../docs/leaderboard-service.md", "../docs/integration-contract.md",
     "../docs/architecture.md", "../.github/images/README.md"]) {
     const text = await readFile(new URL(file, import.meta.url), "utf8");
@@ -186,7 +187,10 @@ test("no doc tells an operator to open a board before its prerequisite", async (
   let checked = 0;
   for (const doc of docs) {
     const text = await readFile(new URL(doc, import.meta.url), "utf8");
-    for (const block of text.split(/\n\s*\n/)) {
+    // Paragraphs are blocks, and so is each table row: one row's prerequisite
+    // must not vouch for an instruction in another row.
+    const blocks = text.split(/\n\s*\n/).flatMap(part => part.split("\n").every(line => line.startsWith("|")) ? part.split("\n") : [part]);
+    for (const block of blocks) {
       let at = block.indexOf("republish -- --open");
       while (at >= 0) {
         checked += 1;

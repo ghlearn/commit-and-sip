@@ -206,7 +206,7 @@ Read ranks carefully when helping an attendee. "Rank 1 of 1 at this booth" is th
 
 ## Leaderboard service operations
 
-> **Current deployment (2026-10-01).** The live service was redeployed from this repository's leaderboard branch and accepts the current booth client. A change to `leaderboard-service/` reaches the site only when the code-deploy steps below are run from an identity with Contributor, followed by the version check. At the time of writing one such change is waiting: the board page's 24 px quiet zone around the repository QR (commit 308c7b4), because the deployer's access lapsed to Reader before it could ship.
+> **Current deployment (2026-10-01).** The live service runs `main`, including the board page's 24 px quiet zone around the repository QR, and accepts the current booth client. Its board is the `universe-2026` event, opened empty. A later change to `leaderboard-service/` reaches the site only when the code-deploy steps below are run from an identity with Contributor, followed by the version check.
 
 The service lives in `leaderboard-service/`, and its design and decisions are in [docs/leaderboard-service.md](../docs/leaderboard-service.md). It runs at <https://commit-and-sip-leaderboard.azurewebsites.net> as one App Service B1 instance in subscription **GitHub - NonProd - skills**, region `westus2`, resource group `rg-commit-and-sip-lb-westus2`. Every submission is re-checked there with this repository's own rubric and blocklist, so **redeploy the service whenever `booth/blocked-terms.json` or the rubric changes**. Otherwise booths and service disagree and submissions fail with `score_mismatch`.
 
