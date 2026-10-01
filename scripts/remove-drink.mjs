@@ -100,6 +100,24 @@ export function publicBoardText(published, failure = null) {
     : "It may still be on the public leaderboard: the outcome was not recorded. Run npm run remove -- --retry.";
 }
 
+// What a removal prints. A settled outcome is always reported. An unsettled
+// one is a warning only when the drink may be public (`owed`, decided by the
+// engine); a booth that never published has nothing to take down, and saying
+// it is "NOT off" the board would be a false alarm. Any takedown that may
+// still be public is unfinished, so the command fails.
+export function removalReport(record) {
+  const settled = ["retracted", "absent"].includes(record.published);
+  const board = settled || record.owed ? publicBoardText(record.published, record.failure)
+    : "It was never on the public leaderboard from this booth, so nothing is owed there.";
+  return {
+    exitCode: record.owed ? 1 : 0,
+    text: `Removed ${record.name} (${record.id}) entered by ${record.handle}.\n`
+      + `Recorded by ${record.removedBy} at ${record.removedAt}: ${record.reason}\n`
+      + "The name stays reserved and cannot be re-entered at this booth.\n"
+      + `${board}\n`,
+  };
+}
+
 // Staff need the ID, and nobody should be asked to guess it from a screen or
 // hand-copy it from a ledger file.
 export async function listDrinks(engine) {
@@ -123,13 +141,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
         ? `${drinks.map(drink => `${drink.id}\t${drink.name}`).join("\n")}\n`
         : "No attendee drinks are on the house menu.\n");
     } else {
-      const record = await engine.removeDrink({ id: args.id, removedBy: args.by, reason: args.reason });
-      process.stdout.write(`Removed ${record.name} (${record.id}) entered by ${record.handle}.\n`
-        + `Recorded by ${record.removedBy} at ${record.removedAt}: ${record.reason}\n`
-        + "The name stays reserved and cannot be re-entered at this booth.\n"
-        + `${publicBoardText(record.published, record.failure)}\n`);
-      // Any takedown that may still be public is unfinished, not a success.
-      if (record.owed) process.exitCode = 1;
+      const report = removalReport(await engine.removeDrink({ id: args.id, removedBy: args.by, reason: args.reason }));
+      process.stdout.write(report.text);
+      process.exitCode = report.exitCode;
     }
   } catch (error) {
     process.stderr.write(`${error.message}\n`);

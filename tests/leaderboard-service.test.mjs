@@ -1189,8 +1189,10 @@ test("a direct removal that may leave a drink public is reported as unfinished",
   const removed = await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
   assert.deepEqual([removed.published, removed.owed], ["not-configured", true],
     "the script exits non-zero on `owed`, so automation cannot read this as done");
-  const source = await readFile(new URL("../scripts/remove-drink.mjs", import.meta.url), "utf8");
-  assert.match(source, /if \(record\.owed\) process\.exitCode = 1;/);
+  const { removalReport } = await import("../scripts/remove-drink.mjs");
+  const report = removalReport(removed);
+  assert.equal(report.exitCode, 1);
+  assert.match(report.text, /NOT off the public leaderboard/);
 });
 
 test("two writers that ever overlap cannot trample each other's temporary file", async t => {
@@ -3054,4 +3056,48 @@ test("the board page personalises only with a publication reference, never on a 
   assert.match(page, /const personal = params\.get\("handle"\) && params\.get\("ref"\)/);
   assert.doesNotMatch(page, /\bif \(handle\b|else if \(handle\b|!handle\b/, "no branch keys off the handle alone");
   assert.match(page, /\} else if \(personal && board\.you === null\) \{/, "'not on the board' is said only about a referenced drink");
+});
+
+// --- Review round 34 ---------------------------------------------------------
+
+test("a staff key without a booth key is never reused, and --from cannot name this machine's own config", async t => {
+  const { chmod } = await import("node:fs/promises");
+  const { configure } = await import("../scripts/configure-leaderboard.mjs");
+  const directory = await tempDirectory(t);
+  const url = "https://commit-and-sip-leaderboard.azurewebsites.net";
+  const partial = join(directory, "partial.json");
+  const text = JSON.stringify({ leaderboardApi: { staffKey: "s".repeat(64), url } });
+  await writeFile(partial, text);
+  await chmod(partial, 0o644);                                  // perhaps read by others; never checked as "fresh"
+  let minted = 0;
+  await assert.rejects(() => configure({ configFile: partial, key: () => { minted += 1; return "k".repeat(64); }, url }),
+    { code: "invalid_config" });
+  await assert.rejects(() => configure({ configFile: partial, url }), /staffKey but no boothKey.*exposed/);
+  assert.equal(minted, 0);
+  assert.equal(await readFile(partial, "utf8"), text, "nothing was written");
+
+  // --from naming the target itself, directly or through a link.
+  const own = join(directory, "local-config.json");
+  await configure({ configFile: own, url });
+  const before = await readFile(own, "utf8");
+  await assert.rejects(() => configure({ configFile: own, from: own, url }), /names this machine's own config/);
+  const { symlink } = await import("node:fs/promises");
+  await symlink(own, join(directory, "alias.json"));
+  await assert.rejects(() => configure({ configFile: own, from: join(directory, "alias.json"), url }), /own config/);
+  assert.equal(await readFile(own, "utf8"), before);
+});
+
+test("removing a drink this booth never published raises no public-board alarm", async t => {
+  const { removalReport } = await import("../scripts/remove-drink.mjs");
+  const { engine } = await engineWith(t, null);                  // a booth that does not publish
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const removed = await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
+  assert.deepEqual([removed.published, removed.owed], ["not-configured", false]);
+  const report = removalReport(removed);
+  assert.equal(report.exitCode, 0);
+  assert.doesNotMatch(report.text, /NOT off|copy the deployed keys/);
+  assert.match(report.text, /never on the public leaderboard from this booth/);
+  // A settled outcome is still reported as what it is.
+  assert.match(removalReport({ ...removed, owed: false, published: "absent" }).text, /It was not on the public leaderboard\./);
 });

@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { promisify } from "node:util";
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { chmod, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, resolve, resolve as resolvePath } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { guardNodeVersion } from "./require-node.mjs";
 import { DomainError, readableByOthers, restrictAdvice, validateStaffConfig } from "../.github/extensions/commit-and-sip/domain.mjs";
@@ -113,7 +113,22 @@ export async function configure({ url, staff = true, configFile, parametersFile,
   const config = await readJson(configFile);
   const existing = apiOf(config, configFile);
   let source = existing;
+  // A staff key with no booth key is a shape this command never writes. It is
+  // not a fresh machine: the staff key in it would be reused unchecked. Treat
+  // it as possibly exposed and start again.
+  if (from === null && existing.staffKey && !existing.boothKey) {
+    throw new DomainError("invalid_config", `${configFile} holds a staffKey but no boothKey, which this command never writes. `
+      + "Treat that staff key as exposed: delete leaderboardApi from the file and set this machine up again "
+      + "(booth/RUNBOOK.md, Copying the keys to another machine). Nothing was written.", 400);
+  }
   if (from !== null) {
+    // --from is a copy from another machine, which the operator is then told
+    // to delete. Naming this machine's own config would make that advice
+    // delete the active keys.
+    const same = async file => realpath(file).catch(() => resolvePath(file));
+    if (await same(from) === await same(configFile)) {
+      throw new Error("--from names this machine's own config. To reconfigure this machine, leave out --from. Nothing was written.");
+    }
     await assertPrivateSource(from, access);
     source = apiOf(await readJson(from), from);
     if (!source.boothKey || (staff && !source.staffKey)) {
