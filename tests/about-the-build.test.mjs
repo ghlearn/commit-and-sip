@@ -33,7 +33,7 @@ test("the booth's served screen says how it was built and links to the code", as
   assert.ok(section, "the section is on the served screen, before hand-over");
   assert.match(section, /<h2 id="built-heading">How this was built<\/h2>/);
   assert.match(section, LINK);
-  assert.match(section, /<img class="qr" src="\/repo-qr\.png" width="148" height="148" alt="QR code for gh\.io\/commit-and-sip[^"]+">/);
+  assert.match(section, /<img class="qr qr-repo" src="\/repo-qr\.png" width="164" height="164" alt="QR code for gh\.io\/commit-and-sip[^"]+">/);
 
   const panel = await startServer({ panel: { runId: "about-test", get: async () => ({}), dispatch: async () => ({}) } });
   t.after(() => panel.close());
@@ -64,7 +64,6 @@ test("the public leaderboard says how it was built, serves the same code, and sh
   const { packageManifest } = await import("../scripts/package-leaderboard.mjs");
   assert.ok((await packageManifest()).includes(".github/extensions/commit-and-sip/renderer/repo-qr.png"), "deployed with the service");
   const css = await readFile(new URL("../leaderboard-service/public/board.css", import.meta.url), "utf8");
-  assert.match(css, /\.built-qr \{[^}]*padding: 8px; background: #fff;/, "a white quiet zone around a code that has almost none");
 });
 
 test("both screens make the same factual claims about the build", () => {
@@ -75,4 +74,37 @@ test("both screens make the same factual claims about the build", () => {
       assert.match(html, claim, `${label}: ${claim}`);
     }
   }
+});
+
+// The supplied image (pinned by hash above) is 800px with 26px modules and
+// only 23px of white of its own, so the white padding around it on screen is
+// most of its quiet zone. A scanner expects four modules of it.
+const ASSET = { size: 800, module: 26, edge: 23 };
+const quietModules = (box, padding) => {
+  const scale = (box - 2 * padding) / ASSET.size;           // border-box: padding is inside the box
+  return (padding + ASSET.edge * scale) / (ASSET.module * scale);
+};
+
+test("the repository QR keeps a four-module quiet zone wherever it is shown", async () => {
+  const boothCss = await readFile(new URL("style.css", renderer), "utf8");
+  const booth = /^\.qr\.qr-repo \{ width: (\d+)px; height: \1px; padding: (\d+)px; image-rendering: auto; \}$/m.exec(boothCss);
+  // Smoothed, not pixelated: it is an 800px image scaled down (see style.css).
+  assert.ok(booth, "the booth sizes and smooths the repository code with its own rule");
+  assert.ok(quietModules(+booth[1], +booth[2]) >= 4, `booth: ${quietModules(+booth[1], +booth[2]).toFixed(2)} modules`);
+
+  const boardCss = await readFile(new URL("../leaderboard-service/public/board.css", import.meta.url), "utf8");
+  const board = /\.built-qr \{[^}]*padding: (\d+)px; background: #fff;[^}]*width: clamp\((\d+)px, [\d.]+vw, (\d+)px\)/.exec(boardCss);
+  assert.ok(board, "the board sizes its code with a padded clamp");
+  for (const box of [+board[2], +board[3]]) {
+    assert.ok(quietModules(box, +board[1]) >= 4, `board at ${box}px: ${quietModules(box, +board[1]).toFixed(2)} modules`);
+  }
+});
+
+test("each attendee's leaderboard code is encoded with a four-module margin", async () => {
+  const { renderQrDataUrl } = await import("../.github/extensions/commit-and-sip/services/qr.mjs");
+  let options;
+  const url = await renderQrDataUrl("https://gh.io/commit-and-sip-leader?handle=a-b-c&ref=0123456789abcdef",
+    async () => ({ default: { toDataURL: async (_, given) => { options = given; return "data:image/png;base64,"; } } }));
+  assert.ok(url);
+  assert.ok(options.margin >= 4, `margin ${options.margin}`);
 });

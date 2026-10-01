@@ -81,9 +81,11 @@ tr.mine th, tr.mine .handle { color: var(--text); }
 .built h2 { margin: 0 0 0.4em; color: var(--text); font-size: 1.1em; font-weight: 700; }
 .built p { max-width: 60ch; margin: 0 0 0.6em; }
 .built a { color: var(--accent-ink); font-weight: 600; }
-/* White padding is the code's quiet zone; the image itself has almost none. */
+/* White padding is the code's quiet zone; the image itself has almost none
+   (23px of 800, a module is 26px). 24px keeps at least four modules of white
+   at every size the clamp allows: 4.4 at 260px, 5.7 at 200px. */
 /* Scanned off a monitor from a step or two away, so it grows with the screen. */
-.built-qr { float: right; margin: 0 0 0.5em 1.5em; padding: 8px; background: #fff; width: clamp(200px, 14vw, 260px); height: auto; image-rendering: pixelated; }
+.built-qr { float: right; margin: 0 0 0.5em 1.5em; padding: 24px; background: #fff; width: clamp(200px, 14vw, 260px); height: auto; image-rendering: pixelated; }
 
 footer { max-width: 64rem; margin: 0 auto; padding: 0 clamp(16px, 4vw, 48px) 32px; color: var(--muted); font-size: 0.7em; }
 footer a { color: var(--accent-ink); }

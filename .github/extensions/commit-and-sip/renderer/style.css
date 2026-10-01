@@ -125,6 +125,13 @@ details p { max-width: 70ch; font-size: 15px; margin: 10px 0; }
 .result > p { margin-top: 12px; font-size: 14px; }
 .qr { display: block; width: 148px; height: 148px; margin-top: 20px; background: white; padding: 8px; image-rendering: pixelated; }
 .qr.qr-leaderboard { width: min(240px, 100%); height: auto; }
+/* The supplied repository code has almost no white edge of its own (23px of
+   800, a module is 26px), so the padding is its quiet zone: 16px around a
+   132px image is 4.6 modules, above the four a scanner expects. Unlike the
+   personal code (320px, scaled up), this 800px image is scaled down, where
+   pixelated sampling breaks its module edges on 2x and 3x screens: smoothed,
+   it decoded at 1x, 2x and 3x; pixelated, at 1x only. */
+.qr.qr-repo { width: 164px; height: 164px; padding: 16px; image-rendering: auto; }
 @media (prefers-reduced-motion: no-preference) {
 button { transition: border-color 140ms ease, background-color 140ms ease; }
 }
