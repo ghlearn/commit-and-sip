@@ -2933,7 +2933,8 @@ test("the runbook gives a supported way to back up and to recover a lost reserva
   const section = runbook.slice(runbook.indexOf("#### Backing up and recovering the reservation key"));
   assert.match(section, /cat \/home\/data\/commit-and-sip\/reservation\.key/);
   assert.match(section, /mv \/home\/data\/commit-and-sip\/<EVENT_ID>\.json/, "the board is preserved, not deleted");
-  assert.match(section, /On \*\*every\*\* booth machine, run `npm run leaderboard:republish`/);
+  assert.match(section, /On \*\*every\*\* booth machine, run `npm run leaderboard:republish -- --takedowns`/);
+  assert.match(section, /Only when every booth has finished, run `npm run leaderboard:republish -- --drinks` on each/);
   assert.match(section, /archived and wiped.*blocklist/s, "and the limit is stated with its remedy");
 });
 
@@ -3100,4 +3101,53 @@ test("removing a drink this booth never published raises no public-board alarm",
   assert.match(report.text, /never on the public leaderboard from this booth/);
   // A settled outcome is still reported as what it is.
   assert.match(removalReport({ ...removed, owed: false, published: "absent" }).text, /It was not on the public leaderboard\./);
+});
+
+// --- Review round 35 ---------------------------------------------------------
+
+test("a multi-booth rebuild runs in two phases, and a booth cannot send drinks before its own takedowns", async t => {
+  const { parsePhase } = await import("../scripts/republish-leaderboard.mjs");
+  assert.deepEqual(parsePhase(["--takedowns"]), { drinks: false, takedowns: true });
+  assert.deepEqual(parsePhase(["--drinks"]), { drinks: true, takedowns: false });
+  assert.deepEqual(parsePhase(["--all"]), { drinks: true, takedowns: true });
+  for (const argv of [[], ["--takedowns", "--drinks"], ["--everything"]]) {
+    assert.throws(() => parsePhase(argv), /--takedowns \| --drinks \| --all/, "the phase is always named");
+  }
+
+  // Two booths that took down different names, rebuilding onto an empty board.
+  const board = await service(t);
+  const to = url => createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url });
+  const lost = await service(t);
+  const boothA = (await engineWith(t, to(lost.url))).engine;
+  const boothB = (await engineWith(t, to(lost.url))).engine;
+  await boothA.open({ runId: "a-1" });
+  await boothA.dispatch("a-1", "submit_name", { name: "Ducky Dawn Drizzle" });
+  await boothA.publish("a-1");
+  await boothB.open({ runId: "b-1" });
+  const takenDownAtB = await boothB.dispatch("b-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await boothB.publish("b-1");
+  await boothB.removeDrink({ id: takenDownAtB.submission.id, reason: "test", removedBy: "lead" });
+  boothA.leaderboardClient = to(board.url);
+  boothB.leaderboardClient = to(board.url);
+
+  // Drinks before this booth's own takedown phase: refused, nothing sent.
+  const early = await boothA.republishAll({ takedowns: false });
+  assert.deepEqual([early.blocked, early.reason], [true, "takedowns_not_replayed"]);
+  assert.equal((await fetch(`${board.url}/api/board`).then(r => r.json())).total, 0);
+
+  // Phase one on every booth, then phase two on every booth.
+  for (const booth of [boothA, boothB]) assert.equal((await booth.republishAll({ drinks: false })).blocked, false);
+  assert.equal((await fetch(`${board.url}/api/board`).then(r => r.json())).total, 0, "phase one sends no drink");
+  for (const booth of [boothA, boothB]) assert.equal((await booth.republishAll({ takedowns: false })).blocked, false);
+  assert.deepEqual((await fetch(`${board.url}/api/board`).then(r => r.json())).entries.map(row => row.name), ["Ducky Dawn Drizzle"]);
+  assert.equal((await post(board.url, submission("Mona Moonrise Mocha", OTHER_HANDLE))).status, 409, "B's takedown was in place first");
+
+  // The marker is single-use: the next rebuild starts with takedowns again.
+  assert.equal((await boothA.republishAll({ takedowns: false })).reason, "takedowns_not_replayed");
+});
+
+test("the integration contract describes launch gates, not unbuilt work", async () => {
+  const contract = await readFile(new URL("../docs/integration-contract.md", import.meta.url), "utf8");
+  assert.doesNotMatch(contract, /Not yet built/);
+  assert.match(contract, /### Launch gates\n\nThe code is built and the leaderboard service is deployed\./);
 });

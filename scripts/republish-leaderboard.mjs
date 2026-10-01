@@ -14,14 +14,33 @@ guardNodeVersion();
 // booth served drinks before it was configured to publish. The booth is the
 // authoritative copy; the board is a projection of every booth's menu, so run
 // it on each booth machine. Drinks staff removed are never sent.
+//
+// With more than one booth the rebuild has two phases across the event, and
+// the phase is always named: --takedowns on every booth, then --drinks on
+// every booth, so no booth's drinks reach the new board before another booth
+// has reserved the names it took down. --all runs both here, for a single
+// booth, or once every other booth has finished --takedowns.
+
+export const USAGE = "Usage: npm run leaderboard:republish -- --takedowns | --drinks | --all\n"
+  + "  --takedowns  replay this booth's takedowns. With several booths, run this on every booth first.\n"
+  + "  --drinks     then send this booth's drinks, once every booth has run --takedowns.\n"
+  + "  --all        both, here: for a single-booth event, or a booth that publishes drinks served before it was configured.";
+
+export function parsePhase(argv) {
+  const phases = { "--all": { drinks: true, takedowns: true }, "--drinks": { drinks: true, takedowns: false },
+    "--takedowns": { drinks: false, takedowns: true } };
+  if (argv.length !== 1 || !Object.hasOwn(phases, argv[0])) throw new Error(USAGE);
+  return phases[argv[0]];
+}
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
+    const phase = parsePhase(process.argv.slice(2));
     const engine = await openEngine();
     if (!engine.leaderboardClient) {
       throw new Error("This booth has no leaderboardApi in booth/local-config.json, so there is nowhere to publish.");
     }
-    const { blocked, drinks, removals } = await engine.republishAll();
+    const { blocked, drinks, reason, removals } = await engine.republishAll(phase);
     const unsettled = removals.filter(removal => !["retracted", "absent"].includes(removal.published));
     for (const removal of unsettled) {
       process.stdout.write(`FAILED\t${removal.id}\ttakedown not replayed (${removal.published === "failed" ? retractionCause(removal.failure) : removal.published})\n`);
@@ -38,7 +57,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     if (blocked) {
       // Sending drinks while a removed name is unreserved would let the
       // replacement board accept it, so the rebuild stopped before any drink.
-      process.stdout.write("No drinks were sent. Every takedown must be reserved first; fix the failures above and run this again.\n");
+      process.stdout.write(reason === "takedowns_not_replayed"
+        ? "No drinks were sent: this booth has not replayed its takedowns for this rebuild. Run --takedowns here (and on every other booth) first.\n"
+        : "No drinks were sent. Every takedown must be reserved first; fix the failures above and run this again.\n");
+    } else if (!phase.drinks) {
+      process.stdout.write("Takedowns done. When every booth has run --takedowns, run npm run leaderboard:republish -- --drinks on each booth.\n");
     } else {
       // "rejected" drinks were refused for good (the name was taken or taken
       // down) and are deliberately not resent: they are reported, not failures.

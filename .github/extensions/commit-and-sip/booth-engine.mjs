@@ -252,29 +252,57 @@ export class BoothEngine {
   // without them a name staff removed could be published again from another
   // booth. A retraction of something not on the board still reserves it, so
   // replaying is safe, and settled outcomes on the removal records are kept.
-  async republishAll() {
+  //
+  // A board shared by several booths is rebuilt in two phases across the
+  // event: every booth replays its takedowns ({ drinks: false }), and only
+  // then does any booth send drinks ({ takedowns: false }). One booth's drinks
+  // must not reach the new board before another booth has reserved the names
+  // it took down. Each booth can enforce its own half: the takedown phase
+  // leaves a marker in this ledger, and the drinks phase refuses without it
+  // (and clears it once done, so the next rebuild starts with takedowns
+  // again). That every other booth finished its takedowns is the operator's
+  // step; the service has no rebuild gate. Calling with neither option off
+  // runs both phases here, for an event with one booth.
+  async republishAll({ drinks: sendDrinks = true, takedowns: replayTakedowns = true } = {}) {
     if (!this.leaderboardClient) return { blocked: false, drinks: [], removals: [] };
-    // Every takedown is replayed, settled ones included: the board they were
-    // settled on may be the one that was lost. Each is marked unsettled in the
-    // ledger before anything is sent, so a failed replay, a stop part-way, or
-    // a wipe attempted meanwhile all see it as owed until the replay itself
-    // lands. retract() then records the real outcome.
-    const ids = await this.store.transaction(data => {
-      const latest = new Map(this.removalLog(data).map(record => [record.id, record]));
-      for (const record of latest.values()) {
-        if (SETTLED.includes(record.published)) record.published = "replaying";
-        delete record.failure;
+    let removals;
+    if (replayTakedowns) {
+      // Every takedown is replayed, settled ones included: the board they were
+      // settled on may be the one that was lost. Each is marked unsettled in
+      // the ledger before anything is sent, so a failed replay, a stop
+      // part-way, or a wipe attempted meanwhile all see it as owed until the
+      // replay itself lands. retract() then records the real outcome.
+      const ids = await this.store.transaction(data => {
+        const latest = new Map(this.removalLog(data).map(record => [record.id, record]));
+        for (const record of latest.values()) {
+          if (SETTLED.includes(record.published)) record.published = "replaying";
+          delete record.failure;
+        }
+        delete data.rebuild;
+        return [...latest.keys()];
+      });
+      removals = [];
+      for (const id of ids) removals.push(await this.retractReport(id));
+      // Takedowns first is a guarantee, not a preference. Until every removed
+      // ID is reserved again, the replacement board would accept that name, so
+      // no drink is sent: the rebuild stops here and says why.
+      if (removals.some(removal => !SETTLED.includes(removal.published))) {
+        return { blocked: true, drinks: [], reason: "takedowns_unsettled", removals };
       }
-      return [...latest.keys()];
-    });
-    const removals = [];
-    for (const id of ids) removals.push(await this.retractReport(id));
-    // Takedowns first is a guarantee, not a preference. Until every removed ID
-    // is reserved again, the replacement board would accept that name, so no
-    // drink is sent: the rebuild stops here and says why.
-    if (removals.some(removal => !SETTLED.includes(removal.published))) {
-      return { blocked: true, drinks: [], removals };
+      await this.store.transaction(data => { data.rebuild = { takedownsReplayedAt: new Date().toISOString() }; });
+    } else {
+      const data = await this.store.read();
+      const latest = new Map(this.removalLog(data).map(record => [record.id, record]));
+      removals = [...latest.values()].map(record => ({ id: record.id, published: record.published,
+        ...(record.failure ? { failure: record.failure } : {}) }));
+      if (!data.rebuild?.takedownsReplayedAt) {
+        return { blocked: true, drinks: [], reason: "takedowns_not_replayed", removals };
+      }
+      if (removals.some(removal => !SETTLED.includes(removal.published))) {
+        return { blocked: true, drinks: [], reason: "takedowns_unsettled", removals };
+      }
     }
+    if (!sendDrinks) return { blocked: false, drinks: [], removals };
     const data = await this.store.read();
     const runIds = this.houseMenu(data).filter(entry => !entry.example && data.runs[entry.runId])
       .map(entry => entry.runId);
@@ -288,6 +316,7 @@ export class BoothEngine {
         ? { name: run.submission?.name, reason: attempt.reason, runId, state: attempt.state }
         : { name: run.submission?.name, reason: run.sync.reason, runId, state: run.sync.state });
     }
+    await this.store.transaction(stored => { delete stored.rebuild; });
     return { blocked: false, drinks: results, removals };
   }
 
