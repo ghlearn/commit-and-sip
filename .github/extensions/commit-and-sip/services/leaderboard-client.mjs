@@ -49,6 +49,17 @@ export function createLeaderboardClient({ url, boothKey, staffKey = null, timeou
   // Routes are absolute from the origin, whatever path the URL carries.
   const endpoint = path => new URL(`/${path}`, new URL(url).origin).toString();
   const client = {
+    // Which board the service is serving now. A rebuild records it with its
+    // takedown phase, so a later replacement board is not mistaken for it.
+    async boardId() {
+      const response = await fetchImpl(endpoint("api/board"), { method: "GET", signal: AbortSignal.timeout(timeoutMs) });
+      if (!response.ok) throw await failure(response, "board read");
+      const body = await response.json();
+      if (typeof body?.boardId !== "string" || !/^[0-9a-f]{32}$/.test(body.boardId)) {
+        throw Object.assign(new Error("The leaderboard did not say which board it is serving."), { code: "unexpected_response" });
+      }
+      return body.boardId;
+    },
     async publish(submission) {
       const response = await fetchImpl(endpoint("api/entries"), {
         body: JSON.stringify(submission),

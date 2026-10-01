@@ -68,9 +68,12 @@ export class MemoryStore {
     this.entries = new Map();
     this.reserved = new Set();
     this.closed = closed;
+    this.boardId = randomBytes(16).toString("hex");
   }
 
-  async state() { return { closed: Boolean(this.closed) }; }
+  // `boardId` names this board, so a booth can tell the board it replayed its
+  // takedowns onto from a later replacement.
+  async state() { return { boardId: this.boardId, closed: Boolean(this.closed) }; }
 
   // Opening is a staff decision: every booth has replayed its takedowns.
   async openBoard() { this.closed = false; }
@@ -130,6 +133,7 @@ const STORED_ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const STORED_HANDLE = /^[a-z]+-[a-z]+-[a-z]+(?:-[0-9a-f]{8})?$/;
 const TOKEN_HASH = /^[0-9a-f]{64}$/;
 const KEY_ID = /^[0-9a-f]{16}$/;
+const BOARD_ID = /^[0-9a-f]{32}$/;
 
 // What is wrong with a stored row, or null. Every field the board serves or
 // compares must be present and of its type, or a corrupted row would load,
@@ -224,7 +228,13 @@ export class FileStore extends MemoryStore {
     Object.assign(store, { file, lockFile: `${file}.lock`, lockTimeoutMs, queue: Promise.resolve(), staleLockMs });
     // An unreadable board is left exactly as found and the service refuses
     // to start. Starting empty would overwrite it on the first submission.
-    store.load(await store.snapshot());
+    const disk = await store.snapshot();
+    store.load(disk);
+    // A board is named before anything reads it: a new one is written now,
+    // closed and with its ID, and a board from before IDs gets one. Otherwise
+    // the first reader would see no ID and a rebuild could not record which
+    // board it replayed onto. The write is the usual locked one.
+    if (!disk.boardId) await store.serialise(() => {});
     return store;
   }
 
@@ -236,7 +246,7 @@ export class FileStore extends MemoryStore {
       // A board this service is creating from nothing starts closed: it may be
       // the replacement for one that was lost, and takedowns must be
       // replayed onto it before any drink. Staff open it.
-      if (error.code === "ENOENT") return { closed: true, entries: new Map(), keyId: null, reserved: new Set(), version: 0 };
+      if (error.code === "ENOENT") return { boardId: null, closed: true, entries: new Map(), keyId: null, reserved: new Set(), version: 0 };
       throw error;
     }
     const unreadable = reason => new Error(`${this.file} is not a readable board (${reason}). Move it aside to start empty, or restore it.`);
@@ -253,6 +263,9 @@ export class FileStore extends MemoryStore {
     }
     // Missing on a board written before the gate existed, which is open.
     if (saved.closed !== undefined && typeof saved.closed !== "boolean") throw unreadable("a malformed closed flag");
+    if (saved.boardId !== undefined && (typeof saved.boardId !== "string" || !BOARD_ID.test(saved.boardId))) {
+      throw unreadable("a malformed board ID");
+    }
     // Every row must be loadable as itself. Two rows with one ID would load
     // "successfully" as one, and the next write would drop the other for good.
     const entries = new Map();
@@ -279,6 +292,7 @@ export class FileStore extends MemoryStore {
       throw unreadable("a malformed reservation key ID");
     }
     return {
+      boardId: saved.boardId ?? null,
       closed: saved.closed ?? false,
       entries,
       keyId: saved.keyId ?? null,
@@ -509,6 +523,8 @@ export class FileStore extends MemoryStore {
           const result = await change();
           if ((await this.snapshot()).version !== disk.version) throw new ConcurrentWriteError();
           await this.persist(`${JSON.stringify({
+            // Minted with the board's first write and never changed after.
+            boardId: disk.boardId ?? randomBytes(16).toString("hex"),
             closed: Boolean(this.closed),
             entries: [...this.entries.values()], keyId: this.keyId ?? disk.keyId ?? undefined,
             reserved: [...this.reserved], version: disk.version + 1,
@@ -549,7 +565,10 @@ export class FileStore extends MemoryStore {
   openBoard() { return this.serialise(() => super.openBoard()); }
 
   // From disk, like every read, so every instance agrees on it.
-  async state() { return { closed: (await this.snapshot()).closed }; }
+  async state() {
+    const { boardId, closed } = await this.snapshot();
+    return { boardId, closed };
+  }
 
   // Reads come from disk, after every write this process has queued, so they
   // see what another instance wrote and never a change that has not landed.

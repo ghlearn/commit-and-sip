@@ -63,6 +63,10 @@ function render(board) {
   $("rows").replaceChildren(...rows);
   $("board").hidden = rows.length === 0;
   $("empty").hidden = rows.length !== 0;
+  // An empty board being rebuilt is not inviting anyone: drinks are held.
+  setText($("empty"), board.rebuilding
+    ? "The board is being rebuilt. Drinks reappear as the booths send them again."
+    : "No drinks yet. Be the first to name one at the booth.");
   setText($("caption"), board.rebuilding
     ? "The board is being rebuilt. Drinks reappear as the booths send them again."
     : board.total > board.entries.length

@@ -271,6 +271,9 @@ export class BoothEngine {
     if (!this.leaderboardClient) return { blocked: false, drinks: [], removals: [] };
     let removals;
     if (replayTakedowns) {
+      // The board these takedowns land on, recorded with the marker so the
+      // drinks phase can check it is still the board being served.
+      const boardId = await this.leaderboardClient.boardId?.().catch(() => null) ?? null;
       // Every takedown is replayed, settled ones included: the board they were
       // settled on may be the one that was lost. Each is marked unsettled in
       // the ledger before anything is sent, so a failed replay, a stop
@@ -293,13 +296,16 @@ export class BoothEngine {
       if (removals.some(removal => !SETTLED.includes(removal.published))) {
         return { blocked: true, drinks: [], reason: "takedowns_unsettled", removals };
       }
-      await this.store.transaction(data => { data.rebuild = { takedownsReplayedAt: new Date().toISOString() }; });
+      await this.store.transaction(data => { data.rebuild = { boardId, takedownsReplayedAt: new Date().toISOString() }; });
     } else {
       const data = await this.store.read();
       const latest = new Map(this.removalLog(data).map(record => [record.id, record]));
       removals = [...latest.values()].map(record => ({ id: record.id, published: record.published,
         ...(record.failure ? { failure: record.failure } : {}) }));
-      if (!data.rebuild?.takedownsReplayedAt) {
+      // The takedowns must have been replayed onto the board served now. A
+      // marker from a board since replaced again proves nothing about this one.
+      const current = await this.leaderboardClient.boardId?.().catch(() => null) ?? null;
+      if (!data.rebuild?.takedownsReplayedAt || !current || data.rebuild.boardId !== current) {
         return { blocked: true, drinks: [], reason: "takedowns_not_replayed", removals };
       }
       if (removals.some(removal => !SETTLED.includes(removal.published))) {

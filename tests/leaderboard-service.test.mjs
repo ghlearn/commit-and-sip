@@ -3167,20 +3167,20 @@ test("a board created from nothing is closed to drinks until staff open it, but 
   const { ClosedError } = await import("../leaderboard-service/store.mjs");
   const directory = await tempDirectory(t);
   const store = await FileStore.open({ directory });
-  assert.deepEqual(await store.state(), { closed: true });
+  assert.equal((await store.state()).closed, true);
   await assert.rejects(() => store.admit(entry("mona-a"), { fingerprint: fp("mona-a"), handles: [entry("mona-a").handle] }), ClosedError);
   assert.equal(await store.retract("mona-gone", fp("mona-gone")), false, "takedowns are replayed onto it");
   const reopened = await FileStore.open({ directory });
-  assert.deepEqual(await reopened.state(), { closed: true }, "closed survives a restart");
+  assert.equal((await reopened.state()).closed, true, "closed survives a restart");
   assert.equal(await reopened.isReserved(fp("mona-gone")), true);
   await reopened.openBoard();
-  assert.deepEqual(await (await FileStore.open({ directory })).state(), { closed: false });
+  assert.equal((await (await FileStore.open({ directory })).state()).closed, false);
   await reopened.admit(entry("mona-a"), { fingerprint: fp("mona-a"), handles: [entry("mona-a").handle] });
 
   // A board written before the gate existed (the live one) is open.
   const legacy = await tempDirectory(t);
   await writeFile(join(legacy, "default.json"), JSON.stringify({ entries: [], reserved: [] }));
-  assert.deepEqual(await (await FileStore.open({ directory: legacy })).state(), { closed: false });
+  assert.equal((await (await FileStore.open({ directory: legacy })).state()).closed, false);
   const bad = await tempDirectory(t);
   await writeFile(join(bad, "default.json"), JSON.stringify({ closed: "yes", entries: [], reserved: [] }));
   await assert.rejects(() => FileStore.open({ directory: bad }), /malformed closed flag/);
@@ -3206,7 +3206,7 @@ test("the service holds drinks while rebuilding, and only the staff key opens it
 
 test("a rebuild holds every booth's ordinary publishing until staff open the board", async t => {
   const { parsePhase } = await import("../scripts/republish-leaderboard.mjs");
-  assert.deepEqual(parsePhase(["--open"]), { open: true });
+  assert.deepEqual(parsePhase(["--open"]), { openOnly: true });
   const lost = await service(t);
   const directory = await tempDirectory(t);
   const replacement = await service(t, { store: await FileStore.open({ directory }) });   // created from nothing: closed
@@ -3279,7 +3279,8 @@ test("--all rebuilds a single booth onto a closed board by itself, and a held dr
   const boothOnly = createLeaderboardClient({ boothKey: BOOTH_KEY, url: fresh.url });
   engine.leaderboardClient = boothOnly;
   assert.equal((await engine.republishAll({ drinks: true, open: true, takedowns: false })).reason, "takedowns_not_replayed");
-  await engine.store.transaction(data => { data.rebuild = { takedownsReplayedAt: new Date().toISOString() }; });
+  const servedNow = (await board(fresh.url)).boardId;
+  await engine.store.transaction(data => { data.rebuild = { boardId: servedNow, takedownsReplayedAt: new Date().toISOString() }; });
   assert.equal((await engine.republishAll({ drinks: true, open: true, takedowns: false })).reason, "cannot_open");
 });
 
@@ -3308,4 +3309,62 @@ test("the dashboard never pairs a stale overview with 'not retrying'", async () 
   const shown = await view;
   assert.equal(reads, 2, "read again because the sweep changed during the read");
   assert.deepEqual([shown.retrying, shown.removals[0].published], [false, "retracted"]);
+});
+
+// --- Review round 38 ---------------------------------------------------------
+
+test("the drinks phase checks the takedowns were replayed onto the board served now", async t => {
+  const first = await service(t, { store: await FileStore.open({ directory: await tempDirectory(t) }) });
+  const to = url => createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url });
+  const { engine } = await engineWith(t, to(first.url));
+  await engine.open({ runId: "booth-1" });
+  const removed = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.removeDrink({ id: removed.submission.id, reason: "test", removedBy: "lead" });
+  await engine.open({ runId: "booth-2" });
+  await engine.dispatch("booth-2", "submit_name", { name: "Ducky Dawn Drizzle" });
+
+  await engine.republishAll({ drinks: false });                      // replayed onto the first replacement
+  assert.equal((await engine.store.read()).rebuild.boardId, (await board(first.url)).boardId);
+  // That board is replaced again before --drinks; staff open the new one.
+  const second = await service(t, { store: await FileStore.open({ directory: await tempDirectory(t) }) });
+  engine.leaderboardClient = to(second.url);
+  await engine.leaderboardClient.openBoard();
+  const refused = await engine.republishAll({ takedowns: false });
+  assert.deepEqual([refused.blocked, refused.reason], [true, "takedowns_not_replayed"], "a stale marker proves nothing about this board");
+  assert.equal((await board(second.url)).total, 0);
+  assert.equal((await post(second.url, submission("Mona Moonrise Mocha", OTHER_HANDLE))).status, 201,
+    "(the name is unreserved here, which is exactly why no drink may go first)");
+});
+
+test("the republish command runs --all in order and --open alone, end to end", async t => {
+  const { main } = await import("../scripts/republish-leaderboard.mjs");
+  const lost = await service(t);
+  const { engine } = await engineWith(t, createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url: lost.url }));
+  await engine.open({ runId: "booth-1" });
+  const removed = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.removeDrink({ id: removed.submission.id, reason: "test", removedBy: "lead" });
+  await engine.open({ runId: "booth-2" });
+  await engine.dispatch("booth-2", "submit_name", { name: "Ducky Dawn Drizzle" });
+
+  const fresh = await service(t, { store: await FileStore.open({ directory: await tempDirectory(t) }) });   // closed
+  engine.leaderboardClient = createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url: fresh.url });
+  let output = "";
+  assert.equal(await main(["--all"], { engine, write: text => { output += text; } }), 0, output);
+  assert.match(output, /1 of 1 takedowns are reserved/);
+  assert.match(output, /1 of 1 drinks are on the public leaderboard/);
+  assert.equal((await board(fresh.url)).total, 1);
+  assert.equal((await post(fresh.url, submission("Mona Moonrise Mocha", OTHER_HANDLE))).status, 409, "takedown replayed before opening");
+
+  // --open on its own opens and does nothing else.
+  const other = await service(t, { store: await FileStore.open({ directory: await tempDirectory(t) }) });
+  engine.leaderboardClient = createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url: other.url });
+  output = "";
+  assert.equal(await main(["--open"], { engine, write: text => { output += text; } }), 0);
+  assert.match(output, /The board is open to drinks/);
+  assert.deepEqual([(await board(other.url)).rebuilding, (await board(other.url)).total], [false, 0]);
+});
+
+test("an empty board being rebuilt says so instead of inviting a drink", async () => {
+  const page = await readFile(new URL("../leaderboard-service/public/board.js", import.meta.url), "utf8");
+  assert.match(page, /setText\(\$\("empty"\), board\.rebuilding\s*\? "The board is being rebuilt\./);
 });
