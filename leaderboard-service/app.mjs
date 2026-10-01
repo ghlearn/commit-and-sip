@@ -5,7 +5,7 @@ import { leaderboard } from "../.github/extensions/commit-and-sip/services/booth
 import { canonicalHandle, PUBLICATION_TOKEN, publicRef, tokenHashOf } from "../.github/extensions/commit-and-sip/services/leaderboard.mjs";
 import { blocklistStatus } from "../.github/extensions/commit-and-sip/services/moderation.mjs";
 import { scoreCoffeeName } from "../.github/extensions/commit-and-sip/services/name-score.mjs";
-import { HandleTakenError, KeyMismatchError, ReservedError } from "./store.mjs";
+import { ClosedError, HandleTakenError, KeyMismatchError, ReservedError } from "./store.mjs";
 
 // The public leaderboard for the Commit & Sip booth.
 //
@@ -130,7 +130,8 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
     async "GET /api/board"(request, url) {
       const entries = await store.list();
       const board = leaderboard(entries);
-      const body = { asOf: now().toISOString(), entries: board.slice(0, BOARD_SIZE).map(publicRow), total: board.length };
+      const body = { asOf: now().toISOString(), entries: board.slice(0, BOARD_SIZE).map(publicRow),
+        rebuilding: (await store.state()).closed, total: board.length };
       const handle = url.searchParams.get("handle");
       if (handle !== null) {
         // With a publication reference the lookup is exact. A QR scanned
@@ -172,6 +173,8 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
         // Taken down at some booth. Worded exactly as the booth words a
         // blocklist hit, so nobody can tell the two apart and guess why.
         if (error instanceof ReservedError) throw new HttpError(409, "unavailable_drink", "That name is not available.");
+        // Retryable: the booth keeps the drink and sends it again once open.
+        if (error instanceof ClosedError) throw new HttpError(503, "board_rebuilding", "The event board is being rebuilt. The drink is kept and sent again later.");
         if (error instanceof HandleTakenError) throw new HttpError(409, "handle_taken", "That handle is already on the board.");
         throw error;
       }
@@ -199,6 +202,17 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
     // stopped, and a client that read it as "absent" would settle a takedown
     // that never happened. The ID arrives in the body of a fixed route, so
     // web-server logs never record it.
+    // Opens a board created closed, once staff know every booth has replayed
+    // its takedowns. Staff key only, and the body must say exactly that.
+    async "POST /api/board/open"(request) {
+      requireKey(request, staffKey);
+      const body = await readJson(request);
+      const shaped = body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).join() === "open";
+      if (!shaped || body.open !== true) throw new HttpError(400, "invalid_request", "Send exactly { \"open\": true }.");
+      await store.openBoard();
+      return [200, { open: true }];
+    },
+
     async "POST /api/retractions"(request) {
       requireKey(request, staffKey);
       const body = await readJson(request);

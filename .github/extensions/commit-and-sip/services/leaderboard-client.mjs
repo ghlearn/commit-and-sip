@@ -84,6 +84,15 @@ export function createLeaderboardClient({ url, boothKey, staffKey = null, timeou
       }
       throw await failure(response, "retraction");
     };
+    // Opens a board created closed for a rebuild. Only a staff machine can.
+    client.openBoard = async () => {
+      const response = await fetchImpl(endpoint("api/board/open"), {
+        body: JSON.stringify({ open: true }),
+        headers: { Authorization: `Bearer ${staffKey}`, "Content-Type": "application/json" },
+        method: "POST", signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (response.status !== 200) throw await failure(response, "opening");
+    };
   }
   return client;
 }

@@ -21,14 +21,15 @@ guardNodeVersion();
 // has reserved the names it took down. --all runs both here, for a single
 // booth, or once every other booth has finished --takedowns.
 
-export const USAGE = "Usage: npm run leaderboard:republish -- --takedowns | --drinks | --all\n"
+export const USAGE = "Usage: npm run leaderboard:republish -- --takedowns | --open | --drinks | --all\n"
   + "  --takedowns  replay this booth's takedowns. With several booths, run this on every booth first.\n"
-  + "  --drinks     then send this booth's drinks, once every booth has run --takedowns.\n"
+  + "  --open       open a rebuilt (or new) board to drinks, once every booth has run --takedowns. Any one staff machine.\n"
+  + "  --drinks     then send this booth's drinks.\n"
   + "  --all        both, here: for a single-booth event, or a booth that publishes drinks served before it was configured.";
 
 export function parsePhase(argv) {
   const phases = { "--all": { drinks: true, takedowns: true }, "--drinks": { drinks: true, takedowns: false },
-    "--takedowns": { drinks: false, takedowns: true } };
+    "--open": { open: true }, "--takedowns": { drinks: false, takedowns: true } };
   if (argv.length !== 1 || !Object.hasOwn(phases, argv[0])) throw new Error(USAGE);
   return phases[argv[0]];
 }
@@ -39,6 +40,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const engine = await openEngine();
     if (!engine.leaderboardClient) {
       throw new Error("This booth has no leaderboardApi in booth/local-config.json, so there is nowhere to publish.");
+    }
+    if (phase.open) {
+      if (!engine.leaderboardClient.openBoard) {
+        throw new Error("Opening the board needs the staff key. Copy the deployed keys to this machine with "
+          + "npm run leaderboard:configure -- --url <url> --from <an owner-only (chmod 600) copy of a staff machine's "
+          + "booth/local-config.json>, then delete that copy and run this again.");
+      }
+      await engine.leaderboardClient.openBoard();
+      process.stdout.write("The board is open to drinks. Now run npm run leaderboard:republish -- --drinks on each booth; "
+        + "drinks waiting on the booths are sent by their own retries too.\n");
+      process.exit(0);
     }
     const { blocked, drinks, reason, removals } = await engine.republishAll(phase);
     const unsettled = removals.filter(removal => !["retracted", "absent"].includes(removal.published));

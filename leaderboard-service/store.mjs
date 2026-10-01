@@ -51,11 +51,29 @@ export class HandleTakenError extends Error {
   }
 }
 
-export class MemoryStore {
+// The board is closed to new entries while it is being rebuilt. Takedowns
+// are replayed first, and no drink may land before every booth has reserved
+// the names it took down, so admission waits (a booth keeps the drink and
+// sends it again) while retractions still go through.
+export class ClosedError extends Error {
   constructor() {
+    super("The board is being rebuilt and is not taking entries yet.");
+    this.name = "ClosedError";
+    this.code = "board_rebuilding";
+  }
+}
+
+export class MemoryStore {
+  constructor({ closed = false } = {}) {
     this.entries = new Map();
     this.reserved = new Set();
+    this.closed = closed;
   }
+
+  async state() { return { closed: Boolean(this.closed) }; }
+
+  // Opening is a staff decision: every booth has replayed its takedowns.
+  async openBoard() { this.closed = false; }
 
   async create(entry) {
     if (this.entries.has(entry.id)) throw new ConflictError(entry.id);
@@ -81,6 +99,7 @@ export class MemoryStore {
   // the same step. A receipt ranked from a later read could find the entry
   // already retracted by a takedown queued behind this one.
   async admit(entry, { fingerprint, handles }) {
+    if (this.closed) throw new ClosedError();
     if (this.reserved.has(fingerprint)) throw new ReservedError();
     const board = () => [...this.entries.values()].map(item => ({ ...item }));
     const existing = this.entries.get(entry.id);
@@ -214,7 +233,10 @@ export class FileStore extends MemoryStore {
     try {
       text = await readFile(this.file, "utf8");
     } catch (error) {
-      if (error.code === "ENOENT") return { entries: new Map(), keyId: null, reserved: new Set(), version: 0 };
+      // A board this service is creating from nothing starts closed: it may be
+      // the replacement for one that was lost, and takedowns must be
+      // replayed onto it before any drink. Staff open it.
+      if (error.code === "ENOENT") return { closed: true, entries: new Map(), keyId: null, reserved: new Set(), version: 0 };
       throw error;
     }
     const unreadable = reason => new Error(`${this.file} is not a readable board (${reason}). Move it aside to start empty, or restore it.`);
@@ -229,6 +251,8 @@ export class FileStore extends MemoryStore {
     if (saved.version !== undefined && (!Number.isSafeInteger(saved.version) || saved.version < 0)) {
       throw unreadable("a malformed version");
     }
+    // Missing on a board written before the gate existed, which is open.
+    if (saved.closed !== undefined && typeof saved.closed !== "boolean") throw unreadable("a malformed closed flag");
     // Every row must be loadable as itself. Two rows with one ID would load
     // "successfully" as one, and the next write would drop the other for good.
     const entries = new Map();
@@ -255,6 +279,7 @@ export class FileStore extends MemoryStore {
       throw unreadable("a malformed reservation key ID");
     }
     return {
+      closed: saved.closed ?? false,
       entries,
       keyId: saved.keyId ?? null,
       reserved,
@@ -274,6 +299,7 @@ export class FileStore extends MemoryStore {
   load(disk) {
     this.entries = new Map([...disk.entries].map(([id, entry]) => [id, { ...entry }]));
     this.reserved = new Set(disk.reserved);
+    this.closed = disk.closed;
   }
 
   // A lease is one small JSON document: who holds it and when they last
@@ -483,6 +509,7 @@ export class FileStore extends MemoryStore {
           const result = await change();
           if ((await this.snapshot()).version !== disk.version) throw new ConcurrentWriteError();
           await this.persist(`${JSON.stringify({
+            closed: Boolean(this.closed),
             entries: [...this.entries.values()], keyId: this.keyId ?? disk.keyId ?? undefined,
             reserved: [...this.reserved], version: disk.version + 1,
           })}\n`, owner);
@@ -518,6 +545,11 @@ export class FileStore extends MemoryStore {
   admit(entry, options) { return this.serialise(() => super.admit(entry, options)); }
 
   retract(id, fingerprint) { return this.serialise(() => super.retract(id, fingerprint)); }
+
+  openBoard() { return this.serialise(() => super.openBoard()); }
+
+  // From disk, like every read, so every instance agrees on it.
+  async state() { return { closed: (await this.snapshot()).closed }; }
 
   // Reads come from disk, after every write this process has queued, so they
   // see what another instance wrote and never a change that has not landed.

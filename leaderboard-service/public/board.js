@@ -63,7 +63,9 @@ function render(board) {
   $("rows").replaceChildren(...rows);
   $("board").hidden = rows.length === 0;
   $("empty").hidden = rows.length !== 0;
-  setText($("caption"), board.total > board.entries.length
+  setText($("caption"), board.rebuilding
+    ? "The board is being rebuilt. Drinks reappear as the booths send them again."
+    : board.total > board.entries.length
     ? `Top ${board.entries.length} of ${board.total} drinks. Equal scores share a rank.`
     : `${board.total} ${board.total === 1 ? "drink" : "drinks"}. Equal scores share a rank.`);
 

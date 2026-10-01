@@ -188,7 +188,7 @@ test("a name caught before it synced is still reserved everywhere", async t => {
 test("the stored board keeps no readable trace of a removed name", async t => {
   const directory = await tempDirectory(t);
   const key = await reservationKey(directory);
-  const store = await FileStore.open({ directory });
+  const store = await openStore({ directory });
   const app = createApp({ boothKey: BOOTH_KEY, reservationKey: key, rules, staffKey: STAFF_KEY, store, words });
   const server = createServer(app).listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -378,6 +378,14 @@ async function tempDirectory(t) {
   return directory;
 }
 
+// A board the service creates from nothing starts closed, for rebuilds (see
+// review round 36). Tests about everything else open it, as staff would.
+const openStore = async options => {
+  const store = await FileStore.open(options);
+  if ((await store.state()).closed) await store.openBoard();
+  return store;
+};
+
 // The platform these tests run on, for the POSIX permission checks, which run
 // the platform's own tools (ls, chmod) rather than a stand-in.
 const POSIX = process.platform;
@@ -388,27 +396,27 @@ const entry = (id, score = 1000) => ({ createdAt: "2026-01-01T00:00:00Z", handle
 
 test("the file store survives a restart and never overwrites on create", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory, event: "event-2026" });
+  const store = await openStore({ directory, event: "event-2026" });
   await store.create(entry("mona-a"));
   await store.create(entry("mona-b"));
   await assert.rejects(() => store.create(entry("mona-a", 9)), ConflictError);
   assert.equal(await store.retract("mona-b", fp("b")), true);
   assert.equal(await store.retract("mona-b", fp("b")), false);
   assert.equal(await store.isReserved(fp("b")), true);
-  const reopened = await FileStore.open({ directory, event: "event-2026" });
+  const reopened = await openStore({ directory, event: "event-2026" });
   assert.deepEqual(await reopened.list(), [entry("mona-a")], "what was written is what comes back");
   assert.equal(await reopened.isReserved(fp("b")), true, "a reservation survives a restart");
-  assert.deepEqual(await (await FileStore.open({ directory, event: "other" })).list(), [],
+  assert.deepEqual(await (await openStore({ directory, event: "other" })).list(), [],
     "a new EVENT_ID starts a new board");
 });
 
 test("concurrent writes are serialised and none is lost", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory });
+  const store = await openStore({ directory });
   const ids = Array.from({ length: 30 }, (_, index) => `mona-${index}`);
   await Promise.all(ids.map(id => store.create(entry(id))));
   await Promise.all(ids.slice(0, 10).map(id => store.retract(id, fp(id))));
-  const reopened = await FileStore.open({ directory });
+  const reopened = await openStore({ directory });
   assert.deepEqual((await reopened.list()).map(item => item.id).sort(), ids.slice(10).sort());
   assert.equal((await Promise.all(ids.slice(0, 10).map(id => reopened.isReserved(fp(id))))).every(Boolean), true);
 });
@@ -417,14 +425,14 @@ test("an unreadable board is left alone and the service refuses to start", async
   const directory = await tempDirectory(t);
   const file = join(directory, "default.json");
   await writeFile(file, "{ torn");
-  await assert.rejects(() => FileStore.open({ directory }), /not a readable board/);
+  await assert.rejects(() => openStore({ directory }), /not a readable board/);
   assert.equal(await readFile(file, "utf8"), "{ torn", "starting empty would overwrite it on the next submission");
 });
 
 test("the event ID cannot walk out of the data directory", async t => {
   const directory = await tempDirectory(t);
   for (const event of ["../escape", "a/b", "UPPER", "", "x".repeat(64)]) {
-    await assert.rejects(() => FileStore.open({ directory, event }), /EVENT_ID/, JSON.stringify(event));
+    await assert.rejects(() => openStore({ directory, event }), /EVENT_ID/, JSON.stringify(event));
   }
 });
 
@@ -702,7 +710,7 @@ test("a takedown queued behind another write still stops a concurrent submission
       return super.serialise(async () => { await gate; return change(); });
     }
   }
-  const store = Object.setPrototypeOf(await FileStore.open({ directory }), GatedStore.prototype);
+  const store = Object.setPrototypeOf(await openStore({ directory }), GatedStore.prototype);
   const app = createApp({ boothKey: BOOTH_KEY, reservationKey: RESERVATION_KEY, rules, staffKey: STAFF_KEY, store, words });
   const server = createServer(app).listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -726,7 +734,7 @@ test("a takedown queued behind another write still stops a concurrent submission
 
 test("a failed write leaves memory exactly as it was on disk", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory });
+  const store = await openStore({ directory });
   await store.create(entry("mona-kept"));
   // The disk refuses the write after the change has been applied in memory,
   // which is the moment a rollback has to happen.
@@ -742,7 +750,7 @@ test("a failed write leaves memory exactly as it was on disk", async t => {
   // Once the disk recovers, a retry is a fresh admission, not a false "already there".
   full = false;
   assert.equal((await store.admit(entry("mona-lost"), { fingerprint: "fp", handles: [OTHER_HANDLE] })).created, true);
-  assert.deepEqual((await (await FileStore.open({ directory })).list()).map(item => item.id).sort(), ["mona-kept", "mona-lost"]);
+  assert.deepEqual((await (await openStore({ directory })).list()).map(item => item.id).sort(), ["mona-kept", "mona-lost"]);
 });
 
 test("two booths that issued the same handle each get a distinct place on the board", async t => {
@@ -908,7 +916,7 @@ test("the token is saved before the first send and reused on every retry", async
 
 test("the stored board keeps only a hash of the publication token", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory });
+  const store = await openStore({ directory });
   const app = createApp({ boothKey: BOOTH_KEY, reservationKey: RESERVATION_KEY, rules, staffKey: STAFF_KEY, store, words });
   const server = createServer(app).listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -1004,7 +1012,7 @@ test("a read never sees a write that has not reached the disk", async t => {
   class SlowDisk extends FileStore {
     serialise(change) { return super.serialise(async () => { const result = await change(); await landed; return result; }); }
   }
-  const store = Object.setPrototypeOf(await FileStore.open({ directory }), SlowDisk.prototype);
+  const store = Object.setPrototypeOf(await openStore({ directory }), SlowDisk.prototype);
   const admitting = store.admit(entry("mona-pending"), { fingerprint: "fp", handles: [HANDLE] });
   const pending = Symbol("pending");
   const tick = () => new Promise(resolve => setImmediate(() => resolve(pending)));
@@ -1058,11 +1066,11 @@ test("the highlighted row keeps every text colour above 4.5:1", async () => {
 
 test("two instances writing one board never lose each other's entries", async t => {
   const directory = await tempDirectory(t);
-  const [a, b] = await Promise.all([FileStore.open({ directory }), FileStore.open({ directory })]);
+  const [a, b] = await Promise.all([openStore({ directory }), openStore({ directory })]);
   const ids = Array.from({ length: 24 }, (_, index) => `mona-${index}`);
   await Promise.all(ids.map((id, index) => (index % 2 ? a : b)
     .admit(entry(id), { fingerprint: fp(id), handles: [`${HANDLE}-${String(index).padStart(8, "0")}`] })));
-  const fresh = await FileStore.open({ directory });
+  const fresh = await openStore({ directory });
   assert.deepEqual((await fresh.list()).map(item => item.id).sort(), [...ids].sort(), "every write from both instances survived");
   assert.equal((await a.list()).length, 24, "each instance reads what the other wrote");
   assert.equal((await b.get("mona-1")).id, "mona-1");
@@ -1070,7 +1078,7 @@ test("two instances writing one board never lose each other's entries", async t 
 
 test("a takedown on one instance stops a submission arriving at the other", async t => {
   const directory = await tempDirectory(t);
-  const [a, b] = await Promise.all([FileStore.open({ directory }), FileStore.open({ directory })]);
+  const [a, b] = await Promise.all([openStore({ directory }), openStore({ directory })]);
   await a.retract("mona-moonrise-mocha", fp("moonrise"));
   const { ReservedError } = await import("../leaderboard-service/store.mjs");
   await assert.rejects(() => b.admit(entry("mona-moonrise-mocha"), { fingerprint: fp("moonrise"), handles: [HANDLE] }), ReservedError);
@@ -1080,7 +1088,7 @@ test("a takedown on one instance stops a submission arriving at the other", asyn
 test("a lock left by a dead instance is taken over; a live one is waited for", async t => {
   const directory = await tempDirectory(t);
   const lock = join(directory, "default.json.lock");
-  const store = await FileStore.open({ directory, lockTimeoutMs: 150, staleLockMs: 1_000 });
+  const store = await openStore({ directory, lockTimeoutMs: 150, staleLockMs: 1_000 });
 
   const live = JSON.stringify({ at: Date.now() + 60_000, owner: "live-instance" });
   await writeFile(lock, live);
@@ -1097,7 +1105,7 @@ test("a lock left by a dead instance is taken over; a live one is waited for", a
 test("a holder whose lease was taken over cannot commit over the new holder", async t => {
   const directory = await tempDirectory(t);
   const lock = join(directory, "default.json.lock");
-  const [a, b] = await Promise.all([FileStore.open({ directory, staleLockMs: 60 }), FileStore.open({ directory, staleLockMs: 60 })]);
+  const [a, b] = await Promise.all([openStore({ directory, staleLockMs: 60 }), openStore({ directory, staleLockMs: 60 })]);
   // A stalls long enough to lose its lease: no renewal while it is frozen.
   a.renewLease = () => async () => {};
   // The exact interleaving from the review: A has passed its version check
@@ -1115,7 +1123,7 @@ test("a holder whose lease was taken over cannot commit over the new holder", as
     return persist(text, owner);
   };
   await a.create(entry("mona-from-a"));
-  const fresh = await FileStore.open({ directory });
+  const fresh = await openStore({ directory });
   assert.deepEqual((await fresh.list()).map(item => item.id).sort(), ["mona-from-a", "mona-from-b"],
     "A found it no longer held the lease, did not rename, and retried from disk");
 });
@@ -1123,8 +1131,8 @@ test("a holder whose lease was taken over cannot commit over the new holder", as
 test("a live holder renews its lease, so a slow write is never taken over", async t => {
   const directory = await tempDirectory(t);
   const [a, b] = await Promise.all([
-    FileStore.open({ directory, staleLockMs: 90 }),
-    FileStore.open({ directory, lockTimeoutMs: 250, staleLockMs: 90 }),
+    openStore({ directory, staleLockMs: 90 }),
+    openStore({ directory, lockTimeoutMs: 250, staleLockMs: 90 }),
   ]);
   let started;
   const inside = new Promise(resolve => { started = resolve; });
@@ -1137,7 +1145,7 @@ test("a live holder renews its lease, so a slow write is never taken over", asyn
   await assert.rejects(() => b.create(entry("mona-impatient")), { code: "board_locked" },
     "the other instance waits for a lease that is being renewed");
   await slow;
-  assert.deepEqual((await (await FileStore.open({ directory })).list()).map(item => item.id), ["mona-slow"]);
+  assert.deepEqual((await (await openStore({ directory })).list()).map(item => item.id), ["mona-slow"]);
 });
 
 test("the event cannot be wiped while a takedown is still owed to the public board", async t => {
@@ -1200,7 +1208,7 @@ test("two writers that ever overlap cannot trample each other's temporary file",
   // for the moment it does not (a lease judged stale while its holder still
   // writes). Every overlapping write must land whole.
   const directory = await tempDirectory(t);
-  const [a, b] = await Promise.all([FileStore.open({ directory }), FileStore.open({ directory })]);
+  const [a, b] = await Promise.all([openStore({ directory }), openStore({ directory })]);
   const writes = Array.from({ length: 40 }, (_, index) =>
     (index % 2 ? a : b).persist(`${JSON.stringify({ entries: [], reserved: [], version: index })}\n`));
   const outcomes = await Promise.allSettled(writes);
@@ -1265,7 +1273,7 @@ test("no staff guidance sends anyone to another machine to finish this booth's t
 
 test("renewing a lease never refreshes a lease someone else now holds", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory, staleLockMs: 60 });   // beats every 20ms
+  const store = await openStore({ directory, staleLockMs: 60 });   // beats every 20ms
   const lock = join(directory, "default.json.lock");
   const successor = JSON.stringify({ at: Date.now() - 60_000, owner: "someone-else" });
   await writeFile(lock, successor);
@@ -1284,7 +1292,7 @@ test("renewing a lease never refreshes a lease someone else now holds", async t 
 
 test("a takedown queued behind an admission cannot turn its receipt into a 500", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory });
+  const store = await openStore({ directory });
   // Hold the admission at the disk write, and queue a retraction behind it.
   let release;
   const held = new Promise(resolve => { release = resolve; });
@@ -1319,7 +1327,7 @@ test("a takedown queued behind an admission cannot turn its receipt into a 500",
 
 test("taking over a stale lease never removes the live lease that replaced it", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory, staleLockMs: 60 });
+  const store = await openStore({ directory, staleLockMs: 60 });
   const lock = join(directory, "default.json.lock");
   // Judged stale from one read...
   const stale = JSON.stringify({ at: Date.now() - 60_000, owner: "dead" });
@@ -1339,7 +1347,7 @@ test("taking over a stale lease never removes the live lease that replaced it", 
 
 test("a half-written lease is waited on while its creator may still be writing", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory, lockTimeoutMs: 120, staleLockMs: 5_000 });
+  const store = await openStore({ directory, lockTimeoutMs: 120, staleLockMs: 5_000 });
   const lease = '{"at":';
   await writeFile(join(directory, "default.json.lock"), lease);
   await assert.rejects(() => store.create(entry("mona-x")), { code: "board_locked" });
@@ -1387,7 +1395,7 @@ test("a lock is never left behind by a renewal that was in flight at release", a
   // holding the lock afterwards: a renewal that finished after the release
   // would recreate a lease nobody holds.
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory, staleLockMs: 30 });
+  const store = await openStore({ directory, staleLockMs: 30 });
   for (let index = 0; index < 25; index += 1) {
     await store.serialise(async () => {
       await new Promise(resolve => setTimeout(resolve, 12 + (index % 4) * 3));
@@ -1403,11 +1411,11 @@ test("a lock is never left behind by a renewal that was in flight at release", a
 
 test("a write that landed is not reported as failed because its lock could not be released", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory });
+  const store = await openStore({ directory });
   store.releaseLock = () => Promise.reject(Object.assign(new Error("share hiccup"), { code: "EIO" }));
   const admitted = await store.admit(entry("mona-landed"), { fingerprint: "fp", handles: [HANDLE] });
   assert.equal(admitted.created, true, "the lease expires on its own; the write stands");
-  assert.deepEqual((await (await FileStore.open({ directory })).list()).map(item => item.id), ["mona-landed"]);
+  assert.deepEqual((await (await openStore({ directory })).list()).map(item => item.id), ["mona-landed"]);
 });
 
 
@@ -1447,7 +1455,7 @@ test("an API URL with a path is refused, and routes always resolve from the orig
 
 test("a failing lease renewal never becomes an unhandled rejection", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory, staleLockMs: 30 });   // renews every 10ms
+  const store = await openStore({ directory, staleLockMs: 30 });   // renews every 10ms
   const unhandled = [];
   const listener = reason => unhandled.push(reason);
   process.on("unhandledRejection", listener);
@@ -1468,7 +1476,7 @@ test("a renewal interleaved with a takeover cannot overwrite the successor", asy
   // takes over, and only then does the old holder's renewal act.
   const directory = await tempDirectory(t);
   const [old, successor] = await Promise.all([
-    FileStore.open({ directory, staleLockMs: 60 }), FileStore.open({ directory, staleLockMs: 60 })]);
+    openStore({ directory, staleLockMs: 60 }), openStore({ directory, staleLockMs: 60 })]);
   const lock = join(directory, "default.json.lock");
   const oldLease = JSON.stringify({ at: Date.now() - 60_000, owner: "old" });
   await writeFile(lock, oldLease);
@@ -1483,7 +1491,7 @@ test("a renewal interleaved with a takeover cannot overwrite the successor", asy
 
 test("a live holder's heartbeat keeps its lease even when the lease itself is old", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory, lockTimeoutMs: 150, staleLockMs: 60 });
+  const store = await openStore({ directory, lockTimeoutMs: 150, staleLockMs: 60 });
   const lease = JSON.stringify({ at: Date.now() - 60_000, owner: "busy" });
   await writeFile(join(directory, "default.json.lock"), lease);
   await writeFile(join(directory, "default.json.lock.busy.beat"), String(Date.now() + 60_000));
@@ -1494,7 +1502,7 @@ test("a live holder's heartbeat keeps its lease even when the lease itself is ol
 
 test("releasing never deletes a lease that a successor now holds", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory });
+  const store = await openStore({ directory });
   const lock = join(directory, "default.json.lock");
   const mine = JSON.stringify({ at: Date.now(), owner: "mine" });
   const successor = JSON.stringify({ at: Date.now(), owner: "successor" });
@@ -1507,7 +1515,7 @@ test("releasing never deletes a lease that a successor now holds", async t => {
 
 test("putting a lease back never overwrites one created in the meantime", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory });
+  const store = await openStore({ directory });
   const lock = join(directory, "default.json.lock");
   const third = JSON.stringify({ at: Date.now(), owner: "third" });
   await writeFile(lock, third);
@@ -1625,7 +1633,7 @@ test("a board with duplicate or missing entry IDs is refused, not silently shrun
     const file = join(directory, "default.json");
     const text = JSON.stringify({ entries, reserved: [], version: 3 });
     await writeFile(file, text);
-    await assert.rejects(() => FileStore.open({ directory }), /is not a readable board/, label);
+    await assert.rejects(() => openStore({ directory }), /is not a readable board/, label);
     assert.equal(await readFile(file, "utf8"), text, `${label}: the file is left exactly as found`);
   }
 });
@@ -1633,23 +1641,23 @@ test("a board with duplicate or missing entry IDs is refused, not silently shrun
 test("a lost reservation key fails closed while the board holds reservations", async t => {
   const { keyIdOf, openReservationKey } = await import("../leaderboard-service/store.mjs");
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory });
+  const store = await openStore({ directory });
   const key = await openReservationKey(directory, store);
   await store.retract("mona-gone", fp("gone"));
   assert.equal(JSON.parse(await readFile(join(directory, "default.json"), "utf8")).keyId, keyIdOf(key),
     "the board records which key its reservations use");
 
   await rm(join(directory, "reservation.key"));
-  const restarted = await FileStore.open({ directory });
+  const restarted = await openStore({ directory });
   await assert.rejects(() => openReservationKey(directory, restarted), /reservation\.key is missing, but .* holds 1 reserved name/);
   await assert.rejects(() => readFile(join(directory, "reservation.key")), { code: "ENOENT" }, "and no replacement key was minted");
 
   await writeFile(join(directory, "reservation.key"), `${"c".repeat(64)}\n`);
-  const reopened = await FileStore.open({ directory });
+  const reopened = await openStore({ directory });
   await assert.rejects(() => openReservationKey(directory, reopened), /different reservation key/);
 
   const fresh = await tempDirectory(t);
-  assert.match(await openReservationKey(fresh, await FileStore.open({ directory: fresh })), /^[0-9a-f]{64}$/,
+  assert.match(await openReservationKey(fresh, await openStore({ directory: fresh })), /^[0-9a-f]{64}$/,
     "a board with no reservations may start with a new key");
 });
 
@@ -1817,16 +1825,16 @@ test("a lease left half-written by a dead creator is taken over, not waited on f
   const lock = join(directory, "default.json.lock");
   for (const partial of ["", '{"at":17', "{"]) {
     await writeFile(lock, partial);
-    const store = await FileStore.open({ directory, lockTimeoutMs: 2_000, staleLockMs: 80 });
+    const store = await openStore({ directory, lockTimeoutMs: 2_000, staleLockMs: 80 });
     await store.create(entry(`mona-${partial.length}`));
     await assert.rejects(() => readFile(lock, "utf8"), { code: "ENOENT" }, `${JSON.stringify(partial)} was cleared`);
   }
-  assert.equal((await (await FileStore.open({ directory })).list()).length, 3, "and the board works again");
+  assert.equal((await (await openStore({ directory })).list()).length, 3, "and the board works again");
 });
 
 test("a half-written lease that its creator then completes is never taken over", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory, staleLockMs: 60 });
+  const store = await openStore({ directory, staleLockMs: 60 });
   const partial = '{"at":';
   const complete = JSON.stringify({ at: Date.now(), owner: "creator" });
   store.malformed = { lastObserved: Date.now(), since: Date.now() - 60_000, text: partial };   // watched long enough
@@ -1837,7 +1845,7 @@ test("a half-written lease that its creator then completes is never taken over",
 
 test("the watch on a malformed lease restarts after any gap, so a new creator is not mistaken for a dead one", async t => {
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory, staleLockMs: 60 });
+  const store = await openStore({ directory, staleLockMs: 60 });
   const lease = { at: Infinity, owner: null, text: "" };
   const t0 = 1_000_000;
   assert.equal(await store.seenAlive(lease, t0), t0);
@@ -1959,7 +1967,7 @@ test("the template accepts exactly the event IDs the service can start with", as
   for (let code = 32; code < 127; code += 1) {
     const character = String.fromCharCode(code);
     let starts = true;
-    try { await FileStore.open({ directory, event: `a${character}` }); } catch { starts = false; }
+    try { await openStore({ directory, event: `a${character}` }); } catch { starts = false; }
     assert.equal(allowed.includes(character), starts, `template and service disagree about ${JSON.stringify(character)}`);
   }
   const committed = JSON.parse(await readFile(new URL("../infra/main.parameters.json", import.meta.url), "utf8")).parameters.eventId.value;
@@ -2033,11 +2041,11 @@ test("a publish whose response was lost is still followed by a second retraction
 test("by default a write waits long enough to recover a lock a crashed creator left half-written", async t => {
   const directory = await tempDirectory(t);
   await writeFile(join(directory, "default.json.lock"), '{"at":');
-  const store = await FileStore.open({ directory, staleLockMs: 150 });   // lockTimeoutMs left to its default
+  const store = await openStore({ directory, staleLockMs: 150 });   // lockTimeoutMs left to its default
   assert.ok(store.lockTimeoutMs > store.staleLockMs, "a waiter outlasts the stale interval");
   await store.create(entry("mona-recovered"));
   assert.deepEqual((await store.list()).map(item => item.id), ["mona-recovered"]);
-  const production = await FileStore.open({ directory: await tempDirectory(t) });
+  const production = await openStore({ directory: await tempDirectory(t) });
   assert.ok(production.lockTimeoutMs > production.staleLockMs, "and so do the production defaults");
 });
 
@@ -2215,14 +2223,14 @@ test("a stored row missing any served field is refused, and the health check say
     const file = join(directory, "default.json");
     const text = JSON.stringify({ entries: [row], reserved: [], version: 3 });
     await writeFile(file, text);
-    await assert.rejects(() => FileStore.open({ directory }), /is not a readable board/, label);
+    await assert.rejects(() => openStore({ directory }), /is not a readable board/, label);
     assert.equal(await readFile(file, "utf8"), text, `${label}: the file is left exactly as found`);
   }
 
   // A row written before publication tokens has no tokenHash, and still loads.
   const directory = await tempDirectory(t);
   await writeFile(join(directory, "default.json"), JSON.stringify({ entries: [entry("mona-a")], reserved: [], version: 1 }));
-  const store = await FileStore.open({ directory });
+  const store = await openStore({ directory });
   const { url } = await service(t, { store });
   assert.equal((await fetch(`${url}/healthz`)).status, 200);
   assert.equal((await board(url)).entries[0].score, 1000);
@@ -2239,7 +2247,7 @@ test("the rubric's own score bounds load", async t => {
   for (const score of [1, 5000]) {
     const directory = await tempDirectory(t);
     await writeFile(join(directory, "default.json"), JSON.stringify({ entries: [entry("mona-a", score)], reserved: [], version: 1 }));
-    assert.equal((await (await FileStore.open({ directory })).list())[0].score, score);
+    assert.equal((await (await openStore({ directory })).list())[0].score, score);
   }
 });
 
@@ -2247,14 +2255,14 @@ test("an instance left holding a replaced reservation key can no longer write", 
   const { keyIdOf, openReservationKey } = await import("../leaderboard-service/store.mjs");
   const directory = await tempDirectory(t);
   // Instance A starts, and binds the (empty) board to its key before serving.
-  const a = await FileStore.open({ directory });
+  const a = await openStore({ directory });
   const keyA = await openReservationKey(directory, a);
   assert.equal(JSON.parse(await readFile(join(directory, "default.json"), "utf8")).keyId, keyIdOf(keyA),
     "bound on disk at start-up, not at the first write");
 
   // The key file disappears while nothing is reserved; instance B mints a new one.
   await rm(join(directory, "reservation.key"));
-  const b = await FileStore.open({ directory });
+  const b = await openStore({ directory });
   const keyB = await openReservationKey(directory, b);
   assert.notEqual(keyIdOf(keyB), keyIdOf(keyA));
 
@@ -2279,7 +2287,7 @@ test("binding the key survives a write that had to be retried", async t => {
   const directory = await tempDirectory(t);
   // A board bound to a key that is gone, with nothing reserved: rebinding is allowed.
   await writeFile(join(directory, "default.json"), JSON.stringify({ entries: [], keyId: "0".repeat(16), reserved: [], version: 1 }));
-  const store = await FileStore.open({ directory });
+  const store = await openStore({ directory });
   const persist = store.persist.bind(store);
   let calls = 0;
   store.persist = (...args) => { calls += 1; return calls === 1 ? Promise.reject(new ConcurrentWriteError()) : persist(...args); };
@@ -2302,11 +2310,11 @@ test("a reservation that is not a fingerprint is refused, never loaded as a no-o
     const file = join(directory, "default.json");
     const text = JSON.stringify(board);
     await writeFile(file, text);
-    await assert.rejects(() => FileStore.open({ directory }), /is not a readable board/, label);
+    await assert.rejects(() => openStore({ directory }), /is not a readable board/, label);
     assert.equal(await readFile(file, "utf8"), text, `${label}: the file is left exactly as found`);
   }
   // And one is never written in the first place.
-  const store = await FileStore.open({ directory: await tempDirectory(t) });
+  const store = await openStore({ directory: await tempDirectory(t) });
   await assert.rejects(() => store.retract("mona-a", "mona-a"), TypeError);
   await assert.rejects(() => new MemoryStore().retract("mona-a", "fp-a"), TypeError);
   assert.equal(await store.retract("mona-a", fp("mona-a")), false, "a real fingerprint is accepted");
@@ -2472,13 +2480,13 @@ test("a board field that is present must be well formed, even if older boards la
     const file = join(directory, "default.json");
     const text = JSON.stringify(board);
     await writeFile(file, text);
-    await assert.rejects(() => FileStore.open({ directory }), /is not a readable board/, label);
+    await assert.rejects(() => openStore({ directory }), /is not a readable board/, label);
     assert.equal(await readFile(file, "utf8"), text, `${label}: the file is left exactly as found`);
   }
   // Exactly what the build deployed today writes: no version, no keyId.
   const directory = await tempDirectory(t);
   await writeFile(join(directory, "default.json"), JSON.stringify({ entries: [entry("mona-a")], reserved: [fp("gone")] }));
-  const store = await FileStore.open({ directory });
+  const store = await openStore({ directory });
   assert.equal(await store.isReserved(fp("gone")), true);
   assert.equal((await store.list()).length, 1);
 });
@@ -2617,7 +2625,7 @@ test("only the service's own reservation proves a removed ID is not public", asy
 test("an instance bound to a key cannot write or stay healthy once the board's binding is gone", async t => {
   const { openReservationKey } = await import("../leaderboard-service/store.mjs");
   const directory = await tempDirectory(t);
-  const store = await FileStore.open({ directory });
+  const store = await openStore({ directory });
   await openReservationKey(directory, store);
   const { url } = await service(t, { store });
   // The binding disappears from disk (a restored or hand-edited board).
@@ -2630,7 +2638,7 @@ test("an instance bound to a key cannot write or stay healthy once the board's b
   assert.equal((await fetch(`${url}/healthz`)).status, 503);
 
   // A restart binds it again, and the instance is healthy.
-  const restarted = await FileStore.open({ directory });
+  const restarted = await openStore({ directory });
   await openReservationKey(directory, restarted);
   const fresh = await service(t, { store: restarted });
   assert.equal((await fetch(`${fresh.url}/healthz`)).status, 200);
@@ -2796,7 +2804,7 @@ test("a board with two rows under one handle is refused", async t => {
   const file = join(directory, "default.json");
   const text = JSON.stringify({ entries: [entry("mona-a"), { ...entry("mona-b"), handle: entry("mona-a").handle }], reserved: [], version: 1 });
   await writeFile(file, text);
-  await assert.rejects(() => FileStore.open({ directory }), /two entries with handle/);
+  await assert.rejects(() => openStore({ directory }), /two entries with handle/);
   assert.equal(await readFile(file, "utf8"), text);
 });
 
@@ -2934,7 +2942,8 @@ test("the runbook gives a supported way to back up and to recover a lost reserva
   assert.match(section, /cat \/home\/data\/commit-and-sip\/reservation\.key/);
   assert.match(section, /mv \/home\/data\/commit-and-sip\/<EVENT_ID>\.json/, "the board is preserved, not deleted");
   assert.match(section, /On \*\*every\*\* booth machine, run `npm run leaderboard:republish -- --takedowns`/);
-  assert.match(section, /Only when every booth has finished, run `npm run leaderboard:republish -- --drinks` on each/);
+  assert.match(section, /Only when every booth has finished, run `npm run leaderboard:republish -- --open` once, then `npm run leaderboard:republish -- --drinks` on each/);
+  assert.match(section, /closed to drinks meanwhile/);
   assert.match(section, /archived and wiped.*blocklist/s, "and the limit is stated with its remedy");
 });
 
@@ -3111,7 +3120,7 @@ test("a multi-booth rebuild runs in two phases, and a booth cannot send drinks b
   assert.deepEqual(parsePhase(["--drinks"]), { drinks: true, takedowns: false });
   assert.deepEqual(parsePhase(["--all"]), { drinks: true, takedowns: true });
   for (const argv of [[], ["--takedowns", "--drinks"], ["--everything"]]) {
-    assert.throws(() => parsePhase(argv), /--takedowns \| --drinks \| --all/, "the phase is always named");
+    assert.throws(() => parsePhase(argv), /--takedowns \| --open \| --drinks \| --all/, "the phase is always named");
   }
 
   // Two booths that took down different names, rebuilding onto an empty board.
@@ -3150,4 +3159,83 @@ test("the integration contract describes launch gates, not unbuilt work", async 
   const contract = await readFile(new URL("../docs/integration-contract.md", import.meta.url), "utf8");
   assert.doesNotMatch(contract, /Not yet built/);
   assert.match(contract, /### Launch gates\n\nThe code is built and the leaderboard service is deployed\./);
+});
+
+// --- Review round 36 ---------------------------------------------------------
+
+test("a board created from nothing is closed to drinks until staff open it, but takes takedowns", async t => {
+  const { ClosedError } = await import("../leaderboard-service/store.mjs");
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory });
+  assert.deepEqual(await store.state(), { closed: true });
+  await assert.rejects(() => store.admit(entry("mona-a"), { fingerprint: fp("mona-a"), handles: [entry("mona-a").handle] }), ClosedError);
+  assert.equal(await store.retract("mona-gone", fp("mona-gone")), false, "takedowns are replayed onto it");
+  const reopened = await FileStore.open({ directory });
+  assert.deepEqual(await reopened.state(), { closed: true }, "closed survives a restart");
+  assert.equal(await reopened.isReserved(fp("mona-gone")), true);
+  await reopened.openBoard();
+  assert.deepEqual(await (await FileStore.open({ directory })).state(), { closed: false });
+  await reopened.admit(entry("mona-a"), { fingerprint: fp("mona-a"), handles: [entry("mona-a").handle] });
+
+  // A board written before the gate existed (the live one) is open.
+  const legacy = await tempDirectory(t);
+  await writeFile(join(legacy, "default.json"), JSON.stringify({ entries: [], reserved: [] }));
+  assert.deepEqual(await (await FileStore.open({ directory: legacy })).state(), { closed: false });
+  const bad = await tempDirectory(t);
+  await writeFile(join(bad, "default.json"), JSON.stringify({ closed: "yes", entries: [], reserved: [] }));
+  await assert.rejects(() => FileStore.open({ directory: bad }), /malformed closed flag/);
+});
+
+test("the service holds drinks while rebuilding, and only the staff key opens it", async t => {
+  const { url } = await service(t, { store: new MemoryStore({ closed: true }) });
+  const refused = await post(url, submission("Mona Moonrise Mocha"));
+  assert.equal(refused.status, 503);
+  assert.equal((await refused.json()).error, "board_rebuilding");
+  assert.equal((await board(url)).rebuilding, true);
+  const open = (body, key) => fetch(`${url}/api/board/open`, { body: JSON.stringify(body), method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` } });
+  assert.equal((await open({ open: true }, BOOTH_KEY)).status, 401, "a booth key cannot open it");
+  assert.equal((await open({}, STAFF_KEY)).status, 400);
+  assert.equal((await open({ open: true, extra: 1 }, STAFF_KEY)).status, 400);
+  assert.equal((await open({ open: true }, STAFF_KEY)).status, 200);
+  assert.equal((await board(url)).rebuilding, false);
+  assert.equal((await post(url, submission("Mona Moonrise Mocha"))).status, 201);
+  const page = await readFile(new URL("../leaderboard-service/public/board.js", import.meta.url), "utf8");
+  assert.match(page, /board\.rebuilding\s*\? "The board is being rebuilt\./, "the monitor says so too");
+});
+
+test("a rebuild holds every booth's ordinary publishing until staff open the board", async t => {
+  const { parsePhase } = await import("../scripts/republish-leaderboard.mjs");
+  assert.deepEqual(parsePhase(["--open"]), { open: true });
+  const lost = await service(t);
+  const directory = await tempDirectory(t);
+  const replacement = await service(t, { store: await FileStore.open({ directory }) });   // created from nothing: closed
+  const to = url => createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url });
+  const boothA = (await engineWith(t, to(lost.url))).engine;
+  const boothB = (await engineWith(t, to(lost.url))).engine;
+  await boothB.open({ runId: "b-1" });
+  const takenDown = await boothB.dispatch("b-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await boothB.publish("b-1");
+  await boothB.removeDrink({ id: takenDown.submission.id, reason: "test", removedBy: "lead" });
+  boothA.leaderboardClient = to(replacement.url);
+  boothB.leaderboardClient = to(replacement.url);
+
+  // Mid-rebuild, an attendee at A invents the name B took down. A's ordinary
+  // publish is held, not admitted, though B has not replayed yet.
+  await boothA.open({ runId: "a-1" });
+  await boothA.dispatch("a-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await boothA.publish("a-1");
+  const held = (await boothA.store.read()).runs["a-1"].sync;
+  assert.deepEqual([held.state, held.code], ["failed", "board_rebuilding"], "kept, and retried later");
+  assert.equal((await board(replacement.url)).total, 0);
+
+  await boothB.republishAll({ drinks: false });                      // B replays its takedown
+  const wrongKey = createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: "w".repeat(64), url: replacement.url });
+  await assert.rejects(() => wrongKey.openBoard(), { status: 401 }, "a refused opening is reported, never assumed");
+  assert.equal((await board(replacement.url)).rebuilding, true);
+  await boothB.leaderboardClient.openBoard();                         // staff open the board
+  await boothA.retryPublications();                                   // A's own retry, after opening
+  assert.deepEqual([(await boothA.store.read()).runs["a-1"].sync.state, (await boothA.store.read()).runs["a-1"].sync.code],
+    ["rejected", "unavailable_drink"], "B's takedown was in place first");
+  assert.equal((await board(replacement.url)).total, 0);
 });
