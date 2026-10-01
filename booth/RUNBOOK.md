@@ -244,7 +244,7 @@ let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
 });'
 ```
 
-Then open `/healthz`. `moderation: "placeholder"` means the service is running with the unreviewed blocklist. A board the service creates, on the first deployment or a new `EVENT_ID`, starts closed to drinks (`/api/board` reports `rebuilding: true`). For a new event, open it once with `npm run leaderboard:republish -- --open` from a staff machine. Redeploying over an existing board leaves it as it was. That is fine for staff testing and a reason not to set `leaderboardUrl`.
+Then open `/healthz`. `moderation: "placeholder"` means the service is running with the unreviewed blocklist. A board the service creates, on the first deployment or a new `EVENT_ID`, starts closed to drinks (`/api/board` reports `rebuilding: true`). Do not open it yet. For a new event, first **archive and reset every booth**, then run `npm run leaderboard:republish -- --open` once from a staff machine; if any booth still holds drinks or takedowns, follow the `--takedowns`, then `--open`, then `--drinks` sequence in the troubleshooting table instead. Redeploying over an existing board leaves it as it was. That is fine for staff testing and a reason not to set `leaderboardUrl`.
 
 Every infrastructure deployment needs the keys again (step 1 keeps the existing ones). Give each additional booth machine the **same deployed keys**, as below (add `--no-staff-key` on machines that should not take drinks down).
 

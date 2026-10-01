@@ -178,3 +178,24 @@ test("the runbook opens a fresh board directly only after every booth is archive
   assert.ok(ops.indexOf("--takedowns") >= 0 && ops.indexOf("--takedowns") < ops.lastIndexOf("--drinks"), "and the full sequence otherwise");
   assert.doesNotMatch(runbook, /open it with `npm run leaderboard:republish -- --open`/, "no unconditional open");
 });
+
+// Every operator instruction to open a board, in any doc, must be preceded in
+// the same block by its prerequisite: every booth reset, or takedowns first.
+test("no doc tells an operator to open a board before its prerequisite", async () => {
+  const docs = ["../booth/RUNBOOK.md", "../README.md", "../docs/leaderboard-service.md", "../docs/integration-contract.md", "../docs/architecture.md"];
+  let checked = 0;
+  for (const doc of docs) {
+    const text = await readFile(new URL(doc, import.meta.url), "utf8");
+    for (const block of text.split(/\n\s*\n/)) {
+      let at = block.indexOf("republish -- --open");
+      while (at >= 0) {
+        checked += 1;
+        const before = block.slice(0, at).toLowerCase();
+        assert.ok(/archive and reset every booth|archive and reset\) on every booth|republish -- --takedowns|`--takedowns`/.test(before),
+          `${doc}: an --open instruction lacks its prerequisite: ${block.slice(Math.max(0, at - 160), at + 40)}`);
+        at = block.indexOf("republish -- --open", at + 1);
+      }
+    }
+  }
+  assert.ok(checked >= 4, `found ${checked} --open instructions`);
+});
