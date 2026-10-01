@@ -108,3 +108,18 @@ test("each attendee's leaderboard code is encoded with a four-module margin", as
   assert.ok(url);
   assert.ok(options.margin >= 4, `margin ${options.margin}`);
 });
+
+// Following the documentation must never expose attendee names before the
+// moderation review: the attendee QR is a gated setting in every setup step.
+test("the setup docs keep the attendee QR gated on the blocklist review", async () => {
+  const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  const runbook = await readFile(new URL("../booth/RUNBOOK.md", import.meta.url), "utf8");
+  const setting = text => text.split("\n").find(line => line.startsWith("- `leaderboardUrl` puts a"));
+  for (const [label, text] of [["README", readme], ["runbook", runbook]]) {
+    const line = setting(text);
+    assert.ok(line, `${label} describes the setting`);
+    assert.match(line, /Leave it unset until the moderation blocklist is reviewed/, `${label}: the gate comes first`);
+  }
+  const readiness = runbook.slice(runbook.indexOf("## Leaderboard and QR readiness"));
+  assert.match(readiness, /stays gated on the blocklist review/);
+});
