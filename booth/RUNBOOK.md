@@ -218,7 +218,7 @@ npm run leaderboard:configure -- --url https://commit-and-sip-leaderboard.azurew
 
 # 2. Infrastructure. The keys go in as secure parameters and never touch the repository.
 az deployment sub create --subscription 6aab8b26-48c5-4cfd-ac82-6b5efcc2e441 --location westus2 \
-  --name commit-and-sip-leaderboard --template-file infra/main.bicep \
+  --name commit-and-sip-leaderboard-westus2 --template-file infra/main.bicep \
   --parameters infra/main.parameters.json --parameters @dist/leaderboard.secure.parameters.json
 rm dist/leaderboard.secure.parameters.json
 
@@ -247,7 +247,7 @@ Then open `/healthz`. `moderation: "placeholder"` means the service is running w
 
 Every infrastructure deployment needs the keys again (step 1 keeps the existing ones). Give each additional booth machine the **same deployed keys**, as below (add `--no-staff-key` on machines that should not take drinks down).
 
-The board is a JSON file on the app's persistent `/home` storage, beside `reservation.key`, the key that fingerprints taken-down names. **Keep the two together:** if the key is lost while the board holds reservations, the service refuses to start rather than mint a new key that would let every taken-down name be published again. Do not delete the board to get past it; follow [backing up and recovering the reservation key](#backing-up-and-recovering-the-reservation-key). The plan runs **one instance**, and there is no reason to scale it out. The store stays correct if the platform briefly runs a second instance, because writes are locked and version-checked on the shared disk, but it is not built for sustained scale-out. To start a fresh board for a new event, change `eventId` in `infra/main.parameters.json` and redeploy the infrastructure. The old board stays on disk.
+The board is a JSON file on the app's persistent `/home` storage, beside `reservation.key`, the key that fingerprints taken-down names. **Keep the two together:** if the key is lost while the board holds reservations, the service refuses to start rather than mint a new key that would let every taken-down name be published again. Do not delete the board to get past it; follow [backing up and recovering the reservation key](#backing-up-and-recovering-the-reservation-key). The plan runs **one instance**, and there is no reason to scale it out. The store stays correct if the platform briefly runs a second instance, because writes are locked and version-checked on the shared disk, but it is not built for sustained scale-out. To start a fresh board for a new event, change `eventId` in `infra/main.parameters.json` and redeploy the infrastructure (step 2 above; the subscription deployment is named `commit-and-sip-leaderboard-westus2`, because the plain name is held by a failed westus3 attempt and Azure refuses to reuse it in another region). The new board starts closed and empty, with its count at 0: open it with `npm run leaderboard:republish -- --open`. The old board stays on disk as `<old eventId>.json`. **Archive and reset on the staff dashboard clears this booth only, never the public board**, which is shared by every booth; the `eventId` change is how the board is reset.
 
 #### Backing up and recovering the reservation key
 
