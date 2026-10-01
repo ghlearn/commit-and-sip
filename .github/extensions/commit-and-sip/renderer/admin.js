@@ -13,6 +13,7 @@
     $("admin").setAttribute("aria-busy", String(busy));
     for (const id of ["export-fields", "takedown-fields", "wipe-fields", "close-fields"]) $(id).disabled = busy;
     $("admin-retry").disabled = busy || !ticket;
+    $("admin-refresh").disabled = busy || !ticket;
   }
 
   async function request(path, body) {
@@ -185,11 +186,11 @@
   // A takedown that did not reach the public board must not read as done.
   const PUBLIC_BOARD = {
     absent: "was not on the public leaderboard",
-    failed: "is NOT yet off the public leaderboard. Refresh to retry",
-    "in-doubt": "may still be on the public leaderboard: it was still being published when it was taken down. Refresh to retry",
-    "not-configured": "is NOT off the public leaderboard: this booth has no staff key. To finish it, copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <an owner-only (chmod 600) copy of a staff machine's booth/local-config.json>, then delete that copy, then retry with Refresh",
+    failed: "is NOT yet off the public leaderboard. Press Refresh and retry",
+    "in-doubt": "may still be on the public leaderboard: it was still being published when it was taken down. Press Refresh and retry",
+    "not-configured": "is NOT off the public leaderboard: this booth has no staff key. To finish it, copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <an owner-only (chmod 600) copy of a staff machine's booth/local-config.json>, then delete that copy, then press Refresh and retry",
     retracted: "was taken off the public leaderboard",
-    unrecorded: "may still be on the public leaderboard: the removal stopped before it reached the board. Refresh to retry",
+    unrecorded: "may still be on the public leaderboard: the removal stopped before it reached the board. Press Refresh and retry",
   };
 
   // Settled outcomes are always shown. An unsettled one is a warning only when
@@ -201,7 +202,7 @@
     if (!owed) return "";
     // A failure names its cause: a refused key or an outdated service is not
     // fixed by waiting for the network.
-    if (published === "failed" && cause) return `is NOT yet off the public leaderboard: ${cause}. Refresh to retry once that is fixed`;
+    if (published === "failed" && cause) return `is NOT yet off the public leaderboard: ${cause}. Press Refresh and retry once that is fixed`;
     return PUBLIC_BOARD[published] ?? PUBLIC_BOARD.unrecorded;
   }
 
@@ -278,6 +279,9 @@
   }
 
   $("admin-retry").addEventListener("click", load);
+  // Reading the state never retries anything. This does: it is the dashboard's
+  // way to send takedowns and drinks that did not reach the public board.
+  $("admin-refresh").addEventListener("click", () => act("refresh", {}));
 
   $("export-form").addEventListener("submit", async event => {
     event.preventDefault();

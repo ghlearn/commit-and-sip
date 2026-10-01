@@ -378,6 +378,9 @@ async function tempDirectory(t) {
   return directory;
 }
 
+// The platform these tests run on, for the POSIX permission checks, which run
+// the platform's own tools (ls, chmod) rather than a stand-in.
+const POSIX = process.platform;
 // A reservation as the service stores it: a 64-hex HMAC-SHA256 fingerprint.
 const fp = label => createHash("sha256").update(label).digest("hex");
 // Each row its own handle, as the service guarantees: the phrase plus a suffix from the ID.
@@ -2422,11 +2425,11 @@ test("keys are copied only from an owner-only file, and the operator is told to 
   await writeFile(copy, await readFile(staffMachine, "utf8"), { mode: 0o644 });
   await chmod(copy, 0o644);                                  // what a copy tool commonly leaves
   const booth = join(directory, "booth.json");
-  await assert.rejects(() => configure({ configFile: booth, from: copy, url, access: { platform: "darwin" } }),
+  await assert.rejects(() => configure({ configFile: booth, from: copy, url, access: { platform: POSIX } }),
     /can be read by other users.*chmod 600/);
   await assert.rejects(() => readFile(booth), { code: "ENOENT" }, "and nothing was written");
   await chmod(copy, 0o600);
-  const done = await configure({ configFile: booth, from: copy, url, access: { platform: "darwin" } });
+  const done = await configure({ configFile: booth, from: copy, url, access: { platform: POSIX } });
   assert.deepEqual(done.copied, ["boothKey", "staffKey"]);
   assert.match(report({ ...done, from: copy, parametersFile: null, staff: true }), new RegExp(`Delete ${copy} now`));
   assert.doesNotMatch(report({ ...done, copied: [], from: null, parametersFile: null, staff: true }), /Delete .* now: it is a second copy/);
@@ -2536,17 +2539,17 @@ test("the staff config is loaded only while its keys are readable by its owner a
   const withKeys = { leaderboardApi: { boothKey: "b".repeat(64), staffKey: "s".repeat(64), url: "https://example.org" } };
   await writeFile(file, JSON.stringify(withKeys));
   await chmod(file, 0o644);                                   // restored from a backup, or copied in
-  await assert.rejects(() => loadStaffConfig(file, { platform: "darwin" }), { code: "config_exposed" });
-  await assert.rejects(() => loadStaffConfig(file, { platform: "darwin" }), /chmod 600.*rotate/);
+  await assert.rejects(() => loadStaffConfig(file, { platform: POSIX }), { code: "config_exposed" });
+  await assert.rejects(() => loadStaffConfig(file, { platform: POSIX }), /chmod 600.*rotate/);
   await chmod(file, 0o640);                                   // group-readable only is still other users
-  await assert.rejects(() => loadStaffConfig(file, { platform: "darwin" }), { code: "config_exposed" });
+  await assert.rejects(() => loadStaffConfig(file, { platform: POSIX }), { code: "config_exposed" });
   await chmod(file, 0o600);
-  assert.equal((await loadStaffConfig(file, { platform: "darwin" })).leaderboardApi.boothKey, "b".repeat(64));
+  assert.equal((await loadStaffConfig(file, { platform: POSIX })).leaderboardApi.boothKey, "b".repeat(64));
 
   // No keys, nothing to expose; and on Windows the ACL decides, not the mode.
   await writeFile(file, JSON.stringify({ leaderboardUrl: "https://example.org/board" }));
   await chmod(file, 0o644);
-  assert.equal((await loadStaffConfig(file, { platform: "darwin" })).leaderboardUrl, "https://example.org/board");
+  assert.equal((await loadStaffConfig(file, { platform: POSIX })).leaderboardUrl, "https://example.org/board");
   await writeFile(file, JSON.stringify(withKeys));
   await chmod(file, 0o644);
   const ownerOnly = async () => ({ stdout: JSON.stringify({ aces: [{ sid: "S-1-5-21-1-2-3-1001", type: "Allow" }], me: "S-1-5-21-1-2-3-1001" }) });
@@ -2711,21 +2714,21 @@ test("configure will not keep keys from a file others could read, but hardens on
   const directory = await tempDirectory(t);
   const url = "https://commit-and-sip-leaderboard.azurewebsites.net";
   const file = join(directory, "local-config.json");
-  await configure({ configFile: file, url, access: { platform: "darwin" } });
+  await configure({ configFile: file, url, access: { platform: POSIX } });
   await chmod(file, 0o644);                                    // restored from a backup
   const before = await readFile(file, "utf8");
-  await assert.rejects(() => configure({ configFile: file, url, access: { platform: "darwin" } }),
+  await assert.rejects(() => configure({ configFile: file, url, access: { platform: POSIX } }),
     { code: "config_exposed" });
-  await assert.rejects(() => configure({ configFile: file, url, access: { platform: "darwin" } }), /Rotate them/);
+  await assert.rejects(() => configure({ configFile: file, url, access: { platform: POSIX } }), /Rotate them/);
   assert.equal(await readFile(file, "utf8"), before, "the exposed keys were not reported as kept, nor rewritten");
 
   await chmod(file, 0o600);
-  assert.deepEqual((await configure({ configFile: file, url, access: { platform: "darwin" } })).generated, [], "private keys are kept");
+  assert.deepEqual((await configure({ configFile: file, url, access: { platform: POSIX } })).generated, [], "private keys are kept");
 
   const urlOnly = join(directory, "url-only.json");
   await writeFile(urlOnly, JSON.stringify({ leaderboardUrl: "https://example.org/board" }));
   await chmod(urlOnly, 0o644);
-  const fresh = await configure({ configFile: urlOnly, url, access: { platform: "darwin" } });
+  const fresh = await configure({ configFile: urlOnly, url, access: { platform: POSIX } });
   assert.deepEqual(fresh.generated, ["boothKey", "staffKey"]);
   assert.equal((await stat(urlOnly)).mode & 0o777, 0o600, "rewritten owner-only");
 });
@@ -2786,4 +2789,74 @@ test("a board with two rows under one handle is refused", async t => {
   await writeFile(file, text);
   await assert.rejects(() => FileStore.open({ directory }), /two entries with handle/);
   assert.equal(await readFile(file, "utf8"), text);
+});
+
+// --- Review round 28 ---------------------------------------------------------
+
+test("an ACL can expose a 0600 key file; it is detected, and stripped when written", async t => {
+  const { readableByOthers } = await import("../.github/extensions/commit-and-sip/domain.mjs");
+  const file = "/tmp/x";
+  const ls = stdout => async () => ({ stdout });
+  const directory = await tempDirectory(t);
+  const target = join(directory, "keys.json");
+  await writeFile(target, "{}", { mode: 0o600 });
+  const exposed = (platform, run) => readableByOthers(target, { platform, run });
+  // macOS: entries are listed under the mode line; "+" is hidden by any xattr.
+  assert.equal(await exposed("darwin", ls(`-rw-------@ 1 me  staff  2 Jan 1 00:00 ${file}\n 0: group:everyone allow read\n`)), true);
+  assert.equal(await exposed("darwin", ls(`-rw-------@ 1 me  staff  2 Jan 1 00:00 ${file}\n 0: group:everyone deny delete\n`)), false);
+  assert.equal(await exposed("darwin", ls(`-rw-------@ 1 me  staff  2 Jan 1 00:00 ${file}\n`)), false);
+  // Linux: "+" after the mode is an ACL; "." is an SELinux context, not one.
+  assert.equal(await exposed("linux", ls(`-rw-------+ 1 me me 2 Jan 1 00:00 ${file}\n`)), true);
+  assert.equal(await exposed("linux", ls(`-rw-------. 1 me me 2 Jan 1 00:00 ${file}\n`)), false);
+  assert.equal(await exposed("linux", ls(`-rw------- 1 me me 2 Jan 1 00:00 ${file}\n`)), false);
+  // Could not look: counts as exposed.
+  assert.equal(await exposed("darwin", async () => { throw new Error("ls failed"); }), true);
+});
+
+test("on macOS, a real ACL entry is refused, and configure never inherits one", { skip: process.platform !== "darwin" && "macOS ACLs" }, async t => {
+  const { execFileSync } = await import("node:child_process");
+  const { chmod } = await import("node:fs/promises");
+  const { loadStaffConfig, readableByOthers } = await import("../.github/extensions/commit-and-sip/domain.mjs");
+  const { configure } = await import("../scripts/configure-leaderboard.mjs");
+  const url = "https://commit-and-sip-leaderboard.azurewebsites.net";
+  const directory = await tempDirectory(t);
+  const file = join(directory, "local-config.json");
+  await configure({ configFile: file, url });
+  assert.equal(await readableByOthers(file), false);
+  execFileSync("/bin/chmod", ["+a", "everyone allow read", file]);     // the mode still says 0600
+  await chmod(file, 0o600);
+  await assert.rejects(() => loadStaffConfig(file), { code: "config_exposed" });
+  await assert.rejects(() => loadStaffConfig(file), /chmod -N/);
+  await assert.rejects(() => configure({ configFile: file, url }), { code: "config_exposed" }, "its keys are not kept either");
+
+  // A folder whose ACL every new file inherits: the key file is written without it.
+  const shared = await tempDirectory(t);
+  execFileSync("/bin/chmod", ["+a", "everyone allow read,file_inherit", shared]);
+  const inherited = join(shared, "local-config.json");
+  await configure({ configFile: inherited, url });
+  assert.doesNotMatch(execFileSync("/bin/ls", ["-led", inherited], { encoding: "utf8" }), /allow/);
+  assert.ok((await loadStaffConfig(inherited)).leaderboardApi);
+});
+
+test("the dashboard's Refresh and retry button sends the refresh action", async () => {
+  const html = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/admin.html", import.meta.url), "utf8");
+  const script = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/admin.js", import.meta.url), "utf8");
+  assert.match(html, /<button id="admin-refresh" type="button">Refresh and retry<\/button>/);
+  assert.match(script, /\$\("admin-refresh"\)\.addEventListener\("click", \(\) => act\("refresh", \{\}\)\)/);
+  assert.doesNotMatch(script, /Refresh to retry/, "every instruction names the button that retries");
+});
+
+test("a key file whose ACL could not be stripped is never written to", async t => {
+  const { restrictToOwner } = await import("../scripts/configure-leaderboard.mjs");
+  const directory = await tempDirectory(t);
+  const file = join(directory, "keys.tmp");
+  await writeFile(file, "", { mode: 0o600 });
+  // Linux without the acl tools, on a file that still carries an ACL.
+  const run = async command => {
+    if (command === "setfacl") throw Object.assign(new Error("spawn setfacl ENOENT"), { code: "ENOENT" });
+    return { stdout: `-rw-------+ 1 me me 0 Jan 1 00:00 ${file}\n` };
+  };
+  await assert.rejects(() => restrictToOwner(file, { platform: "linux", run }), /Could not make .* private.*no keys were written/);
+  const clean = async command => (command === "setfacl" ? { stdout: "" } : { stdout: `-rw------- 1 me me 0 Jan 1 00:00 ${file}\n` });
+  await restrictToOwner(file, { platform: "linux", run: clean });
 });

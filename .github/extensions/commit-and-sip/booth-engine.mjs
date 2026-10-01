@@ -375,7 +375,7 @@ export class BoothEngine {
       const owed = this.removalLog(data).filter(record => !SETTLED.includes(record.published) && mayBePublic(data, record, Boolean(this.leaderboardClient)));
       requireValue(owed.length === 0, "takedowns_owed",
         `${owed.length === 1 ? "One takedown has" : `${owed.length} takedowns have`} not reached the public leaderboard, `
-        + "so wiping would leave it public with no record to retry from. The dashboard shows why each has not landed: fix that and Refresh, "
+        + "so wiping would leave it public with no record to retry from. The dashboard shows why each has not landed: fix that and press Refresh and retry, "
         + "or copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <an owner-only (chmod 600) copy of a staff machine's booth/local-config.json>, then delete that copy. Nothing was changed.", 409);
       const summary = eventSummary(data);
       // An attendee mid-order would lose the drink on the screen in front of

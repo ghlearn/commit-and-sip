@@ -80,10 +80,10 @@ const WINDOWS_PRIVILEGED = ["S-1-5-18", "S-1-5-32-544"];
 // verified counts as readable: the answer guards keys, so it fails closed.
 export async function readableByOthers(file, { platform = process.platform, run = promisify(execFile), env = process.env } = {}) {
   const { mode } = await stat(file);
-  if (platform !== "win32") return (mode & 0o077) !== 0;
+  const path = file instanceof URL ? fileURLToPath(file) : String(file);
+  if (platform !== "win32") return (mode & 0o077) !== 0 || posixAclMayGrant(path, platform, run);
   let acl;
   try {
-    const path = file instanceof URL ? fileURLToPath(file) : String(file);
     const { stdout } = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_ACL],
       { env: { ...env, SIP_ACL_FILE: path } });
     acl = JSON.parse(stdout);
@@ -97,11 +97,25 @@ export async function readableByOthers(file, { platform = process.platform, run 
     || (ace.type === "Allow" && ace.sid !== me && !WINDOWS_PRIVILEGED.includes(ace.sid)));
 }
 
+// A mode of 0600 does not rule out an ACL granting someone else access. macOS
+// lists ACL entries with `ls -le` (its "+" marker is hidden whenever the file
+// also has extended attributes, as every AirDropped file does); elsewhere a
+// "+" after the mode marks an ACL. Any allow entry, or any doubt, counts.
+async function posixAclMayGrant(path, platform, run) {
+  try {
+    const { stdout } = await run("/bin/ls", platform === "darwin" ? ["-led", path] : ["-ld", path]);
+    if (platform === "darwin") return /^\s*\d+: .*\ballow\b/m.test(stdout);
+    return stdout.split("\n")[0].charAt(10) === "+";
+  } catch {
+    return true;
+  }
+}
+
 // How to make a key file owner-only again, in the terms of the platform.
 export function restrictAdvice(file, platform = process.platform) {
   return platform === "win32"
     ? `icacls "${file}" /inheritance:r /grant:r "%USERDOMAIN%\\%USERNAME%:F"`
-    : `chmod 600 ${file}`;
+    : platform === "darwin" ? `chmod 600 ${file} && chmod -N ${file}` : `chmod 600 ${file} && setfacl -b ${file}`;
 }
 
 // Shared by the extension and the staff scripts, so a takedown from the

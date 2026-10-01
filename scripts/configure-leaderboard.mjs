@@ -74,6 +74,14 @@ async function assertPrivateSource(file, access) {
 export async function restrictToOwner(path, { platform = process.platform, run = execFileAsync, env = process.env } = {}) {
   if (platform !== "win32") {
     await chmod(path, 0o600);   // in case the umask left it narrower than intended, never wider
+    // The mode is not the whole answer: an ACL inherited from the folder can
+    // still grant others access. Strip it, then check, and write nothing if
+    // the file cannot be shown to be private.
+    if (platform === "darwin") await run("/bin/chmod", ["-N", path]);
+    else await run("setfacl", ["-b", path]).catch(error => { if (error.code !== "ENOENT") throw error; });
+    if (await readableByOthers(path, { platform, run })) {
+      throw new Error(`Could not make ${path} private to this user, so no keys were written.`);
+    }
     return;
   }
   const user = env.USERNAME && (env.USERDOMAIN ? `${env.USERDOMAIN}\\${env.USERNAME}` : env.USERNAME);
