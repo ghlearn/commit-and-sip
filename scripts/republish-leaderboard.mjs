@@ -25,7 +25,8 @@ export const USAGE = "Usage: npm run leaderboard:republish -- --takedowns | --op
   + "  --takedowns  replay this booth's takedowns. With several booths, run this on every booth first.\n"
   + "  --open       open a rebuilt (or new) board to drinks, once every booth has run --takedowns. Any one staff machine.\n"
   + "  --drinks     then send this booth's drinks.\n"
-  + "  --all        takedowns, open, then drinks, all here: only for a single-booth event, or a booth that publishes drinks served before it was configured.";
+  + "  --all        takedowns, open, then drinks, all here. Only for an event with one booth: it opens the board itself.\n"
+  + "To publish drinks served before this booth was configured, at an event with other booths: --takedowns, then --drinks.";
 
 export function parsePhase(argv) {
   const phases = { "--all": { drinks: true, open: true, takedowns: true }, "--drinks": { drinks: true, takedowns: false },
@@ -73,7 +74,11 @@ export async function main(argv, { engine: given = null, write = text => process
   if (blocked) {
     // Sending drinks while a removed name is unreserved would let the
     // replacement board accept it, so the rebuild stopped before any drink.
-    write(reason === "takedowns_not_replayed"
+    write(reason === "board_unknown"
+      ? "Nothing was replayed, opened or sent: the service did not say which board it is serving. Check it is running this build, then run this again.\n"
+      : reason === "board_changed"
+        ? "No drinks were sent: the board was replaced while the takedowns were being replayed. Start the rebuild again with --takedowns.\n"
+        : reason === "takedowns_not_replayed"
       ? "No drinks were sent: this booth has not replayed its takedowns onto this board. Run --takedowns here (and on every other booth) first.\n"
       : reason === "cannot_open"
         ? "No drinks were sent: opening the board needs the staff key on this machine.\n"

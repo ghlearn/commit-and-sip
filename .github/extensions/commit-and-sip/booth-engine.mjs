@@ -172,6 +172,12 @@ export class BoothEngine {
     });
   }
 
+  // The board the service is serving now, or null if that cannot be told.
+  async currentBoardId() {
+    try { return (await this.leaderboardClient?.boardId?.()) ?? null; }
+    catch { return null; }
+  }
+
   // A takedown as staff are shown it: its outcome and, while it is failing,
   // the cause in words.
   takedownView(record) {
@@ -272,8 +278,12 @@ export class BoothEngine {
     let removals;
     if (replayTakedowns) {
       // The board these takedowns land on, recorded with the marker so the
-      // drinks phase can check it is still the board being served.
-      const boardId = await this.leaderboardClient.boardId?.().catch(() => null) ?? null;
+      // drinks phase can check it is still the board being served. Unknown
+      // means stop: a rebuild that cannot name its board cannot prove later
+      // that this board received its takedowns, so nothing is replayed,
+      // opened or sent.
+      const boardId = await this.currentBoardId();
+      if (!boardId) return { blocked: true, drinks: [], reason: "board_unknown", removals: [] };
       // Every takedown is replayed, settled ones included: the board they were
       // settled on may be the one that was lost. Each is marked unsettled in
       // the ledger before anything is sent, so a failed replay, a stop
@@ -304,7 +314,7 @@ export class BoothEngine {
         ...(record.failure ? { failure: record.failure } : {}) }));
       // The takedowns must have been replayed onto the board served now. A
       // marker from a board since replaced again proves nothing about this one.
-      const current = await this.leaderboardClient.boardId?.().catch(() => null) ?? null;
+      const current = await this.currentBoardId();
       if (!data.rebuild?.takedownsReplayedAt || !current || data.rebuild.boardId !== current) {
         return { blocked: true, drinks: [], reason: "takedowns_not_replayed", removals };
       }
@@ -313,6 +323,11 @@ export class BoothEngine {
       }
     }
     if (!sendDrinks) return { blocked: false, drinks: [], removals };
+    // Within one call too, the board must still be the one the takedowns
+    // reached before it is opened or given drinks.
+    if (replayTakedowns && await this.currentBoardId() !== (await this.store.read()).rebuild?.boardId) {
+      return { blocked: true, drinks: [], reason: "board_changed", removals };
+    }
     if (open) {
       if (!this.leaderboardClient.openBoard) return { blocked: true, drinks: [], reason: "cannot_open", removals };
       await this.leaderboardClient.openBoard();

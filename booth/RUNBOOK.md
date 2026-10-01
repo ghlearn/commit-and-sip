@@ -230,7 +230,18 @@ az webapp deploy --subscription 6aab8b26-48c5-4cfd-ac82-6b5efcc2e441 \
   --src-path dist/leaderboard.zip --type zip --async true
 ```
 
-`--async true` is deliberate. Without it the CLI polls a deployment-status record that this app never writes, and it hangs even though the upload finished. Verify the result yourself instead: `curl -I` on the site should return 200 with a `content-security-policy` header.
+`--async true` is deliberate. Without it the CLI polls a deployment-status record that this app never writes, and it hangs even though the upload finished. So verify the result yourself, and make sure it is **this** build: `curl -I` returning 200 only proves that *some* build is serving, and the old build answers it too. Repeat this until it passes:
+
+```bash
+curl -fsS https://commit-and-sip-leaderboard.azurewebsites.net/api/board | node -e '
+let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+  const b = JSON.parse(s);
+  if (!/^[0-9a-f]{32}$/.test(b.boardId) || typeof b.rebuilding !== "boolean") {
+    console.error("Not this build yet (no boardId/rebuilding). Wait and check again."); process.exit(1);
+  }
+  console.log(`This build is serving board ${b.boardId}, ${b.rebuilding ? "closed (rebuilding)" : "open"}.`);
+});'
+```
 
 Then open `/healthz`. `moderation: "placeholder"` means the service is running with the unreviewed blocklist. A board the service creates, on the first deployment or a new `EVENT_ID`, starts closed to drinks (`/api/board` reports `rebuilding: true`). For a new event, open it once with `npm run leaderboard:republish -- --open` from a staff machine. Redeploying over an existing board leaves it as it was. That is fine for staff testing and a reason not to set `leaderboardUrl`.
 

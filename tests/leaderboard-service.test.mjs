@@ -438,7 +438,11 @@ test("the event ID cannot walk out of the data directory", async t => {
 
 // --- Takedown reaching the public board -------------------------------------
 
+// A real client always reports which board it is serving; a stub stands in
+// for one fixed board, so a rebuild can name it (review round 39).
+const STUB_BOARD = "b0a7d".padEnd(32, "0");
 async function engineWith(t, client) {
+  if (client && typeof client === "object" && !client.boardId) client.boardId = async () => STUB_BOARD;
   const directory = await mkdtemp(join(tmpdir(), "sip-lb-"));
   t.after(() => rm(directory, { force: true, recursive: true }));
   const store = new RunStore(directory);
@@ -3367,4 +3371,50 @@ test("the republish command runs --all in order and --open alone, end to end", a
 test("an empty board being rebuilt says so instead of inviting a drink", async () => {
   const page = await readFile(new URL("../leaderboard-service/public/board.js", import.meta.url), "utf8");
   assert.match(page, /setText\(\$\("empty"\), board\.rebuilding\s*\? "The board is being rebuilt\./);
+});
+
+// --- Review round 39 ---------------------------------------------------------
+
+test("a rebuild that cannot name its board replays, opens and sends nothing", async t => {
+  const fresh = await service(t, { store: await FileStore.open({ directory: await tempDirectory(t) }) });   // closed
+  const real = createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url: fresh.url });
+  const calls = { open: 0, publish: 0, retract: 0 };
+  let ids = [];
+  const client = {
+    boardId: async () => { const next = ids.shift(); if (next instanceof Error) throw next; return next; },
+    openBoard: async () => { calls.open += 1; return real.openBoard(); },
+    publish: async sent => { calls.publish += 1; return real.publish(sent); },
+    retract: async id => { calls.retract += 1; return real.retract(id); },
+  };
+  const { engine } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  const removed = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.removeDrink({ id: removed.submission.id, reason: "test", removedBy: "lead" });
+  await engine.open({ runId: "booth-2" });
+  await engine.dispatch("booth-2", "submit_name", { name: "Ducky Dawn Drizzle" });
+  calls.retract = 0;
+
+  for (const lookup of [new Error("network"), null]) {
+    ids = [lookup];
+    const result = await engine.republishAll({ drinks: true, open: true, takedowns: true });   // --all
+    assert.deepEqual([result.blocked, result.reason], [true, "board_unknown"]);
+    assert.deepEqual(calls, { open: 0, publish: 0, retract: 0 }, "nothing replayed, opened or sent");
+  }
+  // The board changes while the takedowns replay: no opening, no drinks.
+  const current = (await board(fresh.url)).boardId;
+  ids = [current, "f".repeat(32)];
+  const changed = await engine.republishAll({ drinks: true, open: true, takedowns: true });
+  assert.deepEqual([changed.blocked, changed.reason], [true, "board_changed"]);
+  assert.deepEqual([calls.open, calls.publish], [0, 0]);
+  assert.equal((await board(fresh.url)).rebuilding, true);
+
+  const { USAGE } = await import("../scripts/republish-leaderboard.mjs");
+  assert.match(USAGE, /--all .*Only for an event with one booth/);
+  assert.doesNotMatch(USAGE, /--all[^\n]*or a booth that publishes drinks/, "never offered to a multi-booth event");
+});
+
+test("the runbook verifies a deployment by this build's own fields, not by any 200", async () => {
+  const runbook = await readFile(new URL("../booth/RUNBOOK.md", import.meta.url), "utf8");
+  assert.match(runbook, /curl -fsS https:\/\/commit-and-sip-leaderboard\.azurewebsites\.net\/api\/board \| node -e/);
+  assert.match(runbook, /\/\^\[0-9a-f\]\{32\}\$\/\.test\(b\.boardId\) \|\| typeof b\.rebuilding !== "boolean"/);
 });
