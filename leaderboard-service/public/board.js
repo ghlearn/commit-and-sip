@@ -72,7 +72,7 @@ function render(board) {
   // screen reader each time.
   if (Number.isSafeInteger(board.captured)) {
     setText($("captured-count"), board.captured.toLocaleString());
-    setText($("captured-label"), board.captured === 1 ? "drink captured so far" : "drinks captured so far");
+    setText($("captured-label"), board.captured === 1 ? "drink name captured so far" : "drink names captured so far");
     $("captured-count").parentElement.hidden = false;
   }
   setText($("caption"), board.rebuilding

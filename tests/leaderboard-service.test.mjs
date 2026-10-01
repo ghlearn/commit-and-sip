@@ -3471,4 +3471,6 @@ test("the board page carries the event title and shows the captured count", asyn
   assert.doesNotMatch(html, /House leaderboard/);
   assert.match(html, /<span id="captured-count"/);
   assert.match(script, /setText\(\$\("captured-count"\), board\.captured\.toLocaleString\(\)\)/);
+  assert.match(html, /<span id="captured-label">drink names captured so far<\/span>/, "attendees invent names, so the count is of names");
+  assert.match(script, /board\.captured === 1 \? "drink name captured so far" : "drink names captured so far"/);
 });
