@@ -155,3 +155,26 @@ test("the readiness sections count exactly the gates they list", async () => {
   assert.equal(paragraphs.length, words[stated[1]], "contract: one paragraph per stated gate");
   assert.doesNotMatch(gates, /other three gates|Four gates/);
 });
+
+// Opening a fresh board is safe only when no booth still holds takedowns for
+// it to reserve. The runbook may offer the --open shortcut only behind
+// archive and reset on every booth, and must keep the full sequence otherwise.
+test("the runbook opens a fresh board directly only after every booth is archived and reset", async () => {
+  const runbook = await readFile(new URL("../booth/RUNBOOK.md", import.meta.url), "utf8");
+  const fresh = runbook.split("\n").find(line => line.startsWith("| Starting a new event on a fresh board |"));
+  assert.ok(fresh, "the new-event case has its own row");
+  const resetAll = fresh.indexOf("archive and reset) on every booth machine");
+  assert.ok(resetAll >= 0 && resetAll < fresh.indexOf("republish -- --open"), "reset every booth, then open");
+  assert.match(fresh, /If any booth was not archived and reset, do not take this shortcut/);
+  const carried = runbook.split("\n").find(line => line.startsWith("| Public board lost, or `EVENT_ID` changed while booths still hold the event |"));
+  assert.ok(carried, "the carried-over case keeps its row");
+  const takedowns = carried.indexOf("--takedowns");
+  assert.ok(takedowns >= 0 && takedowns < carried.indexOf("--open") && carried.indexOf("--open") < carried.indexOf("--drinks"), "otherwise: takedowns, then open, then drinks");
+  const start = runbook.indexOf("To start a fresh board for a new event");
+  assert.ok(start >= 0, "the operations section explains a fresh board");
+  const ops = runbook.slice(start, runbook.indexOf("\n\n", start));
+  const reset = ops.indexOf("archive and reset every booth first");
+  assert.ok(reset >= 0 && reset < ops.indexOf("republish -- --open"), "reset every booth before the --open shortcut");
+  assert.ok(ops.indexOf("--takedowns") >= 0 && ops.indexOf("--takedowns") < ops.lastIndexOf("--drinks"), "and the full sequence otherwise");
+  assert.doesNotMatch(runbook, /open it with `npm run leaderboard:republish -- --open`/, "no unconditional open");
+});
