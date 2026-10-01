@@ -630,8 +630,13 @@ test("configuring keeps one set of keys, keeps them private, and never sets the 
   assert.deepEqual(again.generated, []);
   assert.deepEqual(JSON.parse(await readFile(configFile, "utf8")).leaderboardApi, saved.leaderboardApi);
 
-  // A booth machine that should publish but not delete.
-  const boothOnly = await configure({ configFile: join(directory, "booth.json"), staff: false, url });
+  // A booth machine that should publish but not delete: never with a booth key
+  // of its own, which the deployed service would refuse, but with the deployed one.
+  await assert.rejects(() => configure({ configFile: join(directory, "booth.json"), staff: false, url }),
+    /must use the deployed keys.*Nothing was written/);
+  await assert.rejects(() => readFile(join(directory, "booth.json")), { code: "ENOENT" });
+  const boothOnly = await configure({ configFile: join(directory, "booth.json"), from: configFile, staff: false, url });
+  assert.equal(boothOnly.next.leaderboardApi.boothKey, saved.leaderboardApi.boothKey);
   assert.equal(boothOnly.next.leaderboardApi.staffKey, undefined);
   // Promoted to a staff machine: never by minting a staff key, which the
   // service would refuse. It copies the deployed keys from a staff machine.
@@ -1744,7 +1749,7 @@ test("the booth screen's refresh retries a publication that failed", async t => 
   const client = { async publish(sent) { if (!online) throw new Error("offline"); return { ...sent, entries: 1, rank: 1 }; } };
   const { engine } = await engineWith(t, client);
   const panel = new BoothPanel(engine, { renderQr: async () => null });
-  panel.lastSweep = Date.now();                     // keep the background sweep out of this test
+  panel.engine.lastPublicationSweep = Date.now();                     // keep the background sweep out of this test
   await panel.dispatch("begin", {});
   await panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" });
   await panel.backgroundPublish;
@@ -1761,7 +1766,7 @@ test("a failed publication is still retried after the attendee has handed over",
   const client = { async publish(sent) { if (!online) throw new Error("offline"); return { ...sent, entries: 1, rank: 1 }; } };
   const { engine, store } = await engineWith(t, client);
   const panel = new BoothPanel(engine, { renderQr: async () => null });
-  panel.lastSweep = Date.now();
+  panel.engine.lastPublicationSweep = Date.now();
   await panel.dispatch("begin", {});
   await panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" });
   await panel.backgroundPublish;
@@ -1771,7 +1776,7 @@ test("a failed publication is still retried after the attendee has handed over",
   online = true;
 
   // The idle screen's own poll starts the retry once the sweep interval passes.
-  panel.lastSweep = 0;
+  panel.engine.lastPublicationSweep = 0;
   await panel.get();
   // Wait only for a sweep the poll itself started. Starting one here would
   // make the test pass whether or not the poll did anything.
@@ -1904,7 +1909,7 @@ test("serving a drink never waits on the leaderboard service", async t => {
   const publishOnce = engine.publishOnce.bind(engine);
   engine.publishOnce = (...args) => { attempts += 1; return publishOnce(...args); };
   const panel = new BoothPanel(engine, { renderQr: async () => null });
-  panel.lastSweep = 0;                                   // let the poll's sweep run too
+  panel.engine.lastPublicationSweep = 0;                                   // let the poll's sweep run too
   await panel.dispatch("begin", {});
   const served = await panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" });
   assert.equal(served.phase, "served", "the attendee's answer came back while the service is still silent");
@@ -3026,4 +3031,27 @@ test("a handle the service cannot place is a final refusal, not an endless retry
   assert.equal(sends, 1, "never resent, by a sweep or a rebuild");
   assert.match(syncView({ code: "handle_taken", state: "rejected" }).message, /could not list it under your handle/);
   assert.match(syncView({ code: "duplicate_drink", state: "rejected" }).message, /did not accept this name/);
+});
+
+// --- Review round 33 ---------------------------------------------------------
+
+test("the background sweep interval is shared by every station on the machine", async () => {
+  const { BoothPanel } = await import("../.github/extensions/commit-and-sip/booth-panel.mjs");
+  let sweeps = 0;
+  const engine = { retryPublications: async () => { sweeps += 1; } };
+  const stations = [new BoothPanel(engine), new BoothPanel(engine), new BoothPanel(engine)];
+  // Staggered idle polls from three stations within one interval.
+  stations[0].sweepInBackground(1_000);
+  stations[1].sweepInBackground(4_000);
+  stations[2].sweepInBackground(9_000);
+  assert.equal(sweeps, 1, "one sweep for the machine, not one per station");
+  stations[1].sweepInBackground(31_500);
+  assert.equal(sweeps, 2);
+});
+
+test("the board page personalises only with a publication reference, never on a handle alone", async () => {
+  const page = await readFile(new URL("../leaderboard-service/public/board.js", import.meta.url), "utf8");
+  assert.match(page, /const personal = params\.get\("handle"\) && params\.get\("ref"\)/);
+  assert.doesNotMatch(page, /\bif \(handle\b|else if \(handle\b|!handle\b/, "no branch keys off the handle alone");
+  assert.match(page, /\} else if \(personal && board\.you === null\) \{/, "'not on the board' is said only about a referenced drink");
 });

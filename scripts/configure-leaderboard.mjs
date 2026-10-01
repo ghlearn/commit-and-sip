@@ -121,6 +121,14 @@ export async function configure({ url, staff = true, configFile, parametersFile,
     }
   }
   const fresh = !source.boothKey;
+  // Only a brand-new deployment mints keys, and it needs the staff key to
+  // deploy them. A booth-only machine minting its own booth key would hold a
+  // key the deployed service never accepts, with no way to deploy it.
+  if (fresh && !staff) {
+    throw new Error("A booth-only machine (--no-staff-key) must use the deployed keys. Copy them from a staff machine: "
+      + "npm run leaderboard:configure -- --url <url> --no-staff-key --from <an owner-only (chmod 600) copy of that machine's "
+      + "booth/local-config.json>, then delete that copy. Nothing was written.");
+  }
   // Keys kept from this machine's own file are only as private as that file
   // has been. If others could read it, they may have them: hardening the file
   // now does not take them back, so they are not kept. A file without keys is

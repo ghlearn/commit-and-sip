@@ -48,10 +48,12 @@ export class BoothPanel {
   // The idle screen polls every few seconds, and that is the only thing still
   // running once an attendee has handed over. So it also starts a retry of
   // any publication still owed, at most every 30 seconds, without waiting for
-  // it: the screen never slows down for the network.
+  // it: the screen never slows down for the network. The interval is kept on
+  // the engine every station shares, not on this panel: several stations'
+  // idle polls, staggered, would otherwise start a sweep every few seconds.
   sweepInBackground(now = Date.now()) {
-    if (now - (this.lastSweep ?? -Infinity) < SWEEP_INTERVAL_MS) return;
-    this.lastSweep = now;
+    if (now - (this.engine.lastPublicationSweep ?? -Infinity) < SWEEP_INTERVAL_MS) return;
+    this.engine.lastPublicationSweep = now;
     this.engine.retryPublications().catch(() => {});
   }
 

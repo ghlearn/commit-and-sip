@@ -17,8 +17,13 @@ const REQUEST_TIMEOUT_MS = 8_000;
 const STALE_AFTER_MS = 30_000;
 
 const params = new URLSearchParams(location.search);
-const handle = params.get("handle");
-const ref = params.get("ref");
+// A handle identifies nobody on its own: another booth may have issued the
+// same phrase, so the service never personalises on it alone. Only a link
+// carrying the opaque publication reference as well is about one drink; a
+// handle-only link (an old or hand-shared one) shows the plain board and
+// makes no claim about anyone's drink.
+const personal = params.get("handle") && params.get("ref")
+  ? { handle: params.get("handle"), ref: params.get("ref") } : null;
 const time = date => date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const $ = id => document.getElementById(id);
 
@@ -63,12 +68,12 @@ function render(board) {
     : `${board.total} ${board.total === 1 ? "drink" : "drinks"}. Equal scores share a rank.`);
 
   const you = $("you");
-  if (handle && board.you) {
+  if (personal && board.you) {
     const text = `Your drink, ${board.you.name}, is ranked ${board.you.rank} of ${board.total}.`;
     setText(you, text);
     you.hidden = false;
     announce(text);
-  } else if (handle && board.you === null) {
+  } else if (personal && board.you === null) {
     const text = "Your drink is not on the board. Booth staff may have removed it, or it has not arrived yet.";
     setText(you, text);
     you.hidden = false;
@@ -90,13 +95,13 @@ function showStatus() {
   setText(status, stale ? `Offline. Showing the board as it was at ${time(lastGood)}.` : `Updated ${time(lastGood)}`);
   status.className = stale ? "status stale" : "status";
   if (stale) announce(`The board is offline. It was last updated at ${time(lastGood)}.`);
-  else if (!handle) announce("The leaderboard is up to date.");
+  else if (!personal) announce("The leaderboard is up to date.");
 }
 
 async function refresh() {
   try {
-    const query = handle
-      ? `?handle=${encodeURIComponent(handle)}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}`
+    const query = personal
+      ? `?handle=${encodeURIComponent(personal.handle)}&ref=${encodeURIComponent(personal.ref)}`
       : "";
     const response = await fetch(`/api/board${query}`, { cache: "no-store", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     if (!response.ok) throw new Error(String(response.status));
