@@ -132,9 +132,9 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
     async "GET /api/board"(request, url) {
       const entries = await store.list();
       const board = leaderboard(entries);
-      const { boardId, closed } = await store.state();
+      const { boardId, captured, closed } = await store.state();
       const body = { asOf: now().toISOString(), boardId, entries: board.slice(0, BOARD_SIZE).map(publicRow),
-        rebuilding: closed, total: board.length };
+        captured, rebuilding: closed, total: board.length };
       const handle = url.searchParams.get("handle");
       if (handle !== null) {
         // With a publication reference the lookup is exact. A QR scanned

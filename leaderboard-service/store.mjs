@@ -69,11 +69,15 @@ export class MemoryStore {
     this.reserved = new Set();
     this.closed = closed;
     this.boardId = randomBytes(16).toString("hex");
+    // Every drink ever admitted to this board, for tracking. It only grows:
+    // a takedown removes an entry but not the fact it was captured, and a
+    // booth resending the same publication is not a new capture.
+    this.captured = 0;
   }
 
   // `boardId` names this board, so a booth can tell the board it replayed its
   // takedowns onto from a later replacement.
-  async state() { return { boardId: this.boardId, closed: Boolean(this.closed) }; }
+  async state() { return { boardId: this.boardId, captured: this.captured, closed: Boolean(this.closed) }; }
 
   // Opening is a staff decision: every booth has replayed its takedowns.
   async openBoard() { this.closed = false; }
@@ -81,6 +85,7 @@ export class MemoryStore {
   async create(entry) {
     if (this.entries.has(entry.id)) throw new ConflictError(entry.id);
     this.entries.set(entry.id, { ...entry });
+    this.captured += 1;
   }
 
   async get(id) {
@@ -112,6 +117,7 @@ export class MemoryStore {
     if (!handle) throw new HandleTakenError();
     const stored = { ...entry, handle };
     this.entries.set(entry.id, stored);
+    this.captured += 1;
     return { created: true, entries: board(), entry: { ...stored } };
   }
 
@@ -246,7 +252,7 @@ export class FileStore extends MemoryStore {
       // A board this service is creating from nothing starts closed: it may be
       // the replacement for one that was lost, and takedowns must be
       // replayed onto it before any drink. Staff open it.
-      if (error.code === "ENOENT") return { boardId: null, closed: true, entries: new Map(), keyId: null, reserved: new Set(), version: 0 };
+      if (error.code === "ENOENT") return { boardId: null, captured: 0, closed: true, entries: new Map(), keyId: null, reserved: new Set(), version: 0 };
       throw error;
     }
     const unreadable = reason => new Error(`${this.file} is not a readable board (${reason}). Move it aside to start empty, or restore it.`);
@@ -287,12 +293,19 @@ export class FileStore extends MemoryStore {
       || [...reserved].some(item => typeof item !== "string" || !FINGERPRINT.test(item))) {
       throw unreadable("malformed reservations");
     }
+    // A board from before the tally starts it at what it holds now. A present
+    // tally must be a count, and can never be below the drinks still on it.
+    if (saved.captured !== undefined
+      && (!Number.isSafeInteger(saved.captured) || saved.captured < entries.size)) {
+      throw unreadable("a malformed captured count");
+    }
     // Likewise a mangled key binding must not read as "unbound".
     if (saved.keyId !== undefined && (typeof saved.keyId !== "string" || !KEY_ID.test(saved.keyId))) {
       throw unreadable("a malformed reservation key ID");
     }
     return {
       boardId: saved.boardId ?? null,
+      captured: saved.captured ?? entries.size,
       closed: saved.closed ?? false,
       entries,
       keyId: saved.keyId ?? null,
@@ -314,6 +327,7 @@ export class FileStore extends MemoryStore {
     this.entries = new Map([...disk.entries].map(([id, entry]) => [id, { ...entry }]));
     this.reserved = new Set(disk.reserved);
     this.closed = disk.closed;
+    this.captured = disk.captured;
   }
 
   // A lease is one small JSON document: who holds it and when they last
@@ -525,6 +539,7 @@ export class FileStore extends MemoryStore {
           await this.persist(`${JSON.stringify({
             // Minted with the board's first write and never changed after.
             boardId: disk.boardId ?? randomBytes(16).toString("hex"),
+            captured: this.captured,
             closed: Boolean(this.closed),
             entries: [...this.entries.values()], keyId: this.keyId ?? disk.keyId ?? undefined,
             reserved: [...this.reserved], version: disk.version + 1,
@@ -566,8 +581,8 @@ export class FileStore extends MemoryStore {
 
   // From disk, like every read, so every instance agrees on it.
   async state() {
-    const { boardId, closed } = await this.snapshot();
-    return { boardId, closed };
+    const { boardId, captured, closed } = await this.snapshot();
+    return { boardId, captured, closed };
   }
 
   // Reads come from disk, after every write this process has queued, so they

@@ -3420,3 +3420,55 @@ test("the runbook verifies a deployment by this build's own fields, not by any 2
   assert.match(runbook, /curl -fsS https:\/\/commit-and-sip-leaderboard\.azurewebsites\.net\/api\/board \| node -e/);
   assert.match(runbook, /\/\^\[0-9a-f\]\{32\}\$\/\.test\(b\.boardId\) \|\| typeof b\.rebuilding !== "boolean"/);
 });
+
+// --- Captured tally and event title -------------------------------------------
+
+test("the board counts every drink ever captured: retries are not new, takedowns do not subtract", async t => {
+  const directory = await tempDirectory(t);
+  const { url } = await service(t, { store: await openStore({ directory }) });
+  const count = async () => (await board(url)).captured;
+  assert.equal(await count(), 0);
+  const first = submission("Mona Moonrise Mocha");
+  assert.equal((await post(url, first)).status, 201);
+  assert.equal((await post(url, first)).status, 200, "a booth resending the same publication");
+  assert.equal(await count(), 1, "a retry is not a second capture");
+  assert.equal((await post(url, submission("Ducky Dawn Drizzle", OTHER_HANDLE))).status, 201);
+  assert.equal(await count(), 2);
+  assert.equal((await del(url, first.id)).status, 204);
+  const after = await board(url);
+  assert.deepEqual([after.total, after.captured], [1, 2], "taken down from the board, still captured");
+  assert.equal((await post(url, submission("Mona Moonrise Mocha", OTHER_HANDLE))).status, 409);
+  assert.equal(await count(), 2, "a refused submission is not captured");
+  assert.equal((await openStore({ directory })).captured, 2, "survives a restart");
+});
+
+test("the tally starts from what an older board holds, and a damaged one is refused", async t => {
+  const legacy = await tempDirectory(t);
+  await writeFile(join(legacy, "default.json"), JSON.stringify({ entries: [entry("mona-a"), entry("mona-b")], reserved: [] }));
+  assert.equal((await (await FileStore.open({ directory: legacy })).state()).captured, 2);
+  for (const [label, captured] of [["text", "3"], ["negative", -1], ["fractional", 2.5], ["below the drinks on it", 1]]) {
+    const directory = await tempDirectory(t);
+    const text = JSON.stringify({ captured, entries: [entry("mona-a"), entry("mona-b")], reserved: [] });
+    await writeFile(join(directory, "default.json"), text);
+    await assert.rejects(() => FileStore.open({ directory }), /malformed captured count/, label);
+    assert.equal(await readFile(join(directory, "default.json"), "utf8"), text, `${label}: left as found`);
+  }
+});
+
+test("a failed write does not count the drink it failed to store", async t => {
+  const store = await openStore({ directory: await tempDirectory(t) });
+  store.persist = async () => { throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); };
+  await assert.rejects(() => store.admit(entry("mona-a"), { fingerprint: fp("mona-a"), handles: [entry("mona-a").handle] }), { code: "ENOSPC" });
+  assert.equal(store.captured, 0);
+  assert.equal((await store.state()).captured, 0);
+});
+
+test("the board page carries the event title and shows the captured count", async () => {
+  const html = await readFile(new URL("../leaderboard-service/public/index.html", import.meta.url), "utf8");
+  const script = await readFile(new URL("../leaderboard-service/public/board.js", import.meta.url), "utf8");
+  assert.match(html, /<h1>GitHub Learn at Universe leaderboard<\/h1>/);
+  assert.match(html, /<title>Commit &amp; Sip · GitHub Learn at Universe leaderboard<\/title>/);
+  assert.doesNotMatch(html, /House leaderboard/);
+  assert.match(html, /<span id="captured-count"/);
+  assert.match(script, /setText\(\$\("captured-count"\), board\.captured\.toLocaleString\(\)\)/);
+});

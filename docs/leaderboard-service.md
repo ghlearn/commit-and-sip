@@ -97,7 +97,9 @@ Each `EVENT_ID` is a separate board file, so setting a new ID starts a fresh boa
 
 ```
 GET    /                        public board (the future QR destination)
-GET    /api/board[?handle=&ref=]    { asOf, total, entries[<=20], you? }  (ref is opaque, never the drink ID)
+GET    /api/board[?handle=&ref=]    { asOf, boardId, captured, rebuilding, total, entries[<=20], you? }  (ref is opaque, never the drink ID)
+                                captured: every drink ever admitted to this board, for tracking. It never
+                                falls: takedowns leave it, resends do not add. total: drinks on the board now.
 POST   /api/entries             booth key. 201 new, 200 same entry again (handle
                                 may be canonical), 409 duplicate_drink |
                                 unavailable_drink | handle_taken,
