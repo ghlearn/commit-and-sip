@@ -45,6 +45,8 @@ header { border-bottom: 6px solid var(--accent); padding-bottom: 0.75em; margin-
 .kicker { margin: 0; color: var(--accent-ink); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.8em; }
 h1 { margin: 0.1em 0 0.2em; font-size: clamp(2rem, 4vw + 1rem, 4.5rem); font-weight: 800; line-height: 1.05; letter-spacing: -0.01em; }
 .lede { margin: 0; color: var(--muted); }
+.captured { margin: 0.6em 0 0; font-size: 1.1em; color: var(--text); }
+.captured-count { font-size: 1.6em; font-weight: 800; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
 
 .status { margin: 0 0 0.75em; color: var(--muted); font-size: 0.85em; font-variant-numeric: tabular-nums; }
 .status.stale { color: var(--error); background: var(--error-surface); padding: 0.4em 0.7em; border: 1px solid var(--error); border-radius: 6px; }
@@ -72,10 +74,24 @@ tr.mine th, tr.mine .handle { color: var(--text); }
   overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 
+/* For whoever is curious, below the board. The QR is for the monitor; on a
+   phone the link is the way in, so the code is hidden there. */
+.built { margin-top: 2.5em; padding-top: 1em; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.85em; }
+.built::after { content: ""; display: block; clear: both; }
+.built h2 { margin: 0 0 0.4em; color: var(--text); font-size: 1.1em; font-weight: 700; }
+.built p { max-width: 60ch; margin: 0 0 0.6em; }
+.built a { color: var(--accent-ink); font-weight: 600; }
+/* White padding is the code's quiet zone; the image itself has almost none
+   (23px of 800, a module is 26px). 24px keeps at least four modules of white
+   at every size the clamp allows: 4.4 at 260px, 5.7 at 200px. */
+/* Scanned off a monitor from a step or two away, so it grows with the screen. */
+.built-qr { float: right; margin: 0 0 0.5em 1.5em; padding: 24px; background: #fff; width: clamp(200px, 14vw, 260px); height: auto; image-rendering: pixelated; }
+
 footer { max-width: 64rem; margin: 0 auto; padding: 0 clamp(16px, 4vw, 48px) 32px; color: var(--muted); font-size: 0.7em; }
 footer a { color: var(--accent-ink); }
 
 /* Phones: the handle is the least important column and the first to go. */
 @media (max-width: 34rem) {
+  .built-qr { display: none; }
   thead th:nth-child(3), td.handle { display: none; }
 }

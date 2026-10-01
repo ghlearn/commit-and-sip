@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <title>Commit &amp; Sip · House leaderboard</title>
+  <title>Commit &amp; Sip · GitHub Learn at Universe leaderboard</title>
   <link rel="stylesheet" href="/board.css">
   <script src="/board.js" defer></script>
 </head>
@@ -12,8 +12,9 @@
   <main>
     <header>
       <p class="kicker">Commit &amp; Sip</p>
-      <h1>House leaderboard</h1>
+      <h1>GitHub Learn at Universe leaderboard</h1>
       <p class="lede">Every drink here was invented at the booth and scored out of 5,000.</p>
+      <p class="captured" hidden><span id="captured-count" class="captured-count"></span> <span id="captured-label">drink names captured so far</span></p>
     </header>
 
     <section id="you" class="you" hidden></section>
@@ -31,6 +32,13 @@
     </table>
 
     <p id="empty" class="empty" hidden>No drinks yet. Be the first to name one at the booth.</p>
+
+    <section class="built" aria-labelledby="built-heading">
+      <img class="built-qr" src="/repo-qr.png" width="132" height="132" alt="QR code for gh.io/commit-and-sip, the code behind Commit and Sip">
+      <h2 id="built-heading">How this was built</h2>
+      <p>Commit &amp; Sip was built with GitHub Copilot. The booth screen is a canvas: a small web app that runs inside the GitHub Copilot App as an extension. Scores come from a fixed rubric in the code, not from an AI model. This leaderboard is a small Node.js service on Azure App Service, set up with Bicep. Changes were reviewed with Copilot code review before merging, and GitHub Actions checks the repository.</p>
+      <p>See the code: <a href="https://gh.io/commit-and-sip" rel="noreferrer noopener" target="_blank">gh.io/commit-and-sip</a></p>
+    </section>
   </main>
   <footer>Mona Sans is used under the <a href="/fonts/OFL.txt">SIL Open Font License</a>.</footer>
 </body>

@@ -2,7 +2,7 @@
 
 **The booth runs entirely in the canvas.** Attendees never open GitHub, a terminal, or an editor. Commands below are staff-only and run from the repository root unless stated otherwise.
 
-**Not event-ready.** The moderation blocklist is an unreviewed placeholder, the leaderboard service is deployed but must not be advertised to attendees yet, there is no public QR destination, and brand review has not happened. See those sections before running a public booth.
+**Not event-ready.** The moderation blocklist is an unreviewed placeholder, and brand review has not happened. The leaderboard service is live and accepts the current booth client, but the attendee QR (`leaderboardUrl`) stays unset until the blocklist is reviewed. See those sections before running a public booth.
 
 ## Exercise shape
 
@@ -41,7 +41,7 @@ The booth reads one optional ignored file, `booth/local-config.json`, with two i
 ```
 
 - `leaderboardApi` makes the booth publish to the leaderboard service and lets takedowns retract from it. Its `url` is the service's **origin only** (no path); anything else is refused at start-up. **Write it with `npm run leaderboard:configure`, never by hand** (see [Leaderboard service operations](#leaderboard-service-operations)). Leave out `staffKey` on a machine that should not take drinks down. The file is written readable by its owner only.
-- `leaderboardUrl` puts a QR code in front of attendees. **Leave it unset** until the moderation blocklist is reviewed and brand sign-off is done.
+- `leaderboardUrl` puts a QR code in front of attendees, to their own place on a public page of attendee names. **Leave it unset until the moderation blocklist is reviewed**, then set it to `https://gh.io/commit-and-sip-leader`. Following this runbook never exposes names before that review; switching the QR on earlier is a decision for the event owner, not a setup step.
 
 Both URLs must be public HTTPS with no credentials, fragment, or nonstandard port. Retired pull-request keys (`mode`, `runs`, `repo`, `requiredChecks`) are rejected on start with a `retired_config` diagnostic rather than ignored, so a stale config cannot look configured. A valid JSON file containing `null`, an array, or a scalar is not valid staff configuration; correct it using the explicit `invalid_config` diagnostic rather than treating it as a network error.
 
@@ -205,7 +205,7 @@ Read ranks carefully when helping an attendee. "Rank 1 of 1 at this booth" is th
 
 ## Leaderboard service operations
 
-> ⚠️ **Redeploy before first use.** The live service runs a build from before this branch's review fixes, and it refuses the current booth client: the client sends a publication token and retracts through `POST /api/retractions`. Run the code-deploy steps below from an identity with Contributor before configuring any booth.
+> **Current deployment (2026-10-01).** The live service was redeployed from this repository's leaderboard branch and accepts the current booth client. A change to `leaderboard-service/` reaches the site only when the code-deploy steps below are run from an identity with Contributor, followed by the version check. At the time of writing one such change is waiting: the board page's 24 px quiet zone around the repository QR (commit 308c7b4), because the deployer's access lapsed to Reader before it could ship.
 
 The service lives in `leaderboard-service/`, and its design and decisions are in [docs/leaderboard-service.md](../docs/leaderboard-service.md). It runs at <https://commit-and-sip-leaderboard.azurewebsites.net> as one App Service B1 instance in subscription **GitHub - NonProd - skills**, region `westus2`, resource group `rg-commit-and-sip-lb-westus2`. Every submission is re-checked there with this repository's own rubric and blocklist, so **redeploy the service whenever `booth/blocked-terms.json` or the rubric changes**. Otherwise booths and service disagree and submissions fail with `score_mismatch`.
 
@@ -284,7 +284,9 @@ The booth itself holds to the same rule: the canvases and the staff commands ref
 
 ## Leaderboard and QR readiness
 
-The leaderboard **service** is deployed (see [Leaderboard service operations](#leaderboard-service-operations)), but it is **not approved as an attendee destination**. `leaderboardUrl` stays unset, and no QR code is generated, until the blocklist is reviewed and brand sign-off is done. Staff may open the board themselves; attendees must not be sent to it. A local `127.0.0.1` renderer cannot host an attendee phone experience, and repository assets are not a public destination. Never use credential-bearing URLs to make private images appear public.
+Two short links exist. `https://gh.io/commit-and-sip-leader` redirects to the leaderboard service and keeps any query string. `https://gh.io/commit-and-sip` points at this (public) repository. The repository QR (`renderer/repo-qr.png`) is on the booth's served screen and on the public leaderboard, under **How this was built**. Print either code with a white margin: the supplied images have almost no quiet zone.
+
+The leaderboard **service** is deployed (see [Leaderboard service operations](#leaderboard-service-operations)). Once `leaderboardUrl` is set to the short link, each attendee's served screen shows a personal QR code (240 px, decoded off the screen) that opens the board on their own row. **That setting stays gated on the blocklist review**, which is still outstanding: leave it unset on every booth until the review is done. The event owner has turned it on for one booth machine ahead of the review, as a deliberate exception for staff testing; on that machine, staff takedown is the only moderation of names on the public page until the review is done. A local `127.0.0.1` renderer cannot host an attendee phone experience, and repository assets are not a public destination. Never use credential-bearing URLs to make private images appear public.
 
 After the public destination is approved and configured:
 

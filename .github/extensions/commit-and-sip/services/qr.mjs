@@ -11,7 +11,10 @@ export async function renderQrDataUrl(url, load = () => import("qrcode")) {
     return await QRCode.toDataURL(url, {
       color: { dark: "#000000ff", light: "#ffffffff" },
       errorCorrectionLevel: "M",
-      margin: 2,
+      // Four modules of white: the quiet zone the QR specification asks for.
+      // The personal link is long enough to make a dense code, and the
+      // display padding around it is not counted on to make up the rest.
+      margin: 4,
       width: 320,
     });
   } catch {

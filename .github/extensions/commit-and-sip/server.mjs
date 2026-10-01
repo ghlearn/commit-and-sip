@@ -9,6 +9,7 @@ import { DomainError, exactInput, requireValue } from "./domain.mjs";
 const shared = new Map([
   ["/style.css", ["style.css", "text/css; charset=utf-8"]],
   ["/mona.png", ["mona.png", "image/png"]],
+  ["/repo-qr.png", ["repo-qr.png", "image/png"]],
   ["/fonts/MonaSansVF.woff2", ["fonts/MonaSansVF.woff2", "font/woff2"]],
   ["/fonts/MonaSansVF-Italic.woff2", ["fonts/MonaSansVF-Italic.woff2", "font/woff2"]],
   ["/fonts/OFL.txt", ["fonts/OFL.txt", "text/plain; charset=utf-8"]]

@@ -67,6 +67,14 @@ function render(board) {
   setText($("empty"), board.rebuilding
     ? "The board is being rebuilt. Drinks reappear as the booths send them again."
     : "No drinks yet. Be the first to name one at the booth.");
+  // Every drink captured on this board, including any staff later took down.
+  // Updated silently: it changes on every new drink and is not news to a
+  // screen reader each time.
+  if (Number.isSafeInteger(board.captured)) {
+    setText($("captured-count"), board.captured.toLocaleString());
+    setText($("captured-label"), board.captured === 1 ? "drink name captured so far" : "drink names captured so far");
+    $("captured-count").parentElement.hidden = false;
+  }
   setText($("caption"), board.rebuilding
     ? "The board is being rebuilt. Drinks reappear as the booths send them again."
     : board.total > board.entries.length

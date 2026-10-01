@@ -29,6 +29,8 @@ const STATIC = {
   "/board.css": { file: new URL("./public/board.css", import.meta.url), type: "text/css; charset=utf-8" },
   "/board.js": { file: new URL("./public/board.js", import.meta.url), type: "text/javascript; charset=utf-8" },
   "/fonts/MonaSansVF.woff2": { file: renderer("fonts/MonaSansVF.woff2"), type: "font/woff2" },
+  // The same code the booth shows, so the two can never point different ways.
+  "/repo-qr.png": { file: renderer("repo-qr.png"), type: "image/png" },
   // The font licence requires the notice to travel with the font.
   "/fonts/OFL.txt": { file: renderer("fonts/OFL.txt"), type: "text/plain; charset=utf-8" },
 };
@@ -130,9 +132,9 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
     async "GET /api/board"(request, url) {
       const entries = await store.list();
       const board = leaderboard(entries);
-      const { boardId, closed } = await store.state();
+      const { boardId, captured, closed } = await store.state();
       const body = { asOf: now().toISOString(), boardId, entries: board.slice(0, BOARD_SIZE).map(publicRow),
-        rebuilding: closed, total: board.length };
+        captured, rebuilding: closed, total: board.length };
       const handle = url.searchParams.get("handle");
       if (handle !== null) {
         // With a publication reference the lookup is exact. A QR scanned

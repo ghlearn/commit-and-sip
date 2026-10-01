@@ -294,17 +294,19 @@ test("the score column still says what its figures are", async () => {
 test("the QR is displayed at the size the stylesheet sets for it", async () => {
   const booth = await readFile(new URL("booth.js", renderer), "utf8");
 
-  assert.match(booth, /image\.className = "qr"/,
-    "the QR image is built without the class that sizes it");
+  assert.match(booth, /image\.className = "qr qr-leaderboard"/,
+    "the QR image is built without the classes that size it");
 
-  const rule = css.split("\n").find(line => line.startsWith(".qr {"));
-  assert.ok(rule, "no .qr rule to size the code with");
-  const width = /width: (\d+)px/.exec(rule);
-  assert.ok(width, ".qr does not set a width");
-  // The encoder emits 320px. Displaying it at that size does not fit a short
-  // booth panel; anything near it would put the hand-over button back off it.
-  assert.ok(Number(width[1]) <= 200,
-    `.qr displays the code at ${width[1]}px, which does not leave room for the hand-over button`);
+  const rule = css.split("\n").find(line => line.startsWith(".qr.qr-leaderboard {"));
+  assert.ok(rule, "no rule sizes the leaderboard code");
+  const width = /width: min\((\d+)px, 100%\)/.exec(rule);
+  assert.ok(width, "the leaderboard code has no width that also fits a narrow panel");
+  // It carries the attendee's own link, so it is denser than the repository
+  // code and is scanned from across the counter: it needs room. The encoder
+  // emits 320px; at that size it would crowd a short panel. The hand-over
+  // button is sticky (pinned by the next test), so it stays in reach anyway.
+  assert.ok(Number(width[1]) >= 220 && Number(width[1]) <= 260,
+    `the leaderboard code displays at ${width[1]}px; it must be large enough to scan and still fit a booth panel`);
 });
 
 // The hand-over button is the last step of the attendee flow. If it is off the

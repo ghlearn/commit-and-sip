@@ -161,10 +161,12 @@
     if (state.qrDataUrl) {
       const image = document.createElement("img");
       image.src = state.qrDataUrl;
-      // Intrinsic size of the encoded image; `.qr` scales it down for display.
-      // Without that class the code renders at its full 320px and pushes the
-      // hand-over button off a short booth panel.
-      image.className = "qr";
+      // Intrinsic size of the encoded image; `.qr-leaderboard` scales it for
+      // display. Without a class the code renders at its full 320px. It is
+      // larger than the repository code because it carries the attendee's own
+      // link, which makes it denser, and it is scanned with a phone held
+      // across the counter. The hand-over button is sticky, so it stays in reach.
+      image.className = "qr qr-leaderboard";
       image.width = 320;
       image.height = 320;
       image.alt = `QR code linking to the leaderboard place for ${state.handle}`;

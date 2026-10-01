@@ -1,8 +1,8 @@
 # Leaderboard service
 
-**Status: deployed at <https://commit-and-sip-leaderboard.azurewebsites.net> and verified end to end with a staff test entry (2026-09-30). No attendee-facing QR code points at it, and none may until the blocklist is reviewed.**
+**Status: deployed at <https://commit-and-sip-leaderboard.azurewebsites.net> (short link <https://gh.io/commit-and-sip-leader>), redeployed on 2026-10-01 and verified end to end through the booth canvases. The attendee QR (`leaderboardUrl`) stays unset until the blocklist is reviewed; the event owner has switched it on for one booth machine ahead of that review, for staff testing.**
 
-> ⚠️ **The live service predates most of this document.** It runs the build verified on 2026-09-30, from before the review fixes (commit e7259b9 and later): atomic admission, canonical handles, publication tokens, the cross-instance lease, fail-closed reservation keys, and `POST /api/retractions`. Those could not be deployed, because the deployer's access dropped to Reader. **The current booth client does not work against the live build:** it sends a `token` and retracts through `POST /api/retractions`, which that build refuses. So **redeploy before configuring any booth** with `leaderboardApi`: `npm run leaderboard:package`, then the `az webapp deploy … --async true` command in the runbook, from an identity with Contributor.
+> **What is live.** Everything in this document up to and including the captured tally is deployed. The one change not yet live is the board page's 24 px quiet zone around the repository QR (commit 308c7b4); it ships with the next code deploy from an identity with Contributor (`npm run leaderboard:package`, then the `az webapp deploy … --async true` command and the version check in the runbook).
 
 This document began as a proposal. It now records what was built, the decisions taken, and where the build departs from the proposal and why. The booth-side contract is still `services/leaderboard.mjs`. The service is constrained by it, not the other way round.
 
@@ -97,7 +97,9 @@ Each `EVENT_ID` is a separate board file, so setting a new ID starts a fresh boa
 
 ```
 GET    /                        public board (the future QR destination)
-GET    /api/board[?handle=&ref=]    { asOf, total, entries[<=20], you? }  (ref is opaque, never the drink ID)
+GET    /api/board[?handle=&ref=]    { asOf, boardId, captured, rebuilding, total, entries[<=20], you? }  (ref is opaque, never the drink ID)
+                                captured: every drink ever admitted to this board, for tracking. It never
+                                falls: takedowns leave it, resends do not add. total: drinks on the board now.
 POST   /api/entries             booth key. 201 new, 200 same entry again (handle
                                 may be canonical), 409 duplicate_drink |
                                 unavailable_drink | handle_taken,
