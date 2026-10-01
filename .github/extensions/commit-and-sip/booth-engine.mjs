@@ -254,19 +254,21 @@ export class BoothEngine {
   // replaying is safe, and settled outcomes on the removal records are kept.
   async republishAll() {
     if (!this.leaderboardClient) return { blocked: false, drinks: [], removals: [] };
+    // Every takedown is replayed, settled ones included: the board they were
+    // settled on may be the one that was lost. Each is marked unsettled in the
+    // ledger before anything is sent, so a failed replay, a stop part-way, or
+    // a wipe attempted meanwhile all see it as owed until the replay itself
+    // lands. retract() then records the real outcome.
+    const ids = await this.store.transaction(data => {
+      const latest = new Map(this.removalLog(data).map(record => [record.id, record]));
+      for (const record of latest.values()) {
+        if (SETTLED.includes(record.published)) record.published = "replaying";
+        delete record.failure;
+      }
+      return [...latest.keys()];
+    });
     const removals = [];
-    for (const record of this.removalLog(await this.store.read())) {
-      if (!this.leaderboardClient.retract) {
-        removals.push({ id: record.id, published: "not-configured" });
-        continue;
-      }
-      if (!SETTLED.includes(record.published)) {
-        removals.push(await this.retractReport(record.id));
-        continue;
-      }
-      try { removals.push({ id: record.id, published: await this.leaderboardClient.retract(record.id) }); }
-      catch (error) { removals.push({ failure: retractionFailure(error), id: record.id, published: "failed" }); }
-    }
+    for (const id of ids) removals.push(await this.retractReport(id));
     // Takedowns first is a guarantee, not a preference. Until every removed ID
     // is reserved again, the replacement board would accept that name, so no
     // drink is sent: the rebuild stops here and says why.

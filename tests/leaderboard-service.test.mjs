@@ -849,7 +849,8 @@ test("rebuilding a lost board restores its reservations before any drink", async
   assert.deepEqual(drinks.map(result => result.name), [kept.submission.name]);
   const retyped = await post(replacement.url, submission("Mona Moonrise Mocha", OTHER_HANDLE));
   assert.equal(retyped.status, 409, "a name taken down before the loss is still refused after the rebuild");
-  assert.equal((await rebuilt.store.read()).removals[0].published, "retracted", "a settled outcome is not rewritten");
+  assert.equal((await rebuilt.store.read()).removals[0].published, "absent",
+    "the record now says what the replay found on the current board, and it is settled");
 
   // A booth without a staff key cannot restore reservations, and says so.
   const boothOnly = new BoothEngine({ catalog, rules, store: runs,
@@ -2962,4 +2963,67 @@ test("a slow retry sweep runs in the background: the dashboard is answered promp
 
   const renderer = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/admin.js", import.meta.url), "utf8");
   assert.match(renderer, /poll = retrying \? setTimeout\(\(\) => \{ void load\(\); \}, 2000\) : null;/, "the dashboard polls until the sweep ends");
+});
+
+// --- Review round 32 ---------------------------------------------------------
+
+test("a takedown replay is recorded as owed before it is sent, and a failed one stays owed", async t => {
+  const { WIPE_CONFIRMATION } = await import("../.github/extensions/commit-and-sip/services/event-archive.mjs");
+  const held = gate();
+  const asked = gate();
+  let replayFails = false;
+  let calls = 0;
+  const client = {
+    async publish(sent) { return { ...sent, entries: 1, rank: 1 }; },
+    async retract() {
+      calls += 1;
+      if (calls === 1) return "retracted";                     // the original takedown, on the board later lost
+      asked.open(); await held.opened;
+      if (replayFails) throw new TypeError("fetch failed");
+      return "absent";
+    },
+  };
+  const { engine, store } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.dispatch("booth-1", "complete", {});
+  await engine.publish("booth-1");
+  assert.equal((await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" })).published, "retracted");
+
+  // While the replay is on the wire, the ledger already says it is owed.
+  replayFails = true;
+  const rebuilding = engine.republishAll();
+  await asked.opened;
+  assert.equal((await store.read()).removals[0].published, "replaying");
+  assert.equal((await engine.owedPublicTakedowns()).length, 1);
+  assert.equal((await engine.adminOverview()).removals[0].owed, true);
+  held.open();
+  const { blocked } = await rebuilding;
+  assert.equal(blocked, true);
+
+  // The failure is recorded, so the dashboard, retries and the wipe all see it.
+  const record = (await store.read()).removals[0];
+  assert.equal(record.published, "failed");
+  assert.deepEqual(record.failure, { code: null, status: null });
+  await assert.rejects(() => engine.archiveAndWipe({ archivedBy: "lead", confirm: WIPE_CONFIRMATION }), { code: "takedowns_owed" });
+  replayFails = false;
+  await engine.retryRetractions();
+  assert.equal((await store.read()).removals[0].published, "absent");
+});
+
+test("a handle the service cannot place is a final refusal, not an endless retry", async t => {
+  const { syncView, TERMINAL_REJECTIONS } = await import("../.github/extensions/commit-and-sip/services/leaderboard.mjs");
+  assert.ok(TERMINAL_REJECTIONS.includes("handle_taken"));
+  let sends = 0;
+  const client = { async publish() { sends += 1; throw Object.assign(new Error("409 handle_taken"), { code: "handle_taken", status: 409 }); } };
+  const { engine, store } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.publish("booth-1");
+  assert.equal((await store.read()).runs["booth-1"].sync.state, "rejected");
+  await engine.retryPublications();
+  await engine.republishAll();
+  assert.equal(sends, 1, "never resent, by a sweep or a rebuild");
+  assert.match(syncView({ code: "handle_taken", state: "rejected" }).message, /could not list it under your handle/);
+  assert.match(syncView({ code: "duplicate_drink", state: "rejected" }).message, /did not accept this name/);
 });

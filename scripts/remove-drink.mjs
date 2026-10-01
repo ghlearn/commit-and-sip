@@ -85,6 +85,7 @@ export const PUBLIC_BOARD = {
   absent: "It was not on the public leaderboard.",
   failed: "It is NOT yet off the public leaderboard. Run npm run remove -- --retry once the network is back.",
   "not-configured": "This booth has no staff key, so it is NOT off the public leaderboard. To finish it, copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <an owner-only (chmod 600) copy of a staff machine's booth/local-config.json>, then delete that copy, then retry.",
+  replaying: "It may not be reserved on the rebuilt public leaderboard: the rebuild stopped before replaying this takedown. Run npm run remove -- --retry.",
   "in-doubt": "It may still be on the public leaderboard: it was still being published when it was taken down. Run npm run remove -- --retry.",
   retracted: "It was taken off the public leaderboard.",
 };

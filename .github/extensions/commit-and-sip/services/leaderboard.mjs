@@ -8,11 +8,13 @@ import { requireValue } from "../domain.mjs";
 export const SYNC_STATES = ["disabled", "pending", "confirmed", "failed", "rejected"];
 
 // Refusals that retrying cannot change: another attendee already holds the
-// name, or staff took it down. They become "rejected" and are never sent
-// again, not even by a rebuild. Otherwise, after the service lost its data,
-// the booth that lost a clash could publish first and take the name from the
-// attendee who legitimately holds it.
-export const TERMINAL_REJECTIONS = ["duplicate_drink", "unavailable_drink"];
+// name, staff took it down, or both handles this publication can use (its
+// own and its canonical form, the same two on every retry) are taken. They
+// become "rejected" and are never sent again, not even by a rebuild.
+// Otherwise, after the service lost its data, the booth that lost a clash
+// could publish first and take the name from the attendee who legitimately
+// holds it, and a handle clash would be resent forever.
+export const TERMINAL_REJECTIONS = ["duplicate_drink", "handle_taken", "unavailable_drink"];
 
 // A random value minted once per publication and kept with the run, so every
 // retry of one publication carries the same token. It lets the service tell a
@@ -129,7 +131,9 @@ export function syncView(sync, handle = null) {
     // hit. Staff read the code from the sync record.
     return {
       eventRank: null,
-      message: "Your drink is saved at this booth, but the event leaderboard did not accept this name.",
+      message: sync.code === "handle_taken"
+        ? "Your drink is saved at this booth, but the event leaderboard could not list it under your handle."
+        : "Your drink is saved at this booth, but the event leaderboard did not accept this name.",
       state: "rejected",
     };
   }
