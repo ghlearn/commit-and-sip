@@ -544,9 +544,16 @@ export class BoothEngine {
       if (!current?.sync) return false;
       // Overlapping attempts: a late failure from an earlier try must not undo
       // a confirmation or a final refusal that another try already recorded.
+      // A definitive refusal is the exception: it comes from the service as it
+      // is now, so it replaces a confirmation from a board that was lost, or
+      // the booth keeps showing a rank that no longer exists and a rebuild
+      // keeps resending a name the service will never take.
       const settled = ["confirmed", "rejected"].includes(current.sync.state);
+      // A failure carries no receipt: one from a lost board must not survive
+      // into a refusal and be read as a rank.
+      const { receipt: _lost, ...failure } = outcome.ok ? {} : failedSync(current.sync, outcome.error);
       if (outcome.ok) current.sync = confirmedSync(current.sync, outcome.receipt);
-      else if (!settled) current.sync = failedSync(current.sync, outcome.error);
+      else if (!settled || failure.state === "rejected") current.sync = failure;
       const { [attempt]: _done, ...others } = current.sync.sending ?? {};
       if (Object.keys(others).length) current.sync.sending = others;
       else delete current.sync.sending;

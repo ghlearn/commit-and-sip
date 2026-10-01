@@ -2469,3 +2469,57 @@ test("a board field that is present must be well formed, even if older boards la
   assert.equal(await store.isReserved(fp("gone")), true);
   assert.equal((await store.list()).length, 1);
 });
+
+// --- Review round 23 ---------------------------------------------------------
+
+test("a rebuild refused for good replaces the lost board's confirmation, and is never resent", async t => {
+  let sends = 0;
+  const client = {
+    async publish(sent) {
+      sends += 1;
+      if (sends === 1) return { ...sent, entries: 1, rank: 1 };          // confirmed on the board that was lost
+      // The replacement board gave the name to another attendee first.
+      throw Object.assign(new Error("The leaderboard submission failed: 409 duplicate_drink."), { code: "duplicate_drink", status: 409 });
+    },
+  };
+  const { engine, store } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.publish("booth-1");
+  assert.equal((await store.read()).runs["booth-1"].sync.state, "confirmed");
+
+  const { drinks } = await engine.republishAll();
+  assert.deepEqual(drinks.map(result => result.state), ["rejected"]);
+  const sync = (await store.read()).runs["booth-1"].sync;
+  assert.equal(sync.state, "rejected", "the current service's final answer wins over the lost board's");
+  assert.equal(sync.code, "duplicate_drink");
+  assert.equal(sync.receipt, undefined, "no rank from the lost board survives");
+  assert.equal((await engine.get("booth-1")).sync.eventRank ?? null, null);
+
+  const again = await engine.republishAll();
+  assert.equal(sends, 2, "a later rebuild does not resend it");
+  assert.deepEqual(again.drinks.map(result => result.state), ["rejected"]);
+
+  // A transient failure during a rebuild still leaves a confirmation alone.
+  const transient = { async publish(sent) { if (transient.down) throw new Error("socket hang up"); return { ...sent, entries: 1, rank: 1 }; } };
+  const other = await engineWith(t, transient);
+  await other.engine.open({ runId: "booth-1" });
+  await other.engine.dispatch("booth-1", "submit_name", { name: "Ducky Dawn Drizzle" });
+  await other.engine.publish("booth-1");
+  transient.down = true;
+  await other.engine.republishAll();
+  assert.equal((await other.store.read()).runs["booth-1"].sync.state, "confirmed");
+});
+
+test("every takedown outcome has words in the remove command, and none prints undefined", async () => {
+  const { PUBLIC_BOARD, publicBoardText } = await import("../scripts/remove-drink.mjs");
+  for (const outcome of ["retracted", "absent", "failed", "not-configured", "in-doubt"]) {
+    assert.ok(Object.hasOwn(PUBLIC_BOARD, outcome), `${outcome} has its own text`);
+  }
+  assert.match(publicBoardText("in-doubt"), /may still be on the public leaderboard.*--retry/);
+  for (const outcome of [undefined, null, "something-new"]) {
+    const text = publicBoardText(outcome);
+    assert.doesNotMatch(text, /undefined/);
+    assert.match(text, /--retry/);
+  }
+});

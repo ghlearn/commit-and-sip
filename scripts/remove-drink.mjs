@@ -63,7 +63,7 @@ export async function retryReport(engine) {
   return {
     exitCode: results.some(result => !["retracted", "absent"].includes(result.published)) ? 1 : 0,
     text: results.length
-      ? `${results.map(result => `${result.id}\t${PUBLIC_BOARD[result.published]}`).join("\n")}\n`
+      ? `${results.map(result => `${result.id}\t${publicBoardText(result.published)}`).join("\n")}\n`
       : "No takedowns are waiting to reach the public leaderboard.\n",
   };
 }
@@ -72,8 +72,16 @@ export const PUBLIC_BOARD = {
   absent: "It was not on the public leaderboard.",
   failed: "It is NOT yet off the public leaderboard. Run npm run remove -- --retry once the network is back.",
   "not-configured": "This booth has no staff key, so it is NOT off the public leaderboard. To finish it, copy the deployed keys to this machine with npm run leaderboard:configure -- --url <url> --from <an owner-only (chmod 600) copy of a staff machine's booth/local-config.json>, then delete that copy, then retry.",
+  "in-doubt": "It may still be on the public leaderboard: it was still being published when it was taken down. Run npm run remove -- --retry.",
   retracted: "It was taken off the public leaderboard.",
 };
+
+// Every outcome gets words. One this table does not know is reported as
+// unresolved, never printed as "undefined".
+export function publicBoardText(published) {
+  return Object.hasOwn(PUBLIC_BOARD, published) ? PUBLIC_BOARD[published]
+    : "It may still be on the public leaderboard: the outcome was not recorded. Run npm run remove -- --retry.";
+}
 
 // Staff need the ID, and nobody should be asked to guess it from a screen or
 // hand-copy it from a ledger file.
@@ -102,7 +110,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       process.stdout.write(`Removed ${record.name} (${record.id}) entered by ${record.handle}.\n`
         + `Recorded by ${record.removedBy} at ${record.removedAt}: ${record.reason}\n`
         + "The name stays reserved and cannot be re-entered at this booth.\n"
-        + `${PUBLIC_BOARD[record.published]}\n`);
+        + `${publicBoardText(record.published)}\n`);
       // Any takedown that may still be public is unfinished, not a success.
       if (record.owed) process.exitCode = 1;
     }

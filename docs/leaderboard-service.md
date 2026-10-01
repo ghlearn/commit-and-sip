@@ -33,7 +33,7 @@ Hosting is subscription **GitHub - NonProd - skills**, region `westus2`, resourc
 
 If a write to disk fails, the in-memory board is put back as it was, so the service never reports success for something that would vanish on restart. Reads wait for any write queued before them, so they never see a change that has not reached the disk.
 
-A drink the service refused for good (`duplicate_drink` or `unavailable_drink`) is recorded on the booth as `rejected` with that code. It is never sent again, not by a refresh and not by a rebuild. Otherwise, after a data loss, the booth that lost a name clash could republish first and take the name from the attendee who holds it. The attendee is told the event board did not accept the name, without the reason.
+A drink the service refused for good (`duplicate_drink` or `unavailable_drink`) is recorded on the booth as `rejected` with that code. It is never sent again, not by a refresh and not by a rebuild. That holds when the refusal comes during a rebuild for a drink that was confirmed on a board since lost: the current service's answer replaces the old confirmation, and the lost board's rank is discarded. Otherwise, after a data loss, the booth that lost a name clash could republish first and take the name from the attendee who holds it. The attendee is told the event board did not accept the name, without the reason.
 
 The service uses Node built-ins only. There are no runtime dependencies to audit, install, or patch.
 
