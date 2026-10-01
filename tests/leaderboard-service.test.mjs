@@ -2928,3 +2928,38 @@ test("the runbook gives a supported way to back up and to recover a lost reserva
   assert.match(section, /On \*\*every\*\* booth machine, run `npm run leaderboard:republish`/);
   assert.match(section, /archived and wiped.*blocklist/s, "and the limit is stated with its remedy");
 });
+
+// --- Review round 31 ---------------------------------------------------------
+
+test("a slow retry sweep runs in the background: the dashboard is answered promptly, and never twice", async t => {
+  const slow = gate();
+  let retractions = 0;
+  const client = {
+    async publish(sent) { return { ...sent, entries: 1, rank: 1 }; },
+    async retract() { retractions += 1; if (retractions === 1) throw new Error("offline"); await slow.opened; return "retracted"; },
+  };
+  const { engine } = await engineWith(t, client);
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await engine.publish("booth-1");
+  const panel = new AdminPanel(engine, { sweepWaitMs: 50 });
+  await panel.dispatch("remove_drink", { id: served.submission.id, reason: "test", removedBy: "lead" });
+
+  const started = Date.now();
+  const first = await panel.dispatch("refresh", {});
+  assert.ok(Date.now() - started < 1000, "answered while the retry is still on the wire");
+  assert.equal(first.retrying, true);
+  assert.equal(first.removals[0].published, "failed", "and what it shows is what is recorded so far");
+  const second = await panel.dispatch("refresh", {});
+  assert.equal(second.retrying, true);
+  assert.equal(retractions, 2, "a second Refresh joined the sweep instead of starting another");
+
+  slow.open();
+  await panel.sweep;
+  const after = await panel.get();
+  assert.equal(after.retrying, false);
+  assert.equal(after.removals[0].published, "retracted");
+
+  const renderer = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/admin.js", import.meta.url), "utf8");
+  assert.match(renderer, /poll = retrying \? setTimeout\(\(\) => \{ void load\(\); \}, 2000\) : null;/, "the dashboard polls until the sweep ends");
+});

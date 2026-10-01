@@ -3,6 +3,8 @@
   const $ = id => document.getElementById(id);
   const ticket = new URLSearchParams(window.location.search).get("ticket");
   let busy = false;
+  let retrying = false;
+  let poll = null;
 
   function fail(message) {
     $("admin-error-message").textContent = message;
@@ -13,7 +15,7 @@
     $("admin").setAttribute("aria-busy", String(busy));
     for (const id of ["export-fields", "takedown-fields", "wipe-fields", "close-fields"]) $(id).disabled = busy;
     $("admin-retry").disabled = busy || !ticket;
-    $("admin-refresh").disabled = busy || !ticket;
+    $("admin-refresh").disabled = busy || retrying || !ticket;
   }
 
   async function request(path, body) {
@@ -240,6 +242,12 @@
   }
 
   function render(state) {
+    // A retry sweep still running in the booth: say so, and look again until
+    // it has finished, so the list shown is never one about to change.
+    retrying = Boolean(state.retrying);
+    $("admin-retrying").hidden = !retrying;
+    clearTimeout(poll);
+    poll = retrying ? setTimeout(() => { void load(); }, 2000) : null;
     totals(state);
     stations(state);
     health(state);

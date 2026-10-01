@@ -4,25 +4,44 @@ import { exactInput, requireValue } from "./domain.mjs";
 // the attendee screen. Keeping the surfaces apart is what lets the attendee
 // canvas keep a whitelist with no destructive action in it at all.
 export class AdminPanel {
-  constructor(engine) {
+  constructor(engine, { sweepWaitMs = 3_000 } = {}) {
     this.engine = engine;
+    this.sweepWaitMs = sweepWaitMs;
+    this.sweep = null;
     // The booth panel exposes a runId; this one never drives a run, and the
     // local server reads that property.
     this.runId = null;
     this.busy = false;
   }
 
+  // `retrying` tells the dashboard a retry sweep is still running, so it keeps
+  // polling instead of showing a result that is about to change.
   async get() {
-    return this.engine.adminOverview();
+    return { ...(await this.engine.adminOverview()), retrying: Boolean(this.sweep) };
   }
 
   async dispatch(action, input = {}) {
     if (action === "refresh") {
       exactInput(input);
       // Refresh is when a takedown that missed the public board is retried,
-      // mirroring how the booth retries a publish that did not land.
-      await this.engine.retryRetractions().catch(() => {});
-      await this.engine.retryPublications().catch(() => {});
+      // mirroring how the booth retries a publish that did not land. Every
+      // owed item is tried in turn and each attempt can take seconds, which
+      // can outlast the dashboard's request. So the sweep runs in the
+      // background, one at a time (a second Refresh joins it), and the answer
+      // waits only briefly: a quick sweep is shown finished, a slow one as
+      // still running, and the dashboard polls until it is done. Staff are
+      // never shown a timeout while the ledger is still changing.
+      this.sweep ??= (async () => {
+        try {
+          await this.engine.retryRetractions().catch(() => {});
+          await this.engine.retryPublications().catch(() => {});
+        } finally {
+          this.sweep = null;
+        }
+      })();
+      let timer;
+      await Promise.race([this.sweep, new Promise(resolve => { timer = setTimeout(resolve, this.sweepWaitMs); })]);
+      clearTimeout(timer);
       return this.get();
     }
     if (action === "export_results") {
