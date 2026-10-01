@@ -41,7 +41,7 @@ The booth reads one optional ignored file, `booth/local-config.json`, with two i
 ```
 
 - `leaderboardApi` makes the booth publish to the leaderboard service and lets takedowns retract from it. Its `url` is the service's **origin only** (no path); anything else is refused at start-up. **Write it with `npm run leaderboard:configure`, never by hand** (see [Leaderboard service operations](#leaderboard-service-operations)). Leave out `staffKey` on a machine that should not take drinks down. The file is written readable by its owner only.
-- `leaderboardUrl` puts a QR code in front of attendees. **Leave it unset** until the moderation blocklist is reviewed and brand sign-off is done.
+- `leaderboardUrl` puts a QR code in front of attendees, to their own place on the board. Set it to `https://gh.io/commit-and-sip-leader`. **Review the moderation blocklist before an event that uses it**: attendee names go to a public page.
 
 Both URLs must be public HTTPS with no credentials, fragment, or nonstandard port. Retired pull-request keys (`mode`, `runs`, `repo`, `requiredChecks`) are rejected on start with a `retired_config` diagnostic rather than ignored, so a stale config cannot look configured. A valid JSON file containing `null`, an array, or a scalar is not valid staff configuration; correct it using the explicit `invalid_config` diagnostic rather than treating it as a network error.
 
@@ -284,9 +284,9 @@ The booth itself holds to the same rule: the canvases and the staff commands ref
 
 ## Leaderboard and QR readiness
 
-Two short links exist. `https://gh.io/commit-and-sip-leader` redirects to the leaderboard service and keeps any query string. `https://gh.io/commit-and-sip` points at this repository. The repository QR (`renderer/repo-qr.png`) is already on the booth's served screen and on the public leaderboard, under **How this was built**. It leads to a 404 for attendees until the repository is made public. Print either code with a white margin: the supplied images have almost no quiet zone.
+Two short links exist. `https://gh.io/commit-and-sip-leader` redirects to the leaderboard service and keeps any query string. `https://gh.io/commit-and-sip` points at this (public) repository. The repository QR (`renderer/repo-qr.png`) is on the booth's served screen and on the public leaderboard, under **How this was built**. Print either code with a white margin: the supplied images have almost no quiet zone.
 
-The leaderboard **service** is deployed (see [Leaderboard service operations](#leaderboard-service-operations)), but it is **not approved as an attendee destination**. `leaderboardUrl` stays unset, and no QR code is generated, until the blocklist is reviewed and brand sign-off is done. Staff may open the board themselves; attendees must not be sent to it. A local `127.0.0.1` renderer cannot host an attendee phone experience, and repository assets are not a public destination. Never use credential-bearing URLs to make private images appear public.
+The leaderboard **service** is deployed (see [Leaderboard service operations](#leaderboard-service-operations)) and is the attendee destination: with `leaderboardUrl` set to the short link, each attendee's served screen shows a personal QR code (240 px, decoded off the screen) that opens the board on their own row. The blocklist review is still outstanding and must be done before the event; until then staff takedown is the only moderation of names on that public page. A local `127.0.0.1` renderer cannot host an attendee phone experience, and repository assets are not a public destination. Never use credential-bearing URLs to make private images appear public.
 
 After the public destination is approved and configured:
 
