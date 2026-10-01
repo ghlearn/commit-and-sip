@@ -1849,7 +1849,7 @@ test("a rebuild whose resend fails is reported as failed, even for a drink confi
   assert.equal((await store.read()).runs["booth-1"].sync.state, "confirmed", "the record keeps the earlier confirmation");
 });
 
-test("the dashboard flags an interrupted removal, and never a drink that was not public", async t => {
+test("the dashboard flags an interrupted removal, including one this booth never sent", async t => {
   const boothOnly = { async publish(sent) { return { ...sent, entries: 1, rank: 1 }; } };
   const { engine, store } = await engineWith(t, boothOnly);
   await engine.open({ runId: "booth-1" });
@@ -1871,7 +1871,8 @@ test("the dashboard flags an interrupted removal, and never a drink that was not
   const { removals } = await engine.adminOverview();
   assert.deepEqual(removals.map(record => [record.id, record.published, record.owed]), [
     [published.submission.id, undefined, true],
-    [unpublished.submission.id, undefined, false],
+    // This booth publishes, so another booth may hold the same ID on the board.
+    [unpublished.submission.id, undefined, true],
   ]);
   const renderer = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/admin.js", import.meta.url), "utf8");
   assert.match(renderer, /return PUBLIC_BOARD\[published\] \?\? PUBLIC_BOARD\.unrecorded;/, "a missing outcome is shown as unresolved");
@@ -2564,4 +2565,60 @@ test("the takedown command refuses mixed modes and repeated flags", async () => 
   assert.throws(() => parseArguments(["--retry", "--retry"]), /given twice/);
   assert.equal(parseArguments(["--retry"]).retry, true);
   assert.equal(parseArguments(["--id", "a", "--by", "lead", "--reason", "x"]).id, "a");
+});
+
+// --- Review round 25 ---------------------------------------------------------
+
+test("only the service's own reservation proves a removed ID is not public", async t => {
+  const { WIPE_CONFIRMATION } = await import("../.github/extensions/commit-and-sip/services/event-archive.mjs");
+  const setUp = async (client, sync) => {
+    const { engine, store } = await engineWith(t, client);
+    await engine.open({ runId: "booth-1" });
+    const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+    await engine.dispatch("booth-1", "complete", {});
+    await store.transaction(data => { data.runs["booth-1"].sync = { attempts: 1, ...sync }; });
+    const removal = await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
+    return { engine, removal };
+  };
+  const boothOnly = { async publish(sent) { return { ...sent, entries: 1, rank: 1 }; } };   // publishes, cannot retract
+
+  // Another booth's entry holds this ID: the takedown is owed, and the wipe waits.
+  const duplicate = await setUp(boothOnly, { code: "duplicate_drink", state: "rejected" });
+  assert.equal(duplicate.removal.owed, true);
+  assert.equal((await duplicate.engine.owedPublicTakedowns()).length, 1);
+  await assert.rejects(() => duplicate.engine.archiveAndWipe({ archivedBy: "lead", confirm: WIPE_CONFIRMATION }),
+    { code: "takedowns_owed" });
+
+  // The service already reserves the ID: nothing is owed.
+  const reserved = await setUp(boothOnly, { code: "unavailable_drink", state: "rejected" });
+  assert.equal(reserved.removal.owed, false);
+
+  // A booth that does not publish owes nothing for a drink it never sent...
+  const offline = await setUp(null, { state: "disabled" });
+  assert.equal(offline.removal.owed, false);
+  // ...but still owes one it did send before its configuration was removed.
+  const sentEarlier = await setUp(null, { state: "confirmed", receipt: {} });
+  assert.equal(sentEarlier.removal.owed, true);
+});
+
+test("an instance bound to a key cannot write or stay healthy once the board's binding is gone", async t => {
+  const { openReservationKey } = await import("../leaderboard-service/store.mjs");
+  const directory = await tempDirectory(t);
+  const store = await FileStore.open({ directory });
+  await openReservationKey(directory, store);
+  const { url } = await service(t, { store });
+  // The binding disappears from disk (a restored or hand-edited board).
+  const file = join(directory, "default.json");
+  const { keyId: _gone, ...unbound } = JSON.parse(await readFile(file, "utf8"));
+  await writeFile(file, JSON.stringify(unbound));
+  const refused = await del(url, "mona-moonrise-mocha");
+  assert.equal(refused.status, 503, "writing would bind the board back to a key that may be obsolete");
+  assert.equal(JSON.parse(await readFile(file, "utf8")).keyId, undefined, "and nothing was written");
+  assert.equal((await fetch(`${url}/healthz`)).status, 503);
+
+  // A restart binds it again, and the instance is healthy.
+  const restarted = await FileStore.open({ directory });
+  await openReservationKey(directory, restarted);
+  const fresh = await service(t, { store: restarted });
+  assert.equal((await fetch(`${fresh.url}/healthz`)).status, 200);
 });

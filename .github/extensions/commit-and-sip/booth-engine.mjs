@@ -34,13 +34,20 @@ const SEND_CLAIM_MS = 60_000;
 const liveClaims = (sync, at = Date.now()) =>
   Object.values(sync?.sending ?? {}).filter(since => at - Date.parse(since) < SEND_CLAIM_MS).length;
 
-// Whether a removed drink may be on the public board: its run published, or
-// may have (a failed publish can land with its response lost). A drink served
-// before this booth was configured ("disabled"), or refused by the service
-// ("rejected"), was never public. An unknown run is treated as public.
-function mayBePublic(data, record) {
-  const state = data.runs[record.runId]?.sync?.state;
-  return !["disabled", "rejected"].includes(state);
+// Whether a removed drink's ID may be on the public board, from any booth.
+// The board is keyed by drink ID, not by run, so this run never having been
+// sent proves little: "duplicate_drink" means another booth's entry holds
+// this exact ID, and a drink served before this booth was configured
+// ("disabled") may share its ID with one another booth published. The only
+// proof the ID is not public is the service saying it is already reserved
+// ("unavailable_drink"). A booth that does not publish at all has no board
+// to answer to for drinks it never sent; it still owes one it did send.
+// An unknown run is treated as public.
+function mayBePublic(data, record, publishing) {
+  const sync = data.runs[record.runId]?.sync;
+  if (sync?.state === "rejected" && sync.code === "unavailable_drink") return false;
+  if (publishing) return true;
+  return sync?.state !== "disabled";
 }
 
 export class BoothEngine {
@@ -120,7 +127,7 @@ export class BoothEngine {
     // `owed` says whether the drink may still be public because of it.
     const published = await this.retract(record.id);
     const data = await this.store.read();
-    return { ...record, owed: !SETTLED.includes(published) && mayBePublic(data, record), published };
+    return { ...record, owed: !SETTLED.includes(published) && mayBePublic(data, record, Boolean(this.leaderboardClient)), published };
   }
 
   // Takes a removed drink off the public board and records the outcome on the
@@ -181,7 +188,7 @@ export class BoothEngine {
   // staff must be warned about, and what must not be wiped away.
   async owedPublicTakedowns(data = null) {
     const current = data ?? await this.store.read();
-    return this.removalLog(current).filter(record => !SETTLED.includes(record.published) && mayBePublic(current, record));
+    return this.removalLog(current).filter(record => !SETTLED.includes(record.published) && mayBePublic(current, record, Boolean(this.leaderboardClient)));
   }
 
   async retryRetractions() {
@@ -285,7 +292,7 @@ export class BoothEngine {
       // `owed`: not settled, and the drink may be public. The dashboard must
       // warn about these, including one whose outcome was never recorded.
       removals: this.removalLog(data).map(record => ({
-        ...record, owed: !SETTLED.includes(record.published) && mayBePublic(data, record),
+        ...record, owed: !SETTLED.includes(record.published) && mayBePublic(data, record, Boolean(this.leaderboardClient)),
       })),
       summary: eventSummary(data),
     };
@@ -345,7 +352,7 @@ export class BoothEngine {
       requireValue(!this.inFlight?.size && !claimed, "publications_in_flight",
         "A drink is still being sent to the public leaderboard. Try again in a few seconds. Nothing was changed.", 409);
       // ...and refuse to wipe while any is still owed.
-      const owed = this.removalLog(data).filter(record => !SETTLED.includes(record.published) && mayBePublic(data, record));
+      const owed = this.removalLog(data).filter(record => !SETTLED.includes(record.published) && mayBePublic(data, record, Boolean(this.leaderboardClient)));
       requireValue(owed.length === 0, "takedowns_owed",
         `${owed.length === 1 ? "One takedown has" : `${owed.length} takedowns have`} not reached the public leaderboard, `
         + "so wiping would leave it public with no record to retry from. Refresh once the network is back, "

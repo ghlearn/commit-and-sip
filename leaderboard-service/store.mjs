@@ -261,7 +261,7 @@ export class FileStore extends MemoryStore {
   // instance's reservation key.
   async assertKeyBound() {
     const disk = await this.snapshot();
-    if (this.keyId && disk.keyId && disk.keyId !== this.keyId) throw new KeyMismatchError();
+    if (this.keyId && disk.keyId !== this.keyId) throw new KeyMismatchError();
   }
 
   // Copies, so a change applied to memory can never alter the snapshot it
@@ -469,8 +469,10 @@ export class FileStore extends MemoryStore {
         const disk = await this.snapshot();
         // Checked under the lock on every write: an instance still holding a
         // key the board is no longer bound to would record reservations that
-        // the rest of the service cannot match, or miss theirs.
-        if (this.keyId && disk.keyId && disk.keyId !== this.keyId) throw new KeyMismatchError();
+        // the rest of the service cannot match, or miss theirs. A board whose
+        // binding has gone counts too: writing would bind it back to this
+        // instance's key, which may be the obsolete one. A restart re-binds.
+        if (this.keyId && disk.keyId !== this.keyId) throw new KeyMismatchError();
         this.load(disk);
         try {
           const result = await change();
