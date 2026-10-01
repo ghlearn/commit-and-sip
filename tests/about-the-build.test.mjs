@@ -204,3 +204,19 @@ test("no doc tells an operator to open a board before its prerequisite", async (
   }
   assert.ok(checked >= 4, `found ${checked} --open instructions`);
 });
+
+// A shared machine's default subscription may be another one, so the runbook
+// names the subscription on every Azure CLI command, fenced or inline.
+test("every az command in the runbook names the subscription", async () => {
+  const runbook = await readFile(new URL("../booth/RUNBOOK.md", import.meta.url), "utf8");
+  const commands = [];
+  for (const [, body] of runbook.matchAll(/```[a-z]*\n([\s\S]*?)```/g)) {
+    commands.push(...body.replace(/\\\n\s*/g, " ").split("\n").filter(line => /^\s*(\$\s*)?az\s/.test(line)));
+  }
+  const prose = runbook.replace(/```[\s\S]*?```/g, "");
+  commands.push(...[...prose.matchAll(/`([^`\n]+)`/g)].map(([, span]) => span).filter(span => /^az\s/.test(span)));
+  assert.ok(commands.length >= 5, `found ${commands.length} az commands`);
+  for (const command of commands) {
+    assert.match(command, /--subscription 6aab8b26-48c5-4cfd-ac82-6b5efcc2e441\b/, command);
+  }
+});
