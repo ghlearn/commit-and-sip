@@ -86,6 +86,28 @@ export class AdminPanel {
         this.busy = false;
       }
     }
+    if (action === "check_public_board") {
+      exactInput(input);
+      return { ...(await this.get()), publicBoard: await this.engine.publicBoard() };
+    }
+    if (action === "clear_public_board") {
+      exactInput(input, ["boardId", "clearedBy", "confirm"]);
+      requireValue(!this.busy, "admin_busy", "That operation is already running. Wait for it to finish.", 409);
+      this.busy = true;
+      try {
+        // Read before the clear, which cannot be undone: if a read afterwards
+        // fails, the dashboard still reports the clear that happened rather
+        // than an error staff would retry.
+        const before = await this.get();
+        const result = await this.engine.clearPublicBoard({
+          boardId: input.boardId, clearedBy: input.clearedBy, confirm: input.confirm,
+        });
+        const state = await this.get().catch(() => before);
+        return { ...state, notice: { cleared: result.cleared, kind: "board_cleared", path: result.path } };
+      } finally {
+        this.busy = false;
+      }
+    }
     requireValue(false, "unknown_action", "That staff action does not exist.", 400);
   }
 }

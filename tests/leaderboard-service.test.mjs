@@ -3509,3 +3509,295 @@ test("the board title is sized to stay on one line", async () => {
     }
   }
 });
+
+// --- Clearing the public board ----------------------------------------------
+
+const clear = (url, body, key = STAFF_KEY) => fetch(`${url}/api/board/clear`, {
+  body: JSON.stringify(body), method: "POST",
+  headers: { "Content-Type": "application/json", ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+});
+
+test("staff clear the whole public board, and only the board they checked", async t => {
+  const { url } = await service(t);
+  const kept = submission("Mona Moonrise Mocha");
+  const removed = submission("Ducky Dawn Drizzle", OTHER_HANDLE);
+  assert.equal((await post(url, kept)).status, 201);
+  assert.equal((await post(url, removed)).status, 201);
+  assert.equal((await del(url, removed.id)).status, 204);
+  const before = await board(url);
+  assert.deepEqual([before.total, before.captured], [1, 2]);
+
+  assert.equal((await clear(url, { boardId: before.boardId }, BOOTH_KEY)).status, 401, "a booth key cannot clear it");
+  assert.equal((await clear(url, { boardId: before.boardId }, null)).status, 401);
+  for (const body of [{}, { boardId: "nope" }, { boardId: before.boardId, extra: 1 }, { boardId: before.boardId.toUpperCase() }]) {
+    assert.equal((await clear(url, body)).status, 400, JSON.stringify(body));
+  }
+  const stale = await clear(url, { boardId: "0".repeat(32) });
+  assert.equal(stale.status, 409);
+  assert.equal((await stale.json()).error, "board_changed");
+  assert.deepEqual((await board(url)).entries.map(row => row.name), [kept.name], "a refused clear changes nothing");
+
+  const cleared = await clear(url, { boardId: before.boardId });
+  assert.equal(cleared.status, 200);
+  const receipt = await cleared.json();
+  assert.deepEqual(receipt.cleared, { captured: 2, total: 1 });
+  assert.match(receipt.boardId, /^[0-9a-f]{32}$/);
+  assert.notEqual(receipt.boardId, before.boardId, "a cleared board is a new board");
+  const after = await board(url);
+  assert.deepEqual([after.boardId, after.total, after.captured, after.rebuilding, after.entries.length],
+    [receipt.boardId, 0, 0, false, 0]);
+
+  // Open for the next event, and the old event's takedowns go with it.
+  assert.equal((await post(url, submission("Ducky Dawn Drizzle", OTHER_HANDLE))).status, 201);
+  assert.equal((await board(url)).captured, 1);
+  const again = await clear(url, { boardId: before.boardId });
+  assert.equal(again.status, 409, "repeating the clear cannot erase the new event");
+  assert.equal((await board(url)).total, 1);
+});
+
+test("a cleared board is persisted under a new ID, and the old board is kept on disk", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "sip-clear-"));
+  t.after(() => rm(directory, { force: true, recursive: true }));
+  const store = await openStore({ directory, event: "universe-2026" });
+  await store.admit({ createdAt: "2026-10-01T00:00:00.000Z", handle: HANDLE, id: "mona-latte-two", name: "Mona Latte Two", score: 1000 },
+    { fingerprint: "a".repeat(64), handles: [HANDLE] });
+  await store.retract("ducky-gone", "b".repeat(64));
+  const old = await store.state();
+  const text = await readFile(join(directory, "universe-2026.json"), "utf8");
+
+  await assert.rejects(() => store.clearBoard("0".repeat(32)), { code: "board_changed" });
+  assert.deepEqual(await readdirJson(directory), ["universe-2026.json"], "a refused clear keeps no copy");
+  const result = await store.clearBoard(old.boardId);
+  assert.deepEqual(result.cleared, { captured: 1, total: 1 });
+
+  const files = await readdirJson(directory);
+  const copy = files.find(name => /^universe-2026\.cleared-[0-9T-]+Z\.json$/.test(name));
+  assert.ok(copy, `the old board is kept: ${files}`);
+  assert.equal(await readFile(join(directory, copy), "utf8"), text, "byte for byte");
+
+  const reopened = await FileStore.open({ directory, event: "universe-2026" });
+  assert.deepEqual(await reopened.state(), { boardId: result.boardId, captured: 0, closed: false });
+  assert.deepEqual(await reopened.list(), []);
+  assert.equal(await reopened.isReserved("b".repeat(64)), false, "reservations are cleared with the board");
+  await reopened.admit({ createdAt: "2026-10-02T00:00:00.000Z", handle: HANDLE, id: "ducky-gone", name: "Ducky Gone", score: 900 },
+    { fingerprint: "b".repeat(64), handles: [HANDLE] });
+  assert.equal((await reopened.state()).boardId, result.boardId, "later writes keep the new ID");
+});
+
+async function readdirJson(directory) {
+  const { readdir } = await import("node:fs/promises");
+  return (await readdir(directory)).filter(name => name.endsWith(".json")).sort();
+}
+
+test("the dashboard clears the public board only after this booth's event has ended", async t => {
+  const { url } = await service(t);
+  const directory = await mkdtemp(join(tmpdir(), "sip-clear-booth-"));
+  t.after(() => rm(directory, { force: true, recursive: true }));
+  const store = new RunStore(directory);
+  const engine = new BoothEngine({ catalog, rules, store,
+    leaderboardClient: createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url }) });
+  const panel = new AdminPanel(engine);
+
+  await engine.open({ runId: "booth-1" });
+  await engine.dispatch("booth-1", "submit_name", { name: "Ducky Dawn Drizzle" });
+  await engine.publish("booth-1");
+  await engine.dispatch("booth-1", "complete", {});
+  const checked = await panel.dispatch("check_public_board", {});
+  assert.deepEqual([checked.publicBoard.total, checked.publicBoard.captured, checked.publicBoard.rebuilding], [1, 1, false]);
+  const { boardId } = checked.publicBoard;
+
+  const attempt = input => panel.dispatch("clear_public_board", { boardId, clearedBy: "Ari", confirm: "clear board", ...input });
+  await assert.rejects(() => attempt({}), { code: "event_not_ended" }, "this booth still holds the event");
+  assert.equal((await board(url)).total, 1);
+
+  await engine.archiveAndWipe({ archivedBy: "Ari", confirm: "wipe" });
+  await assert.rejects(() => attempt({ confirm: "clear" }), { code: "confirmation_required" });
+  await assert.rejects(() => attempt({ clearedBy: " " }), { code: "invalid_clear" });
+  await assert.rejects(() => attempt({ boardId: "nope" }), { code: "invalid_clear" });
+  await assert.rejects(() => attempt({ boardId: "f".repeat(32) }), { code: "board_changed" });
+  assert.equal((await board(url)).total, 1, "nothing refused reached the board");
+
+  const done = await attempt({});
+  assert.equal(done.notice.kind, "board_cleared");
+  assert.deepEqual(done.notice.cleared, { captured: 1, total: 1 });
+  const after = await board(url);
+  assert.deepEqual([after.total, after.captured], [0, 0]);
+  const record = JSON.parse(await readFile(done.notice.path, "utf8"));
+  assert.deepEqual([record.clearedBy, record.previousBoardId, record.boardId], ["Ari", boardId, after.boardId], "who cleared which board is recorded");
+  await assert.rejects(() => attempt({}), { code: "board_changed" }, "the same check cannot clear twice");
+
+  // A booth-only machine cannot see or press the control.
+  const boothOnly = new BoothEngine({ catalog, rules, store,
+    leaderboardClient: createLeaderboardClient({ boothKey: BOOTH_KEY, url }) });
+  assert.equal((await boothOnly.adminOverview()).publishing.takedowns, false);
+  await assert.rejects(() => boothOnly.publicBoard(), { code: "staff_key_required" });
+  await assert.rejects(() => boothOnly.clearPublicBoard({ boardId: after.boardId, clearedBy: "Ari", confirm: "clear board" }), { code: "staff_key_required" });
+});
+
+test("a clear is recorded before the board is touched, and a late record failure is not reported as a failed clear", async t => {
+  const { url } = await service(t);
+  const directory = await mkdtemp(join(tmpdir(), "sip-clear-record-"));
+  t.after(() => rm(directory, { force: true, recursive: true }));
+  const store = new RunStore(directory);
+  const engine = new BoothEngine({ catalog, rules, store,
+    leaderboardClient: createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url }) });
+  assert.equal((await post(url, submission("Mona Moonrise Mocha"))).status, 201);
+  const { boardId } = await engine.publicBoard();
+  const write = store.writeArtifact.bind(store);
+
+  // No record, no clear.
+  store.writeArtifact = async () => { throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); };
+  await assert.rejects(() => engine.clearPublicBoard({ boardId, clearedBy: "Ari", confirm: "clear board" }), { code: "ENOSPC" });
+  assert.equal((await board(url)).total, 1, "the board is untouched when the request cannot be recorded");
+
+  // The request record lands, the completion record does not: still a clear.
+  let writes = 0;
+  store.writeArtifact = async (name, payload) => {
+    writes += 1;
+    if (writes === 2) throw Object.assign(new Error("disk full"), { code: "ENOSPC" });
+    return write(name, payload);
+  };
+  const result = await engine.clearPublicBoard({ boardId, clearedBy: "Ari", confirm: "clear board" });
+  assert.equal((await board(url)).total, 0);
+  assert.equal(result.path, result.requestPath, "the request record stands in for the missing one");
+  const requested = JSON.parse(await readFile(result.requestPath, "utf8"));
+  assert.deepEqual([requested.status, requested.boardId, requested.clearedBy], ["requested", boardId, "Ari"]);
+  assert.match(result.requestPath, /board-clear-requested-/);
+
+  // Normally both are written, and the completion names the request.
+  store.writeArtifact = write;
+  assert.equal((await post(url, submission("Ducky Dawn Drizzle"))).status, 201);
+  const next = await engine.clearPublicBoard({ boardId: (await engine.publicBoard()).boardId, clearedBy: "Ari", confirm: "clear board", now: "2026-10-02T03:00:00.000Z" });
+  assert.match(next.path, /board-cleared-2026-10-02T03-00-00-000Z\.json$/);
+  assert.equal(JSON.parse(await readFile(next.path, "utf8")).requestPath, next.requestPath);
+});
+
+test("the board, its ID and its counts are served from one read of the store", async t => {
+  const entry = { createdAt: "2026-10-01T00:00:00.000Z", handle: HANDLE, id: "mona-latte-two", name: "Mona Latte Two", score: 1000 };
+  const store = {
+    view: async () => ({ boardId: "c".repeat(32), captured: 3, closed: false, entries: [entry] }),
+    list: async () => { throw new Error("read apart from its ID"); },
+    state: async () => { throw new Error("read apart from its entries"); },
+  };
+  const { url } = await service(t, { store });
+  const body = await board(url);
+  assert.deepEqual([body.boardId, body.captured, body.total, body.entries[0].name], ["c".repeat(32), 3, 1, "Mona Latte Two"]);
+});
+
+test("nothing can be served at this booth while its clear is in flight", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "sip-clear-lock-"));
+  t.after(() => rm(directory, { force: true, recursive: true }));
+  let started, release;
+  const begun = new Promise(resolve => { started = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const client = { publish: async () => { throw new Error("unused"); }, retract: async () => "absent",
+    board: async () => ({ boardId: "d".repeat(32), captured: 0, rebuilding: false, total: 0 }),
+    clearBoard: async () => { started(); await gate; return { boardId: "e".repeat(32), cleared: { captured: 0, total: 0 } }; } };
+  const store = new RunStore(directory);
+  const engine = new BoothEngine({ catalog, rules, store, leaderboardClient: client });
+  const clearing = engine.clearPublicBoard({ boardId: "d".repeat(32), clearedBy: "Ari", confirm: "clear board" });
+  await begun;
+  let opened = false;
+  const opening = engine.open({ runId: "late" }).then(() => { opened = true; });
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(opened, false, "a new attendee waits for the clear");
+  release();
+  await clearing;
+  await opening;
+  assert.ok((await store.read()).runs.late, "and is served once it is done");
+});
+
+test("a clear the service refused says so; one that went unanswered says it may have happened", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "sip-clear-outcome-"));
+  t.after(() => rm(directory, { force: true, recursive: true }));
+  // Each attempt at its own time: records are named by it and never overwritten.
+  let minute = 0;
+  const attempt = async error => {
+    const client = { publish: async () => {}, retract: async () => "absent", board: async () => ({}),
+      clearBoard: async () => { throw error; } };
+    const engine = new BoothEngine({ catalog, rules, store: new RunStore(directory), leaderboardClient: client });
+    const now = new Date(Date.UTC(2026, 9, 2, 5, minute++)).toISOString();
+    return engine.clearPublicBoard({ boardId: "d".repeat(32), clearedBy: "Ari", confirm: "clear board", now }).then(() => null, caught => caught);
+  };
+  for (const status of [400, 401, 403, 404]) {
+    const error = await attempt(Object.assign(new Error("no"), { code: "unauthorized", status }));
+    assert.equal(error.code, "clear_refused", String(status));
+    assert.match(error.message, /was not cleared/);
+  }
+  for (const error of [Object.assign(new Error("timeout"), { name: "TimeoutError" }),
+    Object.assign(new Error("odd"), { code: "unexpected_response", status: 200 }),
+    Object.assign(new Error("down"), { code: "server_error", status: 500 })]) {
+    const caught = await attempt(error);
+    assert.equal(caught.code, "clear_unconfirmed", error.message);
+    assert.match(caught.message, /may or may not have happened\. Check the public leaderboard/);
+    assert.match(caught.message, /board-clear-requested-/);
+    assert.doesNotMatch(caught.message, /was not cleared/);
+  }
+});
+
+test("a confirmed clear is reported even if the ledger fails to save afterwards, and refusals are recorded", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "sip-clear-commit-"));
+  t.after(() => rm(directory, { force: true, recursive: true }));
+  const { readdir } = await import("node:fs/promises");
+  const make = clearBoard => new BoothEngine({ catalog, rules, store: new RunStore(directory),
+    leaderboardClient: { publish: async () => {}, retract: async () => "absent", board: async () => ({}), clearBoard } });
+  const input = { boardId: "d".repeat(32), clearedBy: "Ari", confirm: "clear board" };
+
+  // The board was cleared; only the closing ledger write failed.
+  const engine = make(async () => ({ boardId: "e".repeat(32), cleared: { captured: 2, total: 1 } }));
+  const transaction = engine.store.transaction.bind(engine.store);
+  engine.store.transaction = async fn => { await transaction(fn); throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); };
+  const result = await engine.clearPublicBoard({ ...input, now: "2026-10-02T03:30:00.000Z" });
+  assert.deepEqual([result.boardId, result.cleared.total], ["e".repeat(32), 1]);
+  // A failure before the clear is still a failure.
+  engine.store.transaction = async () => { throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); };
+  await assert.rejects(() => engine.clearPublicBoard(input), { code: "ENOSPC" });
+
+  // A refusal leaves a refused record beside its request; an unanswered one does not.
+  const exports = async () => (await readdir(join(directory, "exports"))).filter(name => name.startsWith("board-clear-")).sort();
+  const before = await exports();
+  await assert.rejects(() => make(async () => { throw Object.assign(new Error("no"), { code: "board_changed", status: 409 }); })
+    .clearPublicBoard({ ...input, now: "2026-10-02T04:00:00.000Z" }), { code: "board_changed" });
+  await assert.rejects(() => make(async () => { throw Object.assign(new Error("no"), { code: "unauthorized", status: 401 }); })
+    .clearPublicBoard({ ...input, now: "2026-10-02T04:01:00.000Z" }), { code: "clear_refused" });
+  await assert.rejects(() => make(async () => { throw Object.assign(new Error("t"), { name: "TimeoutError" }); })
+    .clearPublicBoard({ ...input, now: "2026-10-02T04:02:00.000Z" }), { code: "clear_unconfirmed" });
+  const added = (await exports()).filter(name => !before.includes(name));
+  assert.deepEqual(added, [
+    "board-clear-refused-2026-10-02T04-00-00-000Z.json", "board-clear-refused-2026-10-02T04-01-00-000Z.json",
+    "board-clear-requested-2026-10-02T04-00-00-000Z.json", "board-clear-requested-2026-10-02T04-01-00-000Z.json",
+    "board-clear-requested-2026-10-02T04-02-00-000Z.json",
+  ], "only the unanswered request stands alone");
+  const refusal = JSON.parse(await readFile(join(directory, "exports", added[1]), "utf8"));
+  assert.deepEqual([refusal.status, refusal.code], ["refused", "unauthorized"]);
+});
+
+test("the in-memory board view is one synchronous read", async () => {
+  const store = new MemoryStore();
+  await store.admit({ createdAt: "2026-10-01T00:00:00.000Z", handle: HANDLE, id: "mona-latte-two", name: "Mona Latte Two", score: 1000 },
+    { fingerprint: "a".repeat(64), handles: [HANDLE] });
+  const { boardId } = await store.state();
+  // Started before a clear, finished after it: it must describe one board.
+  const view = store.view();
+  await store.clearBoard(boardId);
+  const seen = await view;
+  assert.deepEqual([seen.boardId, seen.captured, seen.entries.length], [boardId, 1, 1]);
+});
+
+test("the dashboard reports a clear that happened even if reading its state afterwards fails", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "sip-clear-panel-"));
+  t.after(() => rm(directory, { force: true, recursive: true }));
+  const engine = new BoothEngine({ catalog, rules, store: new RunStore(directory), leaderboardClient: {
+    publish: async () => {}, retract: async () => "absent", board: async () => ({}),
+    clearBoard: async () => ({ boardId: "e".repeat(32), cleared: { captured: 4, total: 3 } }) } });
+  const panel = new AdminPanel(engine);
+  const overview = engine.adminOverview.bind(engine);
+  let cleared = false;
+  const clear = engine.clearPublicBoard.bind(engine);
+  engine.clearPublicBoard = async input => { const result = await clear(input); cleared = true; return result; };
+  engine.adminOverview = async () => { if (cleared) throw Object.assign(new Error("EIO"), { code: "EIO" }); return overview(); };
+  const state = await panel.dispatch("clear_public_board", { boardId: "d".repeat(32), clearedBy: "Ari", confirm: "clear board" });
+  assert.equal(state.notice.kind, "board_cleared");
+  assert.deepEqual(state.notice.cleared, { captured: 4, total: 3 });
+  assert.equal(panel.busy, false);
+});

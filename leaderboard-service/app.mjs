@@ -5,7 +5,7 @@ import { leaderboard } from "../.github/extensions/commit-and-sip/services/booth
 import { canonicalHandle, PUBLICATION_TOKEN, publicRef, tokenHashOf } from "../.github/extensions/commit-and-sip/services/leaderboard.mjs";
 import { blocklistStatus } from "../.github/extensions/commit-and-sip/services/moderation.mjs";
 import { scoreCoffeeName } from "../.github/extensions/commit-and-sip/services/name-score.mjs";
-import { ClosedError, HandleTakenError, KeyMismatchError, ReservedError } from "./store.mjs";
+import { BoardChangedError, ClosedError, HandleTakenError, KeyMismatchError, ReservedError } from "./store.mjs";
 
 // The public leaderboard for the Commit & Sip booth.
 //
@@ -130,9 +130,8 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
 
   const routes = {
     async "GET /api/board"(request, url) {
-      const entries = await store.list();
+      const { boardId, captured, closed, entries } = await store.view();
       const board = leaderboard(entries);
-      const { boardId, captured, closed } = await store.state();
       const body = { asOf: now().toISOString(), boardId, entries: board.slice(0, BOARD_SIZE).map(publicRow),
         captured, rebuilding: closed, total: board.length };
       const handle = url.searchParams.get("handle");
@@ -214,6 +213,25 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
       if (!shaped || body.open !== true) throw new HttpError(400, "invalid_request", "Send exactly { \"open\": true }.");
       await store.openBoard();
       return [200, { open: true }];
+    },
+
+    // Empties the board for the next event: entries, takedown reservations and
+    // the captured count, under a new board ID. Staff key only. The body names
+    // the board staff checked, so a repeated or stale request cannot clear a
+    // board nobody has looked at. The old board is kept on disk.
+    async "POST /api/board/clear"(request) {
+      requireKey(request, staffKey);
+      const body = await readJson(request);
+      const shaped = body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).join() === "boardId";
+      if (!shaped || typeof body.boardId !== "string" || !/^[0-9a-f]{32}$/.test(body.boardId)) {
+        throw new HttpError(400, "invalid_request", "Send exactly { boardId } with the ID of the board to clear.");
+      }
+      try {
+        return [200, await store.clearBoard(body.boardId)];
+      } catch (error) {
+        if (error instanceof BoardChangedError) throw new HttpError(409, "board_changed", "The board changed since it was checked. Check it again before clearing.");
+        throw error;
+      }
     },
 
     async "POST /api/retractions"(request) {

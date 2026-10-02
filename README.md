@@ -54,7 +54,7 @@ Staff need Node.js 22 or newer and a Copilot App/CLI build supporting project ca
 4. Inspect the registered `commit-and-sip` canvas capabilities.
 5. Open the canvas with no input, or `{}`. The counter opens idle and ready for the next attendee.
 
-Staff operations live on a second canvas, `commit-and-sip-admin`: event totals, results export, drink takedown, closing an abandoned station, and the end-of-event archive and reset. It is deliberately not part of the attendee screen, which faces a queue. See the [staff dashboard](booth/RUNBOOK.md#staff-dashboard), [taking a drink down](booth/RUNBOOK.md#taking-a-drink-down), and [ending an event](booth/RUNBOOK.md#ending-an-event).
+Staff operations live on a second canvas, `commit-and-sip-admin`: event totals, results export, drink takedown, closing an abandoned station, the end-of-event archive and reset, and, on a staff machine, clearing the shared public leaderboard. It is deliberately not part of the attendee screen, which faces a queue. See the [staff dashboard](booth/RUNBOOK.md#staff-dashboard), [taking a drink down](booth/RUNBOOK.md#taking-a-drink-down), and [ending an event](booth/RUNBOOK.md#ending-an-event).
 
 An agent driving the host uses `extensions_reload`, `extensions_manage` (`list`/`inspect`), `list_canvas_capabilities`, `open_canvas`, and `invoke_canvas_action`. These are host tools, not shell commands. Discover the loaded extension and provider identifiers instead of inventing them. Choose a panel `instanceId` when opening, then reuse that panel handle for actions.
 

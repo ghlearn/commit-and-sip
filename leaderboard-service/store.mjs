@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, constants, copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MAX_SCORE } from "../.github/extensions/commit-and-sip/services/name-score.mjs";
 
@@ -63,6 +63,16 @@ export class ClosedError extends Error {
   }
 }
 
+// A clear names the board staff looked at. Any other board, such as one
+// another staff machine cleared a moment earlier, is left alone.
+export class BoardChangedError extends Error {
+  constructor() {
+    super("The board changed since it was read.");
+    this.name = "BoardChangedError";
+    this.code = "board_changed";
+  }
+}
+
 export class MemoryStore {
   constructor({ closed = false } = {}) {
     this.entries = new Map();
@@ -79,8 +89,32 @@ export class MemoryStore {
   // takedowns onto from a later replacement.
   async state() { return { boardId: this.boardId, captured: this.captured, closed: Boolean(this.closed) }; }
 
+  // The board and what names it, from one read. A board ID read apart from
+  // its entries could belong to a board cleared in between, and a clear that
+  // names it would erase a board nobody looked at.
+  // Taken synchronously, so no write can land part-way through it.
+  async view() {
+    return { boardId: this.boardId, captured: this.captured, closed: Boolean(this.closed),
+      entries: [...this.entries.values()].map(entry => ({ ...entry })) };
+  }
+
   // Opening is a staff decision: every booth has replayed its takedowns.
   async openBoard() { this.closed = false; }
+
+  // Empties the board for the next event, on staff's word that every booth
+  // has ended its own. It becomes a new board: a new ID (so a booth's rebuild
+  // record for the old one proves nothing here), no entries, a captured count
+  // of 0, open, and no reservations, as with a new EVENT_ID.
+  async clearBoard(expectedBoardId) {
+    if (expectedBoardId !== this.boardId) throw new BoardChangedError();
+    const cleared = { captured: this.captured, total: this.entries.size };
+    this.entries = new Map();
+    this.reserved = new Set();
+    this.captured = 0;
+    this.closed = false;
+    this.boardId = randomBytes(16).toString("hex");
+    return { boardId: this.boardId, cleared };
+  }
 
   async create(entry) {
     if (this.entries.has(entry.id)) throw new ConflictError(entry.id);
@@ -328,6 +362,7 @@ export class FileStore extends MemoryStore {
     this.reserved = new Set(disk.reserved);
     this.closed = disk.closed;
     this.captured = disk.captured;
+    this.boardId = disk.boardId;
   }
 
   // A lease is one small JSON document: who holds it and when they last
@@ -537,8 +572,8 @@ export class FileStore extends MemoryStore {
           const result = await change();
           if ((await this.snapshot()).version !== disk.version) throw new ConcurrentWriteError();
           await this.persist(`${JSON.stringify({
-            // Minted with the board's first write and never changed after.
-            boardId: disk.boardId ?? randomBytes(16).toString("hex"),
+            // Minted with the board's first write, and changed only by a clear.
+            boardId: this.boardId ?? randomBytes(16).toString("hex"),
             captured: this.captured,
             closed: Boolean(this.closed),
             entries: [...this.entries.values()], keyId: this.keyId ?? disk.keyId ?? undefined,
@@ -578,6 +613,23 @@ export class FileStore extends MemoryStore {
   retract(id, fingerprint) { return this.serialise(() => super.retract(id, fingerprint)); }
 
   openBoard() { return this.serialise(() => super.openBoard()); }
+
+  // The cleared board is kept beside the live one, under the lock and before
+  // anything changes, so a clear never destroys the only copy of an event.
+  clearBoard(expectedBoardId) {
+    return this.serialise(async () => {
+      if (expectedBoardId !== this.boardId) throw new BoardChangedError();
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      await copyFile(this.file, this.file.replace(/\.json$/, `.cleared-${stamp}.json`), constants.COPYFILE_EXCL);
+      return super.clearBoard(expectedBoardId);
+    });
+  }
+
+  async view() {
+    await this.queue;
+    const { boardId, captured, closed, entries } = await this.snapshot();
+    return { boardId, captured, closed: Boolean(closed), entries: [...entries.values()].map(entry => ({ ...entry })) };
+  }
 
   // From disk, like every read, so every instance agrees on it.
   async state() {

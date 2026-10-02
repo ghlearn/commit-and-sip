@@ -2,7 +2,7 @@
 
 **Status: deployed at <https://commit-and-sip-leaderboard.azurewebsites.net> (short link <https://gh.io/commit-and-sip-leader>), redeployed on 2026-10-01 and verified end to end through the booth canvases. The attendee QR (`leaderboardUrl`) stays unset until the blocklist is reviewed; the event owner has switched it on for one booth machine ahead of that review, for staff testing.**
 
-> **What is live.** Everything in this document is deployed, including the captured tally and the board page's 24 px quiet zone around the repository QR. A later change ships with the next code deploy from an identity with Contributor (`npm run leaderboard:package`, then the `az webapp deploy … --async true` command and the version check in the runbook).
+> **What is live.** Everything in this document is deployed, including the captured tally, the board page's 24 px quiet zone around the repository QR, and `POST /api/board/clear` (deployed on 2026-10-02 from the branch that adds it, ahead of its merge). A later change ships with the next code deploy from an identity with Contributor (`npm run leaderboard:package`, then the `az webapp deploy … --async true` command and the version check in the runbook).
 
 This document began as a proposal. It now records what was built, the decisions taken, and where the build departs from the proposal and why. The booth-side contract is still `services/leaderboard.mjs`. The service is constrained by it, not the other way round.
 
@@ -91,23 +91,27 @@ Security measures:
 
 ### Retention: still open
 
-Each `EVENT_ID` is a separate board file, so setting a new ID starts a fresh board and leaves the old one on disk. How long old boards are kept, and when they are deleted, is a human decision that has not been made.
+Each `EVENT_ID` is a separate board file, so setting a new ID starts a fresh board and leaves the old one on disk. Staff can also empty the board under the same ID from a staff machine's dashboard (`POST /api/board/clear`), which keeps the cleared board beside it as `<EVENT_ID>.cleared-<time>.json`. How long old and cleared boards are kept, and when they are deleted, is a human decision that has not been made.
 
 ## API
 
 ```
 GET    /                        public board (the future QR destination)
 GET    /api/board[?handle=&ref=]    { asOf, boardId, captured, rebuilding, total, entries[<=20], you? }  (ref is opaque, never the drink ID)
-                                captured: every drink ever admitted to this board, for tracking. It never
-                                falls: takedowns leave it, resends do not add. total: drinks on the board now.
+                                captured: every drink ever admitted to this board, for tracking. Only a
+                                clear resets it: takedowns leave it, resends do not add. total: drinks on the board now.
 POST   /api/entries             booth key. 201 new, 200 same entry again (handle
                                 may be canonical), 409 duplicate_drink |
                                 unavailable_drink | handle_taken,
                                 422 score_mismatch | rejected_name | invalid_handle
 POST   /api/retractions         staff key. Body exactly { id }. 204 retracted, 200 {"retraction":"absent"}.
-POST   /api/board/open          staff key. Body exactly { "open": true }. Opens a board created closed. 200.
                                 Reserves either way. The ID is never in a URL, so web-server
                                 logs hold no removed name.
+POST   /api/board/open          staff key. Body exactly { "open": true }. Opens a board created closed. 200.
+POST   /api/board/clear         staff key. Body exactly { boardId } naming the board staff checked.
+                                200 { boardId (new), cleared: { total, captured } }: no entries, no
+                                reservations, captured 0, open. The old board is kept on disk as
+                                <EVENT_ID>.cleared-<time>.json. 409 board_changed for any other board.
 GET    /healthz                 200 { ok, moderation: "reviewed" | "placeholder" }, or
                                 503 when the board on /home cannot be read
 ```
