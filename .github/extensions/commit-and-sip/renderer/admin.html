@@ -129,6 +129,25 @@
       <p id="wipe-problem" class="notice error-notice" role="alert" hidden></p>
     </section>
 
+    <section id="clear-section" aria-labelledby="clear-heading" hidden>
+      <h2 id="clear-heading">Clear the public leaderboard</h2>
+      <p>The public leaderboard is shared by every booth, so resetting this booth leaves it as it is. Clearing it removes every drink name from the board and sets the count back to 0, for all booths. The service keeps a copy of the old board.</p>
+      <p><strong>Do this only after every booth has ended its event.</strong> This booth must be archived and reset first.</p>
+      <button id="clear-check" type="button">Check the public leaderboard</button>
+      <form id="clear-form" hidden>
+        <fieldset id="clear-fields">
+          <legend>Clear for every booth</legend>
+          <p id="clear-summary" role="status"></p>
+          <label for="clear-by">Your name</label>
+          <input id="clear-by" type="text" required maxlength="80" autocomplete="off">
+          <label for="clear-confirm">Type <code>clear board</code> to confirm</label>
+          <input id="clear-confirm" type="text" required maxlength="20" autocomplete="off" spellcheck="false">
+          <button id="clear-submit" type="submit">Clear the public leaderboard</button>
+        </fieldset>
+      </form>
+      <p id="clear-problem" class="notice error-notice" role="alert" hidden></p>
+    </section>
+
     <p class="muted">Attendee data lives on this machine, not in the repository. Deleting the cloned repository does not remove it.</p>
   </main>
 </body>

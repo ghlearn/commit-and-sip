@@ -1,7 +1,7 @@
 import { DomainError, exactInput, requireValue } from "./domain.mjs";
 import { AdminPanel } from "./admin-panel.mjs";
 import { startServer } from "./server.mjs";
-import { WIPE_CONFIRMATION } from "./services/event-archive.mjs";
+import { CLEAR_BOARD_CONFIRMATION, WIPE_CONFIRMATION } from "./services/event-archive.mjs";
 
 const empty = { type: "object", properties: {}, additionalProperties: false };
 const staffName = { type: "string", minLength: 1, maxLength: 80 };
@@ -34,6 +34,12 @@ export function adminCanvasDefinition({ engine, guarded = fn => fn(), reportErro
       properties: { archivedBy: staffName, confirm: { const: WIPE_CONFIRMATION } },
       required: ["archivedBy", "confirm"], additionalProperties: false
     }, `Archive the whole event and reset the booth for the next one. Destructive: requires confirm "${WIPE_CONFIRMATION}".`],
+    check_public_board: [empty, "Read what the shared public leaderboard holds now, and which board it is, before clearing it."],
+    clear_public_board: [{
+      type: "object",
+      properties: { boardId: { type: "string", pattern: "^[0-9a-f]{32}$" }, clearedBy: staffName, confirm: { const: CLEAR_BOARD_CONFIRMATION } },
+      required: ["boardId", "clearedBy", "confirm"], additionalProperties: false
+    }, `Empty the public leaderboard for every booth, after this booth has ended its event. Destructive: requires the boardId from check_public_board and confirm "${CLEAR_BOARD_CONFIRMATION}".`],
   };
   return {
     id: "commit-and-sip-admin",

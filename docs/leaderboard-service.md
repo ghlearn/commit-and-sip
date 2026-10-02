@@ -91,21 +91,25 @@ Security measures:
 
 ### Retention: still open
 
-Each `EVENT_ID` is a separate board file, so setting a new ID starts a fresh board and leaves the old one on disk. How long old boards are kept, and when they are deleted, is a human decision that has not been made.
+Each `EVENT_ID` is a separate board file, so setting a new ID starts a fresh board and leaves the old one on disk. Staff can also empty the board under the same ID from a staff machine's dashboard (`POST /api/board/clear`), which keeps the cleared board beside it as `<EVENT_ID>.cleared-<time>.json`. How long old and cleared boards are kept, and when they are deleted, is a human decision that has not been made.
 
 ## API
 
 ```
 GET    /                        public board (the future QR destination)
 GET    /api/board[?handle=&ref=]    { asOf, boardId, captured, rebuilding, total, entries[<=20], you? }  (ref is opaque, never the drink ID)
-                                captured: every drink ever admitted to this board, for tracking. It never
-                                falls: takedowns leave it, resends do not add. total: drinks on the board now.
+                                captured: every drink ever admitted to this board, for tracking. Only a
+                                clear resets it: takedowns leave it, resends do not add. total: drinks on the board now.
 POST   /api/entries             booth key. 201 new, 200 same entry again (handle
                                 may be canonical), 409 duplicate_drink |
                                 unavailable_drink | handle_taken,
                                 422 score_mismatch | rejected_name | invalid_handle
 POST   /api/retractions         staff key. Body exactly { id }. 204 retracted, 200 {"retraction":"absent"}.
 POST   /api/board/open          staff key. Body exactly { "open": true }. Opens a board created closed. 200.
+POST   /api/board/clear         staff key. Body exactly { boardId } naming the board staff checked.
+                                200 { boardId (new), cleared: { total, captured } }: no entries, no
+                                reservations, captured 0, open. The old board is kept on disk as
+                                <EVENT_ID>.cleared-<time>.json. 409 board_changed for any other board.
                                 Reserves either way. The ID is never in a URL, so web-server
                                 logs hold no removed name.
 GET    /healthz                 200 { ok, moderation: "reviewed" | "placeholder" }, or

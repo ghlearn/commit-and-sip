@@ -7,7 +7,7 @@ import {
   confirmedSync, failedSync, initialSync, newPublicationToken, publicRef, retractionCause, retractionFailure, submissionFor, syncView, tokenHashOf, validateLeaderboardClient, validateReceipt,
 } from "./services/leaderboard.mjs";
 import {
-  archiveMatches, archivePayload, artifactName, emptyLedger, eventSummary, exportPayload, WIPE_CONFIRMATION
+  archiveMatches, archivePayload, artifactName, CLEAR_BOARD_CONFIRMATION, emptyLedger, eventSummary, exportPayload, WIPE_CONFIRMATION
 } from "./services/event-archive.mjs";
 import { blocklistStatus } from "./services/moderation.mjs";
 
@@ -470,6 +470,52 @@ export class BoothEngine {
       Object.assign(data, empty);
       return { archive: path, summary };
     });
+  }
+
+  // What the public board holds now, read when staff start to clear it, so
+  // they see what they are about to erase. Not part of the overview: the
+  // dashboard refreshes often, and must not wait on the network to do it.
+  async publicBoard() {
+    requireValue(this.leaderboardClient?.clearBoard, "staff_key_required",
+      "Clearing the public leaderboard needs this machine's staff key. Use a staff machine.", 409);
+    try { return await this.leaderboardClient.board(); }
+    catch (error) {
+      throw new DomainError("leaderboard_unreachable",
+        `The public leaderboard could not be read${error?.code && error.code !== "unknown" ? ` (${error.code})` : ""}. Check this machine's connection and try again. Nothing was changed.`, 502);
+    }
+  }
+
+  // Empties the public board for every booth: its drinks, its takedown
+  // reservations and its captured count. The service keeps the old board on
+  // disk. It is the step after End the event, so this booth must already be
+  // archived and reset: a booth that still holds drinks would have them
+  // marked published on a board that no longer shows them. Other booths are
+  // staff's call, as with opening a board. `boardId` is the board staff
+  // checked; a board changed since then is refused, not cleared.
+  async clearPublicBoard({ boardId, clearedBy, confirm, now = new Date().toISOString() } = {}) {
+    requireValue(confirm === CLEAR_BOARD_CONFIRMATION, "confirmation_required",
+      `Type ${CLEAR_BOARD_CONFIRMATION} to confirm. Nothing was changed.`, 400);
+    requireValue(typeof clearedBy === "string" && clearedBy.trim().length > 0,
+      "invalid_clear", "Record who cleared the public leaderboard.", 400);
+    requireValue(typeof boardId === "string" && /^[0-9a-f]{32}$/.test(boardId),
+      "invalid_clear", "Check the public leaderboard first. Nothing was changed.", 400);
+    requireValue(this.leaderboardClient?.clearBoard, "staff_key_required",
+      "Clearing the public leaderboard needs this machine's staff key. Use a staff machine.", 409);
+    const summary = eventSummary(await this.store.read());
+    requireValue(summary.attendees === 0 && summary.invented === 0 && summary.removals === 0, "event_not_ended",
+      "End the event on this booth first (archive and reset), then clear the public leaderboard. Nothing was changed.", 409);
+    let result;
+    try { result = await this.leaderboardClient.clearBoard(boardId); }
+    catch (error) {
+      if (error?.code === "board_changed") {
+        throw new DomainError("board_changed", "The public leaderboard changed since you checked it. Check it again before clearing. Nothing was changed.", 409);
+      }
+      throw new DomainError("leaderboard_unreachable",
+        `The public leaderboard was not cleared${error?.code && error.code !== "unknown" ? ` (${error.code})` : ""}. Check this machine's connection and keys, then check the board again.`, 502);
+    }
+    const record = { boardId: result.boardId, cleared: result.cleared ?? null, clearedAt: now, clearedBy: clearedBy.trim(), previousBoardId: boardId };
+    const path = await this.store.writeArtifact(artifactName("board-cleared", now), record);
+    return { ...record, path };
   }
 
   // The counter view: what is on the menu and who is winning. It needs no run,

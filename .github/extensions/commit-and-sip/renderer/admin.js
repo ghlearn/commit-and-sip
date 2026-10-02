@@ -5,6 +5,9 @@
   let busy = false;
   let retrying = false;
   let poll = null;
+  // The board staff last checked. A clear names it, so the service refuses
+  // if the board has changed since.
+  let checkedBoard = null;
 
   function fail(message) {
     $("admin-error-message").textContent = message;
@@ -13,7 +16,8 @@
 
   function controls() {
     $("admin").setAttribute("aria-busy", String(busy));
-    for (const id of ["export-fields", "takedown-fields", "wipe-fields", "close-fields"]) $(id).disabled = busy;
+    for (const id of ["export-fields", "takedown-fields", "wipe-fields", "close-fields", "clear-fields"]) $(id).disabled = busy;
+    $("clear-check").disabled = busy;
     $("admin-retry").disabled = busy || !ticket;
     $("admin-refresh").disabled = busy || retrying || !ticket;
   }
@@ -236,6 +240,10 @@
       const board = boardStatus(state.notice);
       box.textContent = `${state.notice.name} was removed from the house menu${board ? ` and ${board}` : ""}.`;
     }
+    else if (state.notice.kind === "board_cleared") {
+      const was = state.notice.cleared;
+      box.textContent = `The public leaderboard was cleared for every booth${was ? `: ${was.total} drink name(s) removed, ${was.captured} captured in all` : ""}. A record is in ${state.notice.path}.`;
+    }
     else if (state.notice.kind === "wiped") {
       box.textContent = `Event archived to ${state.notice.archive} and the booth was reset. ${state.notice.was.invented} drink(s) and ${state.notice.was.removals} removal(s) are in that file and nowhere else. Copy it off this machine.`;
     }
@@ -256,6 +264,20 @@
     removals(state);
     archives(state);
     notice(state);
+    // Only a machine with the staff key can clear the shared board.
+    $("clear-section").hidden = !state.publishing?.takedowns;
+    if (state.publicBoard) {
+      checkedBoard = state.publicBoard;
+      const { total, captured } = checkedBoard;
+      $("clear-summary").textContent = total === 0 && captured === 0
+        ? "The public leaderboard is already empty."
+        : `The public leaderboard has ${total ?? "an unknown number of"} drink name(s) on it, ${captured ?? "an unknown number"} captured in all. Clearing removes them for every booth.`;
+      $("clear-form").hidden = false;
+    } else if (state.notice?.kind === "board_cleared") {
+      checkedBoard = null;
+      $("clear-form").hidden = true;
+      $("clear-confirm").value = "";
+    }
   }
 
   async function load() {
@@ -338,6 +360,16 @@
     if (await act("archive_and_wipe", { archivedBy, confirm }, "wipe-problem")) {
       $("wipe-confirm").value = "";
     }
+  });
+
+  $("clear-check").addEventListener("click", () => act("check_public_board", {}, "clear-problem"));
+
+  $("clear-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const clearedBy = $("clear-by").value.trim();
+    const confirm = $("clear-confirm").value.trim();
+    if (!clearedBy || !confirm || !checkedBoard) return;
+    await act("clear_public_board", { boardId: checkedBoard.boardId, clearedBy, confirm }, "clear-problem");
   });
 
   if (!ticket) fail("This dashboard lost its local connection. Reopen it from the Copilot App.");

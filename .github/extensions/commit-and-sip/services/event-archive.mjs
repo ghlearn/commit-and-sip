@@ -7,6 +7,7 @@ import { requireValue } from "../domain.mjs";
 // without touching a disk.
 
 export const WIPE_CONFIRMATION = "wipe";
+export const CLEAR_BOARD_CONFIRMATION = "clear board";
 
 // A run is still the station's business until it is completed. Wiping under an
 // attendee would delete the drink they are looking at, so the count of these

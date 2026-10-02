@@ -49,17 +49,20 @@ export function createLeaderboardClient({ url, boothKey, staffKey = null, timeou
   // Routes are absolute from the origin, whatever path the URL carries.
   const endpoint = path => new URL(`/${path}`, new URL(url).origin).toString();
   const client = {
-    // Which board the service is serving now. A rebuild records it with its
-    // takedown phase, so a later replacement board is not mistaken for it.
-    async boardId() {
+    // Which board the service is serving now, and how much is on it. A
+    // rebuild records the ID with its takedown phase, so a later replacement
+    // board is not mistaken for it.
+    async board() {
       const response = await fetchImpl(endpoint("api/board"), { method: "GET", signal: AbortSignal.timeout(timeoutMs) });
       if (!response.ok) throw await failure(response, "board read");
       const body = await response.json();
       if (typeof body?.boardId !== "string" || !/^[0-9a-f]{32}$/.test(body.boardId)) {
         throw Object.assign(new Error("The leaderboard did not say which board it is serving."), { code: "unexpected_response" });
       }
-      return body.boardId;
+      const count = value => (Number.isSafeInteger(value) && value >= 0 ? value : null);
+      return { boardId: body.boardId, captured: count(body.captured), rebuilding: body.rebuilding === true, total: count(body.total) };
     },
+    async boardId() { return (await client.board()).boardId; },
     async publish(submission) {
       const response = await fetchImpl(endpoint("api/entries"), {
         body: JSON.stringify(submission),
@@ -103,6 +106,21 @@ export function createLeaderboardClient({ url, boothKey, staffKey = null, timeou
         method: "POST", signal: AbortSignal.timeout(timeoutMs),
       });
       if (response.status !== 200) throw await failure(response, "opening");
+    };
+    // Empties the whole public board, for every booth. It names the board
+    // staff checked; the service refuses any other with "board_changed".
+    client.clearBoard = async boardId => {
+      const response = await fetchImpl(endpoint("api/board/clear"), {
+        body: JSON.stringify({ boardId }),
+        headers: { Authorization: `Bearer ${staffKey}`, "Content-Type": "application/json" },
+        method: "POST", signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (response.status !== 200) throw await failure(response, "clear");
+      const body = await response.json();
+      if (typeof body?.boardId !== "string" || !/^[0-9a-f]{32}$/.test(body.boardId) || body.boardId === boardId) {
+        throw Object.assign(new Error("The leaderboard did not confirm the clear."), { code: "unexpected_response", status: 200 });
+      }
+      return body;
     };
   }
   return client;
