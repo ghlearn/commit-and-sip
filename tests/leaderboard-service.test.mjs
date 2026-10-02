@@ -3487,21 +3487,25 @@ test("the board title is sized to stay on one line", async () => {
   assert.match(h1, /white-space: nowrap;/);
   const cqi = Number(/font-size: min\(([\d.]+)cqi, 4\.5rem\);/.exec(h1)?.[1]);
   assert.ok(cqi > 0 && cqi * 19.2 <= 100, `title at ${cqi}cqi fits the header`);
-  // The fallback is a min() of terms in vw, rem, and calc((100vw - Npx) / R).
+  // The fallback is a min() of terms in vw, rem, and calc((Nvw - Npx) / R).
   const fallback = /font-size: min\(((?:[^;()]|\([^;]*?\))*)\);\n\s*font-size: min\([\d.]+cqi/.exec(h1)?.[1];
   assert.ok(fallback, "a vw fallback precedes the cqi size, so container units win where supported");
   const terms = fallback.split(/,\s*(?![^()]*\))/).map(term => {
     let m;
     if ((m = /^([\d.]+)vw$/.exec(term))) return width => Number(m[1]) * width / 100;
     if ((m = /^([\d.]+)rem$/.exec(term))) return () => Number(m[1]) * 16;
-    if ((m = /^calc\(\(100vw - ([\d.]+)px\) \/ ([\d.]+)\)$/.exec(term))) return width => (width - Number(m[1])) / Number(m[2]);
+    if ((m = /^calc\(\(([\d.]+)vw - ([\d.]+)px\) \/ ([\d.]+)\)$/.exec(term))) return width => (Number(m[1]) * width / 100 - Number(m[2])) / Number(m[3]);
     assert.fail(`unrecognised fallback term: ${term}`);
   });
-  // main: max-width 64rem, side padding clamp(16px, 4vw, 48px).
-  for (let width = 200; width <= 4000; width += 2) {
-    const pad = Math.min(48, Math.max(16, 0.04 * width));
-    const content = Math.min(width, 1024) - 2 * pad;
-    const size = Math.min(...terms.map(term => term(width)));
-    assert.ok(size * 19.2 <= content + 1e-9, `fallback fits at ${width}px: ${size * 19.2} > ${content}`);
+  // main: max-width 64rem, side padding clamp(16px, 4vw, 48px). vw counts a
+  // classic vertical scrollbar; main's width does not. Overlay scrollbars
+  // take no room, Windows' classic ones about 17px; allow up to 20px.
+  for (const gutter of [0, 17, 20]) {
+    for (let width = 200; width <= 4000; width += 2) {
+      const pad = Math.min(48, Math.max(16, 0.04 * width));
+      const content = Math.min(width - gutter, 1024) - 2 * pad;
+      const size = Math.min(...terms.map(term => term(width)));
+      assert.ok(size * 19.2 <= content + 1e-9, `fallback fits at ${width}px with a ${gutter}px scrollbar: ${size * 19.2} > ${content}`);
+    }
   }
 });
