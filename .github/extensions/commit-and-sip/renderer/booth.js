@@ -70,8 +70,8 @@
       const item = document.createElement("li");
       const name = document.createElement("strong");
       name.textContent = drink.name;
-      item.append(name, document.createTextNode(
-        `${drink.example ? " - house example" : ""} - ${drink.serving}`));
+      item.append(name);
+      if (drink.example) item.append(document.createTextNode(" - house example"));
       menu.append(item);
     }
     // Both lists are windowed by the engine. Say so where it is trimmed rather
