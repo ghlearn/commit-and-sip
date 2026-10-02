@@ -118,3 +118,13 @@ test("a drink cannot be added without a run and handle to attribute it to", () =
   assert.throws(() => addDrink(null, { rawName: "Mona Mocha", rules, runId: "r", handle: "h" }), { code: "menu_invalid" });
   assert.equal(menu.length, 3, "no failed attempt leaves a partial entry");
 });
+
+// Attendees name the drink; whether it is served hot or cold is not part of
+// the name, so the menu never tacks it on after one.
+test("the booth menu shows a drink's name without its serving", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/booth.js", import.meta.url), "utf8");
+  const fill = source.slice(source.indexOf("function fillMenu"), source.indexOf("const board = $(\"leaderboard\")"));
+  assert.ok(fill.includes("house example"), "found the menu renderer");
+  assert.doesNotMatch(fill, /serving/, "the menu line carries no serving");
+});
