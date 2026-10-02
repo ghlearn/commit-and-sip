@@ -130,7 +130,9 @@ test("the setup docs keep the attendee QR gated on the blocklist review", async 
 test("the operator docs describe the current deployment, not an earlier one", async () => {
   const stale = [/predates (most of )?this document/i, /Redeploy before first use/, /refuses the current booth client/,
     /current booth client does not work/i, /repository it opens is private/, /there is no public QR destination/i,
-    /no attendee-facing QR code points at it/i, /gated on the blocklist review and the service redeploy/];
+    /no attendee-facing QR code points at it/i, /gated on the blocklist review and the service redeploy/,
+    /one such change is waiting/, /change not yet live is the board page's 24 px quiet zone/,
+    /deployer here holds Reader only/, /have not been run against the live service/];
   for (const file of ["../README.md", "../booth/RUNBOOK.md", "../docs/leaderboard-service.md", "../docs/integration-contract.md",
     "../docs/architecture.md", "../.github/images/README.md"]) {
     const text = await readFile(new URL(file, import.meta.url), "utf8");
@@ -154,4 +156,73 @@ test("the readiness sections count exactly the gates they list", async () => {
   const paragraphs = gates.split("\n\n").slice(2).filter(p => p.trim() && !p.startsWith("Not a gate") && !/^The leaderboard service is deployed/.test(p));
   assert.equal(paragraphs.length, words[stated[1]], "contract: one paragraph per stated gate");
   assert.doesNotMatch(gates, /other three gates|Four gates/);
+});
+
+// Opening a fresh board is safe only when no booth still holds takedowns for
+// it to reserve. The runbook may offer the --open shortcut only behind
+// archive and reset on every booth, and must keep the full sequence otherwise.
+test("the runbook opens a fresh board directly only after every booth is archived and reset", async () => {
+  const runbook = await readFile(new URL("../booth/RUNBOOK.md", import.meta.url), "utf8");
+  const fresh = runbook.split("\n").find(line => line.startsWith("| Starting a new event on a fresh board |"));
+  assert.ok(fresh, "the new-event case has its own row");
+  const resetAll = fresh.indexOf("archive and reset) on every booth machine");
+  assert.ok(resetAll >= 0 && resetAll < fresh.indexOf("change `eventId`") && resetAll < fresh.indexOf("republish -- --open"),
+    "reset every booth, then change eventId, then open");
+  assert.match(fresh, /If any booth was not archived and reset, do not take this shortcut/);
+  const carried = runbook.split("\n").find(line => line.startsWith("| Public board lost, or `EVENT_ID` changed while booths still hold the event |"));
+  assert.ok(carried, "the carried-over case keeps its row");
+  const takedowns = carried.indexOf("--takedowns");
+  assert.ok(takedowns >= 0 && takedowns < carried.indexOf("--open") && carried.indexOf("--open") < carried.indexOf("--drinks"), "otherwise: takedowns, then open, then drinks");
+  const start = runbook.indexOf("To start a fresh board for a new event");
+  assert.ok(start >= 0, "the operations section explains a fresh board");
+  const ops = runbook.slice(start, runbook.indexOf("\n\n", start));
+  const reset = ops.indexOf("archive and reset) on every booth machine while the service still serves the old board");
+  assert.ok(reset >= 0 && reset < ops.indexOf("change `eventId`") && reset < ops.indexOf("republish -- --open"),
+    "every booth is reset before eventId changes, and so before the board is opened");
+  assert.match(ops, /If `eventId` was changed before every booth was reset, do not open the new board/);
+  const deploy = runbook.split(/\n\s*\n/).find(block => block.startsWith("Then open `/healthz`."));
+  assert.match(deploy, /archived and reset before `eventId` changed/, "the deploy check does not ask for a reset after the change");
+  assert.doesNotMatch(deploy, /first \*\*archive and reset every booth\*\*/);
+  assert.ok(ops.indexOf("--takedowns") >= 0 && ops.indexOf("--takedowns") < ops.lastIndexOf("--drinks"), "and the full sequence otherwise");
+  assert.doesNotMatch(runbook, /open it with `npm run leaderboard:republish -- --open`/, "no unconditional open");
+});
+
+// Every operator instruction to open a board, in any doc, must be preceded in
+// the same block by its prerequisite: every booth reset, or takedowns first.
+test("no doc tells an operator to open a board before its prerequisite", async () => {
+  const docs = ["../booth/RUNBOOK.md", "../README.md", "../docs/leaderboard-service.md", "../docs/integration-contract.md", "../docs/architecture.md"];
+  let checked = 0;
+  for (const doc of docs) {
+    const text = await readFile(new URL(doc, import.meta.url), "utf8");
+    // Paragraphs are blocks, and so is each table row: one row's prerequisite
+    // must not vouch for an instruction in another row.
+    const blocks = text.split(/\n\s*\n/).flatMap(part => part.split("\n").every(line => line.startsWith("|")) ? part.split("\n") : [part]);
+    for (const block of blocks) {
+      let at = block.indexOf("republish -- --open");
+      while (at >= 0) {
+        checked += 1;
+        const before = block.slice(0, at).toLowerCase();
+        assert.ok(/archive and reset every booth|archive and reset\) on every booth|archived and reset before `eventid` changed|every booth already reset|republish -- --takedowns|`--takedowns`/.test(before),
+          `${doc}: an --open instruction lacks its prerequisite: ${block.slice(Math.max(0, at - 160), at + 40)}`);
+        at = block.indexOf("republish -- --open", at + 1);
+      }
+    }
+  }
+  assert.ok(checked >= 4, `found ${checked} --open instructions`);
+});
+
+// A shared machine's default subscription may be another one, so the runbook
+// names the subscription on every Azure CLI command, fenced or inline.
+test("every az command in the runbook names the subscription", async () => {
+  const runbook = await readFile(new URL("../booth/RUNBOOK.md", import.meta.url), "utf8");
+  const commands = [];
+  for (const [, body] of runbook.matchAll(/```[a-z]*\n([\s\S]*?)```/g)) {
+    commands.push(...body.replace(/\\\n\s*/g, " ").split("\n").filter(line => /^\s*(\$\s*)?az\s/.test(line)));
+  }
+  const prose = runbook.replace(/```[\s\S]*?```/g, "");
+  commands.push(...[...prose.matchAll(/`([^`\n]+)`/g)].map(([, span]) => span).filter(span => /^az\s/.test(span)));
+  assert.ok(commands.length >= 5, `found ${commands.length} az commands`);
+  for (const command of commands) {
+    assert.match(command, /--subscription 6aab8b26-48c5-4cfd-ac82-6b5efcc2e441\b/, command);
+  }
 });

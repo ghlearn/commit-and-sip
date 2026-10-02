@@ -5,7 +5,7 @@
     "location": { "value": "westus2" },
     "resourceGroupName": { "value": "rg-commit-and-sip-lb-westus2" },
     "appName": { "value": "commit-and-sip-leaderboard" },
-    "eventId": { "value": "default" },
+    "eventId": { "value": "universe-2026" },
     "owner": { "value": "arilivigni" }
   }
 }
