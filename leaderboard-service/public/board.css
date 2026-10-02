@@ -51,7 +51,7 @@ header { border-bottom: 6px solid var(--accent); padding-bottom: 0.75em; margin-
    also stops at 3rem. */
 h1 {
   margin: 0.1em 0 0.2em;
-  font-size: min(4.6vw, 3rem);
+  font-size: min(4.6vw, calc((100vw - 32px) / 19.2), 3rem);
   font-size: min(5.2cqi, 4.5rem);
   white-space: nowrap;
   font-weight: 800; line-height: 1.05; letter-spacing: -0.01em;
