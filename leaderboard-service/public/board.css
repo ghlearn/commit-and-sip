@@ -47,8 +47,8 @@ header { border-bottom: 6px solid var(--accent); padding-bottom: 0.75em; margin-
    800 it is up to 18.3em wide in Mona Sans (wider at small sizes) and 18.4em
    in the system fallback, so it is sized for 19.2em: 5.2% of the header's
    width (cqi). The vw line is for browsers without container units: main's
-   side padding is up to 4vw each side, and its 64rem cap is why that line
-   also stops at 3rem. */
+   side padding is up to 4vw each side but never under 16px (the calc term,
+   for the narrowest screens), and its 64rem cap is why it stops at 3rem. */
 h1 {
   margin: 0.1em 0 0.2em;
   font-size: min(4.6vw, calc((100vw - 32px) / 19.2), 3rem);
