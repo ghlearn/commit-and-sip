@@ -3710,11 +3710,14 @@ test("nothing can be served at this booth while its clear is in flight", async t
 test("a clear the service refused says so; one that went unanswered says it may have happened", async t => {
   const directory = await mkdtemp(join(tmpdir(), "sip-clear-outcome-"));
   t.after(() => rm(directory, { force: true, recursive: true }));
+  // Each attempt at its own time: records are named by it and never overwritten.
+  let minute = 0;
   const attempt = async error => {
     const client = { publish: async () => {}, retract: async () => "absent", board: async () => ({}),
       clearBoard: async () => { throw error; } };
     const engine = new BoothEngine({ catalog, rules, store: new RunStore(directory), leaderboardClient: client });
-    return engine.clearPublicBoard({ boardId: "d".repeat(32), clearedBy: "Ari", confirm: "clear board" }).then(() => null, caught => caught);
+    const now = new Date(Date.UTC(2026, 9, 2, 5, minute++)).toISOString();
+    return engine.clearPublicBoard({ boardId: "d".repeat(32), clearedBy: "Ari", confirm: "clear board", now }).then(() => null, caught => caught);
   };
   for (const status of [400, 401, 403, 404]) {
     const error = await attempt(Object.assign(new Error("no"), { code: "unauthorized", status }));
@@ -3744,7 +3747,7 @@ test("a confirmed clear is reported even if the ledger fails to save afterwards,
   const engine = make(async () => ({ boardId: "e".repeat(32), cleared: { captured: 2, total: 1 } }));
   const transaction = engine.store.transaction.bind(engine.store);
   engine.store.transaction = async fn => { await transaction(fn); throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); };
-  const result = await engine.clearPublicBoard(input);
+  const result = await engine.clearPublicBoard({ ...input, now: "2026-10-02T03:30:00.000Z" });
   assert.deepEqual([result.boardId, result.cleared.total], ["e".repeat(32), 1]);
   // A failure before the clear is still a failure.
   engine.store.transaction = async () => { throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); };
@@ -3779,4 +3782,22 @@ test("the in-memory board view is one synchronous read", async () => {
   await store.clearBoard(boardId);
   const seen = await view;
   assert.deepEqual([seen.boardId, seen.captured, seen.entries.length], [boardId, 1, 1]);
+});
+
+test("the dashboard reports a clear that happened even if reading its state afterwards fails", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "sip-clear-panel-"));
+  t.after(() => rm(directory, { force: true, recursive: true }));
+  const engine = new BoothEngine({ catalog, rules, store: new RunStore(directory), leaderboardClient: {
+    publish: async () => {}, retract: async () => "absent", board: async () => ({}),
+    clearBoard: async () => ({ boardId: "e".repeat(32), cleared: { captured: 4, total: 3 } }) } });
+  const panel = new AdminPanel(engine);
+  const overview = engine.adminOverview.bind(engine);
+  let cleared = false;
+  const clear = engine.clearPublicBoard.bind(engine);
+  engine.clearPublicBoard = async input => { const result = await clear(input); cleared = true; return result; };
+  engine.adminOverview = async () => { if (cleared) throw Object.assign(new Error("EIO"), { code: "EIO" }); return overview(); };
+  const state = await panel.dispatch("clear_public_board", { boardId: "d".repeat(32), clearedBy: "Ari", confirm: "clear board" });
+  assert.equal(state.notice.kind, "board_cleared");
+  assert.deepEqual(state.notice.cleared, { captured: 4, total: 3 });
+  assert.equal(panel.busy, false);
 });

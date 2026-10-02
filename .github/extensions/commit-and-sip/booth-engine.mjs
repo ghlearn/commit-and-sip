@@ -512,10 +512,15 @@ export class BoothEngine {
     try {
       return await this.store.transaction(async data => {
         const summary = eventSummary(data);
-        // An empty ledger also means no publication is claimed or on the wire:
-        // every send belongs to a run, and the wipe waited for them.
+        // What this guards is this booth's own records: a booth holding drinks
+        // would have them marked published on a board that no longer shows
+        // them. An empty ledger, archived and reset or never used (a staff
+        // machine that serves no one), holds nothing to make inconsistent.
+        // Other booths are staff's call, as with opening a board. An empty
+        // ledger also means no publication is claimed or on the wire: every
+        // send belongs to a run, and the wipe waited for them.
         requireValue(summary.attendees === 0 && summary.invented === 0 && summary.removals === 0, "event_not_ended",
-          "End the event on this booth first (archive and reset), then clear the public leaderboard. Nothing was changed.", 409);
+          "This booth still holds event records. End the event on this booth first (archive and reset), then clear the public leaderboard. Nothing was changed.", 409);
         // Recorded before the request, because the clear cannot be undone: if this
         // machine cannot write its record, nothing is cleared. A request whose
         // answer never arrives (a timeout) leaves this record as the trace of it.
