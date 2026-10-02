@@ -505,43 +505,61 @@ export class BoothEngine {
     // between the check and the clear: it would be marked published on a board
     // that no longer shows it. Other writers wait for the lock, at most the
     // client's few-second timeout.
-    return this.store.transaction(async data => {
-      const summary = eventSummary(data);
-      // An empty ledger also means no publication is claimed or on the wire:
-      // every send belongs to a run, and the wipe waited for them.
-      requireValue(summary.attendees === 0 && summary.invented === 0 && summary.removals === 0, "event_not_ended",
-        "End the event on this booth first (archive and reset), then clear the public leaderboard. Nothing was changed.", 409);
-      // Recorded before the request, because the clear cannot be undone: if this
-      // machine cannot write its record, nothing is cleared. A request whose
-      // answer never arrives (a timeout) leaves this record as the trace of it.
-      const requested = { boardId, clearedBy: clearedBy.trim(), requestedAt: now, status: "requested" };
-      const requestPath = await this.store.writeArtifact(artifactName("board-clear-requested", now), requested);
-      let result;
-      try { result = await this.leaderboardClient.clearBoard(boardId); }
-      catch (error) {
-        if (error?.code === "board_changed") {
-          throw new DomainError("board_changed", "The public leaderboard changed since you checked it. Check it again before clearing. Nothing was changed.", 409);
+    // The transaction rewrites the (unchanged) ledger as it ends. If only
+    // that fails, the board is still cleared, and saying otherwise would send
+    // staff to retry into board_changed. So a confirmed clear is returned.
+    let confirmed = null;
+    try {
+      return await this.store.transaction(async data => {
+        const summary = eventSummary(data);
+        // An empty ledger also means no publication is claimed or on the wire:
+        // every send belongs to a run, and the wipe waited for them.
+        requireValue(summary.attendees === 0 && summary.invented === 0 && summary.removals === 0, "event_not_ended",
+          "End the event on this booth first (archive and reset), then clear the public leaderboard. Nothing was changed.", 409);
+        // Recorded before the request, because the clear cannot be undone: if this
+        // machine cannot write its record, nothing is cleared. A request whose
+        // answer never arrives (a timeout) leaves this record as the trace of it.
+        const requested = { boardId, clearedBy: clearedBy.trim(), requestedAt: now, status: "requested" };
+        const requestPath = await this.store.writeArtifact(artifactName("board-clear-requested", now), requested);
+        let result;
+        // A definite refusal is recorded too, so a request record with nothing
+        // after it always means the answer never came. Best effort: the
+        // refusal is reported either way.
+        const refused = async code => {
+          await this.store.writeArtifact(artifactName("board-clear-refused", now), { boardId, code, refusedAt: now, requestPath, status: "refused" }).catch(() => {});
+        };
+        try { result = await this.leaderboardClient.clearBoard(boardId); }
+        catch (error) {
+          if (error?.code === "board_changed") {
+            await refused("board_changed");
+            throw new DomainError("board_changed", "The public leaderboard changed since you checked it. Check it again before clearing. Nothing was changed.", 409);
+          }
+          const code = error?.code && error.code !== "unknown" ? ` (${error.code})` : "";
+          // Only the service refusing the request proves nothing happened. A
+          // timeout, a dropped connection, a server error or an answer that does
+          // not read right can all follow a clear that landed.
+          if (Number.isInteger(error?.status) && error.status >= 400 && error.status < 500) {
+            await refused(typeof error.code === "string" && /^[a-z_]{1,40}$/.test(error.code) ? error.code : `http_${error.status}`);
+            throw new DomainError("clear_refused",
+              `The service refused the clear${code}, so the public leaderboard was not cleared. Check this machine's staff key, then check the board again.`, 502);
+          }
+          throw new DomainError("clear_unconfirmed",
+            `The clear could not be confirmed${code}: it may or may not have happened. Check the public leaderboard before doing anything else. The request is recorded in ${requestPath}.`, 502);
         }
-        const code = error?.code && error.code !== "unknown" ? ` (${error.code})` : "";
-        // Only the service refusing the request proves nothing happened. A
-        // timeout, a dropped connection, a server error or an answer that does
-        // not read right can all follow a clear that landed.
-        if (Number.isInteger(error?.status) && error.status >= 400 && error.status < 500) {
-          throw new DomainError("clear_refused",
-            `The service refused the clear${code}, so the public leaderboard was not cleared. Check this machine's staff key, then check the board again.`, 502);
-        }
-        throw new DomainError("clear_unconfirmed",
-          `The clear could not be confirmed${code}: it may or may not have happened. Check the public leaderboard before doing anything else. The request is recorded in ${requestPath}.`, 502);
-      }
-      const record = { boardId: result.boardId, cleared: result.cleared ?? null, clearedAt: now, clearedBy: clearedBy.trim(), previousBoardId: boardId };
-      // The board is already cleared, so a failed write here must not report a
-      // failure: staff would retry and only get board_changed. The request
-      // record written above still says who cleared which board.
-      let path = requestPath;
-      try { path = await this.store.writeArtifact(artifactName("board-cleared", now), { ...record, requestPath }); }
-      catch { /* the request record stands */ }
-      return { ...record, path, requestPath };
-    });
+        const record = { boardId: result.boardId, cleared: result.cleared ?? null, clearedAt: now, clearedBy: clearedBy.trim(), previousBoardId: boardId };
+        // The board is already cleared, so a failed write here must not report a
+        // failure: staff would retry and only get board_changed. The request
+        // record written above still says who cleared which board.
+        let path = requestPath;
+        try { path = await this.store.writeArtifact(artifactName("board-cleared", now), { ...record, requestPath }); }
+        catch { /* the request record stands */ }
+        confirmed = { ...record, path, requestPath };
+        return confirmed;
+      });
+    } catch (error) {
+      if (confirmed) return confirmed;
+      throw error;
+    }
   }
 
   // The counter view: what is on the menu and who is winning. It needs no run,

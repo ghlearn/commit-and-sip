@@ -3731,3 +3731,52 @@ test("a clear the service refused says so; one that went unanswered says it may 
     assert.doesNotMatch(caught.message, /was not cleared/);
   }
 });
+
+test("a confirmed clear is reported even if the ledger fails to save afterwards, and refusals are recorded", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "sip-clear-commit-"));
+  t.after(() => rm(directory, { force: true, recursive: true }));
+  const { readdir } = await import("node:fs/promises");
+  const make = clearBoard => new BoothEngine({ catalog, rules, store: new RunStore(directory),
+    leaderboardClient: { publish: async () => {}, retract: async () => "absent", board: async () => ({}), clearBoard } });
+  const input = { boardId: "d".repeat(32), clearedBy: "Ari", confirm: "clear board" };
+
+  // The board was cleared; only the closing ledger write failed.
+  const engine = make(async () => ({ boardId: "e".repeat(32), cleared: { captured: 2, total: 1 } }));
+  const transaction = engine.store.transaction.bind(engine.store);
+  engine.store.transaction = async fn => { await transaction(fn); throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); };
+  const result = await engine.clearPublicBoard(input);
+  assert.deepEqual([result.boardId, result.cleared.total], ["e".repeat(32), 1]);
+  // A failure before the clear is still a failure.
+  engine.store.transaction = async () => { throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); };
+  await assert.rejects(() => engine.clearPublicBoard(input), { code: "ENOSPC" });
+
+  // A refusal leaves a refused record beside its request; an unanswered one does not.
+  const exports = async () => (await readdir(join(directory, "exports"))).filter(name => name.startsWith("board-clear-")).sort();
+  const before = await exports();
+  await assert.rejects(() => make(async () => { throw Object.assign(new Error("no"), { code: "board_changed", status: 409 }); })
+    .clearPublicBoard({ ...input, now: "2026-10-02T04:00:00.000Z" }), { code: "board_changed" });
+  await assert.rejects(() => make(async () => { throw Object.assign(new Error("no"), { code: "unauthorized", status: 401 }); })
+    .clearPublicBoard({ ...input, now: "2026-10-02T04:01:00.000Z" }), { code: "clear_refused" });
+  await assert.rejects(() => make(async () => { throw Object.assign(new Error("t"), { name: "TimeoutError" }); })
+    .clearPublicBoard({ ...input, now: "2026-10-02T04:02:00.000Z" }), { code: "clear_unconfirmed" });
+  const added = (await exports()).filter(name => !before.includes(name));
+  assert.deepEqual(added, [
+    "board-clear-refused-2026-10-02T04-00-00-000Z.json", "board-clear-refused-2026-10-02T04-01-00-000Z.json",
+    "board-clear-requested-2026-10-02T04-00-00-000Z.json", "board-clear-requested-2026-10-02T04-01-00-000Z.json",
+    "board-clear-requested-2026-10-02T04-02-00-000Z.json",
+  ], "only the unanswered request stands alone");
+  const refusal = JSON.parse(await readFile(join(directory, "exports", added[1]), "utf8"));
+  assert.deepEqual([refusal.status, refusal.code], ["refused", "unauthorized"]);
+});
+
+test("the in-memory board view is one synchronous read", async () => {
+  const store = new MemoryStore();
+  await store.admit({ createdAt: "2026-10-01T00:00:00.000Z", handle: HANDLE, id: "mona-latte-two", name: "Mona Latte Two", score: 1000 },
+    { fingerprint: "a".repeat(64), handles: [HANDLE] });
+  const { boardId } = await store.state();
+  // Started before a clear, finished after it: it must describe one board.
+  const view = store.view();
+  await store.clearBoard(boardId);
+  const seen = await view;
+  assert.deepEqual([seen.boardId, seen.captured, seen.entries.length], [boardId, 1, 1]);
+});

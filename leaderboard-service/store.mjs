@@ -92,7 +92,11 @@ export class MemoryStore {
   // The board and what names it, from one read. A board ID read apart from
   // its entries could belong to a board cleared in between, and a clear that
   // names it would erase a board nobody looked at.
-  async view() { return { ...(await this.state()), entries: await this.list() }; }
+  // Taken synchronously, so no write can land part-way through it.
+  async view() {
+    return { boardId: this.boardId, captured: this.captured, closed: Boolean(this.closed),
+      entries: [...this.entries.values()].map(entry => ({ ...entry })) };
+  }
 
   // Opening is a staff decision: every booth has replayed its takedowns.
   async openBoard() { this.closed = false; }
