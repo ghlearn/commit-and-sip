@@ -3474,3 +3474,26 @@ test("the board page carries the event title and shows the captured count", asyn
   assert.match(html, /<span id="captured-label">drink names captured so far<\/span>/, "attendees invent names, so the count is of names");
   assert.match(script, /board\.captured === 1 \? "drink name captured so far" : "drink names captured so far"/);
 });
+
+// The title must fit on one line at every width. Measured in Chromium at
+// weight 800 it is up to 18.3em wide in Mona Sans and 18.4em in the system
+// fallback; 19.2em leaves about 4% headroom. So its size may be at most
+// 100/19.2 of the header's width, and the vw fallback must fit main's content
+// box at every viewport width.
+test("the board title is sized to stay on one line", async () => {
+  const css = await readFile(new URL("../leaderboard-service/public/board.css", import.meta.url), "utf8");
+  assert.match(css, /header \{[^}]*container-type: inline-size;/, "the header is the size container");
+  const h1 = /\nh1 \{([^}]*)\}/.exec(css)[1];
+  assert.match(h1, /white-space: nowrap;/);
+  const cqi = Number(/font-size: min\(([\d.]+)cqi, 4\.5rem\);/.exec(h1)?.[1]);
+  assert.ok(cqi > 0 && cqi * 19.2 <= 100, `title at ${cqi}cqi fits the header`);
+  const [, vw, rem] = /font-size: min\(([\d.]+)vw, ([\d.]+)rem\);/.exec(h1).map(Number);
+  assert.ok(h1.indexOf("vw,") < h1.indexOf("cqi,"), "the vw fallback comes first, so container units win where supported");
+  // main: max-width 64rem, side padding clamp(16px, 4vw, 48px).
+  for (let width = 280; width <= 4000; width += 10) {
+    const pad = Math.min(48, Math.max(16, 0.04 * width));
+    const content = Math.min(width, 1024) - 2 * pad;
+    const size = Math.min(vw * width / 100, rem * 16);
+    assert.ok(size * 19.2 <= content, `fallback fits at ${width}px: ${size * 19.2} > ${content}`);
+  }
+});
