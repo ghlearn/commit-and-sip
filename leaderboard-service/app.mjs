@@ -130,9 +130,8 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
 
   const routes = {
     async "GET /api/board"(request, url) {
-      const entries = await store.list();
+      const { boardId, captured, closed, entries } = await store.view();
       const board = leaderboard(entries);
-      const { boardId, captured, closed } = await store.state();
       const body = { asOf: now().toISOString(), boardId, entries: board.slice(0, BOARD_SIZE).map(publicRow),
         captured, rebuilding: closed, total: board.length };
       const handle = url.searchParams.get("handle");

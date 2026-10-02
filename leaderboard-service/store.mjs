@@ -89,6 +89,11 @@ export class MemoryStore {
   // takedowns onto from a later replacement.
   async state() { return { boardId: this.boardId, captured: this.captured, closed: Boolean(this.closed) }; }
 
+  // The board and what names it, from one read. A board ID read apart from
+  // its entries could belong to a board cleared in between, and a clear that
+  // names it would erase a board nobody looked at.
+  async view() { return { ...(await this.state()), entries: await this.list() }; }
+
   // Opening is a staff decision: every booth has replayed its takedowns.
   async openBoard() { this.closed = false; }
 
@@ -614,6 +619,12 @@ export class FileStore extends MemoryStore {
       await copyFile(this.file, this.file.replace(/\.json$/, `.cleared-${stamp}.json`), constants.COPYFILE_EXCL);
       return super.clearBoard(expectedBoardId);
     });
+  }
+
+  async view() {
+    await this.queue;
+    const { boardId, captured, closed, entries } = await this.snapshot();
+    return { boardId, captured, closed: Boolean(closed), entries: [...entries.values()].map(entry => ({ ...entry })) };
   }
 
   // From disk, like every read, so every instance agrees on it.
