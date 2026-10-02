@@ -504,6 +504,11 @@ export class BoothEngine {
     const summary = eventSummary(await this.store.read());
     requireValue(summary.attendees === 0 && summary.invented === 0 && summary.removals === 0, "event_not_ended",
       "End the event on this booth first (archive and reset), then clear the public leaderboard. Nothing was changed.", 409);
+    // Recorded before the request, because the clear cannot be undone: if this
+    // machine cannot write its record, nothing is cleared. A request whose
+    // answer never arrives (a timeout) leaves this record as the trace of it.
+    const requested = { boardId, clearedBy: clearedBy.trim(), requestedAt: now, status: "requested" };
+    const requestPath = await this.store.writeArtifact(artifactName("board-clear-requested", now), requested);
     let result;
     try { result = await this.leaderboardClient.clearBoard(boardId); }
     catch (error) {
@@ -514,8 +519,13 @@ export class BoothEngine {
         `The public leaderboard was not cleared${error?.code && error.code !== "unknown" ? ` (${error.code})` : ""}. Check this machine's connection and keys, then check the board again.`, 502);
     }
     const record = { boardId: result.boardId, cleared: result.cleared ?? null, clearedAt: now, clearedBy: clearedBy.trim(), previousBoardId: boardId };
-    const path = await this.store.writeArtifact(artifactName("board-cleared", now), record);
-    return { ...record, path };
+    // The board is already cleared, so a failed write here must not report a
+    // failure: staff would retry and only get board_changed. The request
+    // record written above still says who cleared which board.
+    let path = requestPath;
+    try { path = await this.store.writeArtifact(artifactName("board-cleared", now), { ...record, requestPath }); }
+    catch { /* the request record stands */ }
+    return { ...record, path, requestPath };
   }
 
   // The counter view: what is on the menu and who is winning. It needs no run,

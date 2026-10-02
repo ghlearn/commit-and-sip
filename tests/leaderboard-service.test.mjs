@@ -3633,3 +3633,41 @@ test("the dashboard clears the public board only after this booth's event has en
   await assert.rejects(() => boothOnly.publicBoard(), { code: "staff_key_required" });
   await assert.rejects(() => boothOnly.clearPublicBoard({ boardId: after.boardId, clearedBy: "Ari", confirm: "clear board" }), { code: "staff_key_required" });
 });
+
+test("a clear is recorded before the board is touched, and a late record failure is not reported as a failed clear", async t => {
+  const { url } = await service(t);
+  const directory = await mkdtemp(join(tmpdir(), "sip-clear-record-"));
+  t.after(() => rm(directory, { force: true, recursive: true }));
+  const store = new RunStore(directory);
+  const engine = new BoothEngine({ catalog, rules, store,
+    leaderboardClient: createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url }) });
+  assert.equal((await post(url, submission("Mona Moonrise Mocha"))).status, 201);
+  const { boardId } = await engine.publicBoard();
+  const write = store.writeArtifact.bind(store);
+
+  // No record, no clear.
+  store.writeArtifact = async () => { throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); };
+  await assert.rejects(() => engine.clearPublicBoard({ boardId, clearedBy: "Ari", confirm: "clear board" }), { code: "ENOSPC" });
+  assert.equal((await board(url)).total, 1, "the board is untouched when the request cannot be recorded");
+
+  // The request record lands, the completion record does not: still a clear.
+  let writes = 0;
+  store.writeArtifact = async (name, payload) => {
+    writes += 1;
+    if (writes === 2) throw Object.assign(new Error("disk full"), { code: "ENOSPC" });
+    return write(name, payload);
+  };
+  const result = await engine.clearPublicBoard({ boardId, clearedBy: "Ari", confirm: "clear board" });
+  assert.equal((await board(url)).total, 0);
+  assert.equal(result.path, result.requestPath, "the request record stands in for the missing one");
+  const requested = JSON.parse(await readFile(result.requestPath, "utf8"));
+  assert.deepEqual([requested.status, requested.boardId, requested.clearedBy], ["requested", boardId, "Ari"]);
+  assert.match(result.requestPath, /board-clear-requested-/);
+
+  // Normally both are written, and the completion names the request.
+  store.writeArtifact = write;
+  assert.equal((await post(url, submission("Ducky Dawn Drizzle"))).status, 201);
+  const next = await engine.clearPublicBoard({ boardId: (await engine.publicBoard()).boardId, clearedBy: "Ari", confirm: "clear board", now: "2026-10-02T03:00:00.000Z" });
+  assert.match(next.path, /board-cleared-2026-10-02T03-00-00-000Z\.json$/);
+  assert.equal(JSON.parse(await readFile(next.path, "utf8")).requestPath, next.requestPath);
+});
