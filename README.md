@@ -44,6 +44,74 @@ Already in place:
 
 The earlier pull-request review flow, its live and canvas-pilot modes, and its provisioning scripts have been removed. No code path in this repository reads or writes GitHub.
 
+## Run Commit & Sip in the GitHub Copilot App
+
+A booth runs three panels side by side in the GitHub Copilot App: the attendee canvas, the staff canvas, and a browser canvas showing the shared leaderboard. Staff set this up; attendees only ever touch the attendee canvas.
+
+### Before you start
+
+You need:
+
+- A GitHub account with a Copilot plan, or your own model provider configured in the App.
+- [Git](https://github.com/git-guides/install-git).
+- Node.js 22 or newer. The pinned version is in [`.nvmrc`](.nvmrc).
+- For Copilot Business or Copilot Enterprise, the organization's **GitHub Copilot app** policy must stay enabled. It is on by default and is separate from the Copilot CLI policy.
+
+### Install the GitHub Copilot App
+
+1. Go to the [GitHub Copilot app download page](https://github.com/features/ai/github-app) and download the build for your operating system. Direct links: [macOS (Apple silicon)](https://gh.io/copilot-app-mac), [macOS (Intel)](https://gh.io/copilot-app-mac-intel), [Windows (x64)](https://gh.io/copilot-app-win64), [Windows (Arm)](https://gh.io/copilot-app-win-arm), [Linux](https://gh.io/copilot-app-linux).
+2. Install it as you would any desktop app. On macOS, open the downloaded disk image and drag the App into **Applications**. On Windows, run the installer.
+3. Open the GitHub Copilot App and click **Sign in to GitHub**, then follow the prompts in your browser. If you use GitHub Enterprise Cloud with data residency, choose **Use GitHub Enterprise** and enter your `*.ghe.com` hostname. GitHub Enterprise Server is not supported.
+4. If you have no Copilot plan, choose whether to sign up for one or continue with your own model provider.
+5. When you're asked to pick repositories, you can select `ghlearn/commit-and-sip` now or skip and add it in the next section. Choose a theme to finish onboarding.
+
+See [Getting started with the GitHub Copilot app](https://docs.github.com/en/copilot/get-started/quickstart-copilot-app) for the full walkthrough.
+
+### Add Commit & Sip as a project
+
+1. In the App sidebar, next to **Projects**, click **+**.
+2. Under **Add project from**, choose **GitHub repository** and pick `ghlearn/commit-and-sip`, or choose **Repository URL** and enter `https://github.com/ghlearn/commit-and-sip`. If you've already cloned it, choose **Local folder or repository** and select that folder.
+3. Once the project appears under **Projects**, click **+** next to it to start a new session. Pick **Interactive** from the mode dropdown under the prompt box.
+4. Install development dependencies once on the booth machine, so the QR encoder is available. From the repository root in a terminal, or by asking Copilot in the session to run them:
+
+   ```sh
+   nvm use
+   npm ci
+   ```
+
+The Commit & Sip canvases ship with the repository as a project canvas extension in [`.github/extensions/commit-and-sip/`](.github/extensions/commit-and-sip/). There's no plugin to install from **Customize**, and no SDK package to add; the App loads the extension from the project.
+
+### Open the canvases
+
+Canvases open in the App's right side panel. Type each request into the session's prompt box.
+
+1. **Load the extension.** Ask Copilot:
+
+   > Reload extensions and list them.
+
+   Confirm the project extension `commit-and-sip` shows as **running**. If it is missing or failed, ask Copilot to show its log before continuing. A moderation warning on start means the blocklist is still unreviewed.
+2. **Open the attendee canvas.** Ask Copilot to open the `commit-and-sip` canvas with no input. The counter opens idle with **Start my order** and the house menu.
+
+   ![Commit & Sip attendee canvas at rest, showing How it works, the Start my order button, and the house menu with its three house examples.](.github/images/copilot-app/booth-attendee-canvas.png)
+
+3. **Open the staff canvas.** Ask Copilot to open the `commit-and-sip-admin` canvas with no input. It shows event totals, station health, export, takedown, and end-of-event controls. Keep it off the attendee-facing screen: it shows staff names and removal reasons, and it can erase the event.
+
+   ![Commit & Sip booth staff dashboard showing event totals, station health, and the export results form.](.github/images/copilot-app/booth-staff-canvas.png)
+
+4. **Open the leaderboard.** Ask Copilot to open a browser canvas at <https://gh.io/commit-and-sip-leader>. The short link redirects to the live leaderboard service, which ranks every booth's drinks by score.
+
+   ![Commit & Sip leaderboard in a browser canvas, showing the drink count, a ranked table of drinks and scores, and the How this was built panel with a QR code to the repository.](.github/images/copilot-app/leaderboard-browser-canvas.png)
+
+To open all three at once, ask Copilot:
+
+> Open the Commit & Sip attendee canvas, the Commit & Sip staff canvas, and a browser canvas at https://gh.io/commit-and-sip-leader.
+
+If Copilot reports that no canvas matches `commit-and-sip`, the extension has not loaded yet: reload extensions, confirm it is running, then ask again. Make sure the session was started from the project under **Projects**, not from **Chats**: the extension lives in the repository, and a chat has no project checkout.
+
+Reopening a panel reads saved state, so closing one never resets the booth. Opening the leaderboard on a booth screen does not turn on the attendee QR code; that is still gated on `leaderboardUrl` (see [staff configuration](#staff-configuration-and-data)).
+
+The screenshots are the canvas pages captured with Playwright, not the surrounding App window. The barista handle on the leaderboard is blurred.
+
 ## Staff: open the booth
 
 Staff need Node.js 22 or newer and a Copilot App/CLI build supporting project canvas extensions. The pinned version lives in `.nvmrc`; run `nvm use` before npm scripts. Open this repository in that host.
