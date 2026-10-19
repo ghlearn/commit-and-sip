@@ -1,6 +1,8 @@
 # Authentic images and QR release checklist
 
-No App screenshots are supplied yet. Do not fabricate them, reuse unrelated product screenshots, or present canvas artwork as evidence of native App UI.
+No native App window screenshots are supplied yet. Do not fabricate them, reuse unrelated product screenshots, or present canvas artwork as evidence of native App UI.
+
+`copilot-app/` holds Playwright captures of the canvas pages only, used by the main README's setup steps: the idle attendee canvas, the staff dashboard (cropped above the local saved-files path), and the public leaderboard with barista handles blurred. Recapture them from a booth with no real attendee data.
 
 ## Three captures to obtain
 
