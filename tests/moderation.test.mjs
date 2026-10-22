@@ -67,6 +67,12 @@ test("a possessive is not joined to its neighbours in word mode", () => {
   for (const name of ["Mona S Hard", "Mona s-h-a-r-d", "Mona 's hard", "Mona la'ss", "Mona Lass's Brew"]) {
     assert.ok(findBlockedTerm(name, shaped), `${name} should be blocked`);
   }
+  // A term split around a possessive keeps its inner "s" ("ba's tard").
+  const inner = validateBlocklist({ review: { placeholder: true }, entries: [{ term: "toast", match: "word" }] });
+  for (const name of ["Mona toa's t", "Mona to a's t Latte", "Mona Toast's Brew"]) {
+    assert.ok(findBlockedTerm(name, inner), `${name} should be blocked`);
+  }
+  assert.equal(findBlockedTerm("Mona Toa's Brew", inner), null, "a possessive ending a run adds nothing");
 });
 
 test("a blocklist must declare provenance and a usable match mode", () => {

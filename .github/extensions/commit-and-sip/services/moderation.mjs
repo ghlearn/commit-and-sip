@@ -23,13 +23,17 @@ export function canonicalizeForMatch(text) {
 }
 
 // Word mode needs the separators the joined form throws away. A possessive
-// "'s" attached to a word is dropped first: left as its own "s" token, the
-// run-joining in word mode would read "Mona's Hit" as "s"+"hit" or "Pi's" as
-// "pi"+"s". Only an "'s" glued to a preceding letter or digit and ending the
-// word counts, so a spaced-out "'s hit" or "pi'ss" is still caught.
+// "'s" glued to the end of a word stays attached to that word rather than
+// becoming its own "s" token, which run-joining would read as "s"+"hit" in
+// "Mona's Hit" or "pi"+"s" in "Pi's". Only "'s" directly after a letter or
+// digit and ending the word counts, so "'s hit" and "pi'ss" are unaffected.
+function wordTokens(text) {
+  return [...fold(text).matchAll(/[a-z0-9]+('s(?![a-z0-9]))?/g)]
+    .map(([whole, possessive]) => ({ text: collapse(possessive ? whole.slice(0, -2) : whole), possessive: Boolean(possessive) }));
+}
+
 export function matchTokens(text) {
-  return fold(text).replace(/(?<=[a-z0-9])'s(?![a-z0-9])/g, "")
-    .split(/[^a-z0-9]+/).filter(Boolean).map(collapse);
+  return wordTokens(text).map(token => token.text);
 }
 
 export function validateBlocklist(list) {
@@ -80,7 +84,7 @@ export function blocklistStatus(list) {
 export function findBlockedTerm(name, list) {
   if (!list?.entries?.length) return null;
   const joined = canonicalizeForMatch(name);
-  const tokens = matchTokens(name);
+  const tokens = wordTokens(name);
   for (const entry of list.entries) {
     const term = canonicalizeForMatch(entry.term);
     if (entry.match === "substring" ? joined.includes(term) : matchesWholeWords(tokens, term)) return entry;
@@ -92,12 +96,15 @@ export function findBlockedTerm(name, list) {
 // term is trivially evaded by spacing it out, which turns it into many
 // one-letter tokens, so a run of consecutive tokens counts as one word when it
 // joins to exactly the term. "g r i n d" is caught; "Grinder" is still not.
+// A possessive's "s" counts only once the run continues past its word, so a
+// term split around it ("ba's tard") is caught, but "Pi's" alone is just "pi".
 function matchesWholeWords(tokens, term) {
   for (let start = 0; start < tokens.length; start += 1) {
     let joined = "";
     for (let end = start; end < tokens.length; end += 1) {
-      joined = collapse(joined + tokens[end]);
+      joined = collapse(joined + tokens[end].text);
       if (joined === term) return true;
+      if (tokens[end].possessive) joined = collapse(`${joined}s`);
       if (joined.length > term.length) break;
     }
   }
