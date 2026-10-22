@@ -1,5 +1,7 @@
 # Commit & Sip booth runbook
 
+For an at-a-glance reference during a shift, use the [Booth staff cheat sheet](CHEAT-SHEET.md).
+
 **The booth runs entirely in the canvas.** Attendees never open GitHub, a terminal, or an editor. Commands below are staff-only and run from the repository root unless stated otherwise.
 
 **Not event-ready.** The moderation blocklist is an unreviewed placeholder, and brand review has not happened. The leaderboard service is live and accepts the current booth client, and every booth's attendee QR points at <https://gh.io/commit-and-sip-leader> by default, so until the blocklist is reviewed, staff takedown is the main moderation of names on the public page. See those sections before running a public booth.

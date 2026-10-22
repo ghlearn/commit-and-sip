@@ -179,6 +179,27 @@ test("every prompt in the README's App walkthrough is fenced, so it has a copy b
   }
 });
 
+test("the staff cheat sheet is linked, uses copyable prompts, and matches the attendee controls", async () => {
+  const [sheet, readme, runbook] = await Promise.all(
+    ["../booth/CHEAT-SHEET.md", "../README.md", "../booth/RUNBOOK.md"]
+      .map(file => readFile(new URL(file, import.meta.url), "utf8")));
+  const { DEFAULT_LEADERBOARD_URL } = await import("../.github/extensions/commit-and-sip/domain.mjs");
+  const prompts = [...sheet.matchAll(/^```text\n([^\n]+)\n```$/gm)].map(([, prompt]) => prompt);
+  assert.deepEqual(prompts, [
+    "Reload extensions and list them.",
+    `Open the commit-and-sip canvas with no input and a browser canvas at ${DEFAULT_LEADERBOARD_URL}.`,
+    "Open the commit-and-sip-admin canvas with no input.",
+    "Show the log for the commit-and-sip extension.",
+  ]);
+  for (const id of ["begin", "name-submit", "finish", "booth-retry"]) {
+    const label = new RegExp(`<button id="${id}"[^>]*>([^<]+)</button>`).exec(boothHtml)?.[1];
+    assert.ok(label, `${id}: an attendee control exists`);
+    assert.ok(sheet.includes(`**${label}**`), `${id}: the cheat sheet uses the visible label`);
+  }
+  assert.match(readme, /\[Booth staff cheat sheet\]\(booth\/CHEAT-SHEET\.md\)/);
+  assert.match(runbook, /\[Booth staff cheat sheet\]\(CHEAT-SHEET\.md\)/);
+});
+
 // Status statements go stale silently. These are the ones that were once true
 // and are not now: the live build refusing the client, a private repository,
 // no public destination at all. None may come back into the operator docs.
@@ -189,7 +210,7 @@ test("the operator docs describe the current deployment, not an earlier one", as
     /one such change is waiting/, /change not yet live is the board page's 24 px quiet zone/,
     /deployer here holds Reader only/, /have not been run against the live service/,
     /leave it unset until/i, /stays unset until the blocklist/i, /Leaderboard QR — not generated yet/];
-  for (const file of ["../README.md", "../booth/RUNBOOK.md", "../docs/leaderboard-service.md", "../docs/integration-contract.md",
+  for (const file of ["../README.md", "../booth/RUNBOOK.md", "../booth/CHEAT-SHEET.md", "../docs/leaderboard-service.md", "../docs/integration-contract.md",
     "../docs/architecture.md", "../.github/images/README.md"]) {
     const text = await readFile(new URL(file, import.meta.url), "utf8");
     for (const phrase of stale) assert.doesNotMatch(text, phrase, `${file}: ${phrase}`);
@@ -246,7 +267,7 @@ test("the runbook opens a fresh board directly only after every booth is archive
 // Every operator instruction to open a board, in any doc, must be preceded in
 // the same block by its prerequisite: every booth reset, or takedowns first.
 test("no doc tells an operator to open a board before its prerequisite", async () => {
-  const docs = ["../booth/RUNBOOK.md", "../README.md", "../docs/leaderboard-service.md", "../docs/integration-contract.md", "../docs/architecture.md"];
+  const docs = ["../booth/RUNBOOK.md", "../booth/CHEAT-SHEET.md", "../README.md", "../docs/leaderboard-service.md", "../docs/integration-contract.md", "../docs/architecture.md"];
   let checked = 0;
   for (const doc of docs) {
     const text = await readFile(new URL(doc, import.meta.url), "utf8");
