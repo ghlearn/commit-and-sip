@@ -54,7 +54,7 @@ The leaderboard destination is <https://gh.io/commit-and-sip-leader>, and every 
 
 Entries declare `substring` or `word`. Substring mode rejects the fragment anywhere; word mode requires the term to consume whole words so a real list does not reject `Grinder` for containing `grind`. Word mode also joins runs of consecutive tokens, because tokenizing alone would let a spaced-out term evade it: that flaw was caught by its own test rather than shipped.
 
-`booth/blocked-terms.json` is an explicit placeholder. `validateBlocklist` enforces structure and provenance, while `blocklistStatus` reports readiness separately, so a placeholder still loads and the booth still runs, but never claims approval. The extension logs a warning naming the gap on every booth start. Nothing here certifies a list as adequate; that remains a human decision recorded in the file's `review` block.
+`booth/blocked-terms.json` holds a short list reviewed on 2026-10-22. `validateBlocklist` enforces structure and provenance, while `blocklistStatus` reports readiness separately, so a placeholder or unreviewed list still loads and the booth still runs, but never claims approval. Whenever the list is unreviewed, the extension logs a warning naming the gap on every booth start. Nothing here certifies a list as adequate; that remains a human decision recorded in the file's `review` block.
 
 This is the only moderation list. A second flat `blockedTerms` array in `booth/name-rules.json` was removed: it matched by plain substring with no evasion resistance and no word mode, and the runbook's review procedure never mentioned it, so a reviewer could complete that procedure and leave a second list untouched. The key is now rejected at start-up rather than ignored.
 

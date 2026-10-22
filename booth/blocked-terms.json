@@ -211,7 +211,17 @@
     },
     {
       "term": "porn",
-      "match": "substring",
+      "match": "word",
+      "note": "2; word: substring would refuse Vapor Noir; inflections listed below"
+    },
+    {
+      "term": "porno",
+      "match": "word",
+      "note": "2"
+    },
+    {
+      "term": "pornstar",
+      "match": "word",
       "note": "2"
     },
     {
@@ -231,7 +241,12 @@
     },
     {
       "term": "dildo",
-      "match": "substring",
+      "match": "word",
+      "note": "2; word: substring would refuse Dill Donut; inflections listed below"
+    },
+    {
+      "term": "dildos",
+      "match": "word",
       "note": "2"
     },
     {
@@ -241,17 +256,32 @@
     },
     {
       "term": "jizz",
-      "match": "substring",
-      "note": "2"
+      "match": "word",
+      "note": "2; word: substring would refuse Fuji Zest"
     },
     {
       "term": "slut",
-      "match": "substring",
+      "match": "word",
+      "note": "2; word: substring would refuse Mona's Lute; inflections listed below"
+    },
+    {
+      "term": "sluts",
+      "match": "word",
+      "note": "2"
+    },
+    {
+      "term": "slutty",
+      "match": "word",
       "note": "2"
     },
     {
       "term": "whore",
-      "match": "substring",
+      "match": "word",
+      "note": "2; word: substring would refuse Who Red; inflections listed below"
+    },
+    {
+      "term": "whores",
+      "match": "word",
       "note": "2"
     },
     {
@@ -280,8 +310,13 @@
     },
     {
       "term": "asshole",
-      "match": "substring",
-      "note": "2; ass alone is compared as as, so it is not listed"
+      "match": "word",
+      "note": "2; word: substring would refuse Cash Ole; inflections listed below; ass alone is compared as as, so it is not listed"
+    },
+    {
+      "term": "assholes",
+      "match": "word",
+      "note": "2"
     },
     {
       "term": "bitch",

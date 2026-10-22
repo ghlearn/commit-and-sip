@@ -125,10 +125,11 @@ Real defects have reached a fully green suite and been caught only in a browser:
 ## Release evidence still needed
 
 1. Authentic App captures and a keyboard, touch, and accessibility walkthrough.
-2. A reviewed moderation blocklist, approved by a human before any public booth use.
-3. A deployed leaderboard service and a real public QR destination, verified by scanning from a phone.
-4. Brand and trademark review of the mascot names and artwork.
-5. A decision on public template visibility.
+2. A deployed leaderboard service and a real public QR destination, verified by scanning from a phone.
+3. Brand and trademark review of the mascot names and artwork.
+4. A decision on public template visibility.
+
+The moderation blocklist was reviewed and approved on 2026-10-22; it needs re-review before each event rather than first-time approval.
 
 Passing local tests is not acceptance evidence for any of these.
 

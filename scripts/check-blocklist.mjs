@@ -35,7 +35,8 @@ const VOCABULARY = [
 // innocent words: "8-bit Chai" is compared as "bitchai".
 export const EDGE_NAMES = [
   "Copilot 8-bit Chai", "Ducky Bit Chocolate", "Mona Rabbit Chai",
-  "Mona Con Leche", "Bob's Cold Brew"
+  "Mona Con Leche", "Bob's Cold Brew", "Copilot Vapor Noir", "Mona Fuji Zest",
+  "Dill Donut Latte", "Mona's Lute", "Doctor Who Red Eye", "Cash Ole Mocha"
 ];
 
 function corpus(mascots, houseNames) {
