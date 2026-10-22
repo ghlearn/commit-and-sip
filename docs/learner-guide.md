@@ -12,7 +12,7 @@ Type your name and choose **Add it to the menu**. The menu is first come, first 
 
 A deterministic local rubric scores the name out of 5,000 and shows the breakdown. The same name always earns the same score, and no model writes your feedback. Most invented names land well short of the maximum, so a mid-range score is a normal result.
 
-Your drink then joins the house menu and the leaderboard, and equal scores share a rank. When a leaderboard destination is configured the canvas shows a scannable code and link; no public destination is currently deployed, and nothing is invented to fill that space. Finally, choose **I'm done - hand over to the next barista** to clear the counter. Your drink and your entry stay.
+Your drink then joins the house menu and the leaderboard, and equal scores share a rank. The leaderboard is at <https://gh.io/commit-and-sip-leader>, but a QR appears only when staff configure a destination. Public attendee use remains gated on the moderation review; if no approved destination is configured, the canvas shows no code. A staff-testing QR is not approval for public use. Finally, choose **I'm done - hand over to the next barista** to clear the counter. Your drink and your entry stay.
 
 ## Resume and recovery
 

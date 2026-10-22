@@ -34,7 +34,7 @@ A mid-range score is a normal result. Most invented names land well below the ma
 
 Your drink joins the house menu and the leaderboard for the rest of the event. Equal scores share a rank.
 
-When a leaderboard destination is configured, the station shows a scannable code and a link to your place on it. If no destination is configured, no code is shown; nothing is invented to fill the space.
+The leaderboard is at <https://gh.io/commit-and-sip-leader>. When a leaderboard destination is configured, the station shows a scannable code and a link to your place on it. If no destination is configured, no code is shown; nothing is invented to fill the space.
 
 Choose I'm done - hand over to the next barista. That clears the counter for the next person. Your drink stays on the menu and your entry stays on the leaderboard; only the station is reset.
 

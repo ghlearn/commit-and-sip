@@ -46,7 +46,7 @@ A receipt is accepted only when its handle, ID, name, and score match what was s
 
 `syncView` keeps two facts apart that are easy to conflate: the booth standing is local and the booth owns it, while an event rank exists only once the service confirms it. Until then the canvas says the place is still being confirmed, and the booth rank is labelled "at this booth" so it cannot be read as an event-wide placing.
 
-The leaderboard destination is unresolved. `leaderboardUrl` stays null unless staff configure an approved destination, and no link or QR is invented. `BoothEngine` refuses a non-web `leaderboardUrl` at construction rather than rendering a code that scans to nothing, exposes `attendeeUrl` only after the attendee has played, and leaves it null when nothing is configured. The existing requirement for an approved publicly reachable HTTPS destination and a real issue-renderable QR asset is unchanged.
+The leaderboard destination is <https://gh.io/commit-and-sip-leader>. `leaderboardUrl` stays null unless staff configure an approved destination, and no link or QR is invented. Public attendee use remains gated on the blocklist review. `BoothEngine` refuses a non-web `leaderboardUrl` at construction rather than rendering a code that scans to nothing, exposes `attendeeUrl` only after the attendee has played, and leaves it null when nothing is configured. The requirement for an approved publicly reachable HTTPS destination and a real scannable QR is unchanged.
 
 ### Moderation
 

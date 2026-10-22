@@ -46,7 +46,7 @@ Most invented names land well short of 5,000. Say so before the score appears, s
 
 The drink joins the house menu and the leaderboard for the rest of the event, and equal scores share a rank. Completion releases only the station; the entry stays.
 
-No public leaderboard destination is currently deployed. When one is configured, the canvas renders a real scannable code from that verified destination. When it is not, no code is shown. Do not invent a URL, describe a placeholder as a production code, or tell an attendee to scan something that resolves to nothing.
+The leaderboard is at <https://gh.io/commit-and-sip-leader>, but QR display is separately controlled by staff configuration. For public attendee use, keep `leaderboardUrl` unset until the blocklist review is complete; the documented staff-testing exception does not clear that gate. When a destination is configured, the canvas renders a real scannable code from it. When it is not, no code is shown. Do not invent a URL, describe a placeholder as a production code, or tell an attendee to scan something that resolves to nothing.
 
 Confirm the counter is clear and showing the thank-you message before inviting the next attendee.
 

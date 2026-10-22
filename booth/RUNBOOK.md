@@ -36,7 +36,7 @@ The booth reads one optional ignored file, `booth/local-config.json`, with two i
 ```json
 {
   "leaderboardApi": {"url": "https://<app>.azurewebsites.net", "boothKey": "<64 hex>", "staffKey": "<64 hex>"},
-  "leaderboardUrl": "https://<app>.azurewebsites.net/"
+  "leaderboardUrl": "https://gh.io/commit-and-sip-leader"
 }
 ```
 
