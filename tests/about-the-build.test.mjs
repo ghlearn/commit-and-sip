@@ -150,6 +150,11 @@ test("the setup docs say how to set each leaderboard URL and what it defaults to
     const [, api, link] = cells(urls, "How to set it");
     assert.ok(api?.includes(`\`${command}\``), `${label}: the service URL is written by the configure script`);
     assert.ok(link?.includes('`"leaderboardUrl": "https://<your link>"`'), `${label}: the short URL is a key in the file`);
+    // extension.mjs reads the file once at start-up, so neither change reaches
+    // a running booth until the extension reloads.
+    for (const [setting, cell] of [["service", api], ["short", link]]) {
+      assert.match(cell ?? "", /then reload extensions\b/, `${label}: the ${setting} URL change needs an extension reload`);
+    }
     const [, deployed, fallback] = cells(urls, "Current default");
     assert.ok(deployed?.includes(`\`${service}\``), `${label}: this event's service, from infra/main.parameters.json`);
     assert.ok(fallback?.includes(`\`${DEFAULT_LEADERBOARD_URL}\`, from \`DEFAULT_LEADERBOARD_URL\``), `${label}: the default in the code`);

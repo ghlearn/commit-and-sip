@@ -62,7 +62,7 @@ Do not expose logs, keys, or staff details to attendees. Storage/lock errors: st
 | Attendee board / QR | `leaderboardUrl` | Default: <https://gh.io/commit-and-sip-leader>; `null` hides the QR. |
 | Publishing service | `leaderboardApi.url` | This event: <https://commit-and-sip-leaderboard.azurewebsites.net>; no automatic default. |
 
-Use [URL configuration instructions](RUNBOOK.md#leaderboard-urls) to change these safely. Replace the URL in the launch prompt too. Keep the key-holding file owner-only; never paste it into chat.
+Use [URL configuration instructions](RUNBOOK.md#leaderboard-urls) to change these safely, then reload extensions and reopen the canvases: the booth reads them only at start-up. Replace the URL in the launch prompt too. Keep the key-holding file owner-only; never paste it into chat.
 
 ## Close safely
 
