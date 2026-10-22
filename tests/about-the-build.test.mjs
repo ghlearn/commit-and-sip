@@ -126,6 +126,59 @@ test("the setup docs give the attendee QR's default destination and how to turn 
   assert.match(readiness, /attendee QR is \*\*on by default\*\*/);
 });
 
+// The docs and prompts spell out both leaderboard URLs, so they also name the
+// setting that changes each one, how to set it, and what it is by default.
+test("the setup docs say how to set each leaderboard URL and what it defaults to", async () => {
+  const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  const runbook = await readFile(new URL("../booth/RUNBOOK.md", import.meta.url), "utf8");
+  const { DEFAULT_LEADERBOARD_URL } = await import("../.github/extensions/commit-and-sip/domain.mjs");
+  const { parseArguments } = await import("../scripts/configure-leaderboard.mjs");
+  const { parameters } = JSON.parse(await readFile(new URL("../infra/main.parameters.json", import.meta.url), "utf8"));
+  const service = `https://${parameters.appName.value}.azurewebsites.net`;   // the deployment's url output
+  const command = "npm run leaderboard:configure -- --url https://<app>.azurewebsites.net";
+  assert.throws(() => parseArguments([]), error => error.message.startsWith(`Usage: ${command} `), "the script's own usage");
+  const section = text => {
+    const start = text.indexOf("\n### Leaderboard URLs\n");
+    assert.ok(start >= 0, "a Leaderboard URLs section");
+    const end = text.slice(start + 1).search(/\n#{1,3} /);
+    return end < 0 ? text.slice(start) : text.slice(start, start + 1 + end);
+  };
+  const cells = (text, row) => (text.split("\n").find(line => line.startsWith(`| **${row}** |`)) ?? "").split(" | ");
+  for (const [label, text] of [["README", readme], ["runbook", runbook]]) {
+    const urls = section(text);
+    assert.deepEqual(cells(urls, "Setting"), ["| **Setting**", "`leaderboardApi.url`", "`leaderboardUrl` |"], `${label}: the settings`);
+    const [, api, link] = cells(urls, "How to set it");
+    assert.ok(api?.includes(`\`${command}\``), `${label}: the service URL is written by the configure script`);
+    assert.ok(link?.includes('`"leaderboardUrl": "https://<your link>"`'), `${label}: the short URL is a key in the file`);
+    const [, deployed, fallback] = cells(urls, "Current default");
+    assert.ok(deployed?.includes(`\`${service}\``), `${label}: this event's service, from infra/main.parameters.json`);
+    assert.ok(fallback?.includes(`\`${DEFAULT_LEADERBOARD_URL}\`, from \`DEFAULT_LEADERBOARD_URL\``), `${label}: the default in the code`);
+  }
+  // The prompts paste the default, so a new default has to reach them too.
+  const prompts = readme.split("\n").filter(line => line.includes("browser canvas at https://"));
+  assert.equal(prompts.length, 2, "the leaderboard prompt and the all-at-once prompt");
+  for (const prompt of prompts) assert.ok(prompt.endsWith(`browser canvas at ${DEFAULT_LEADERBOARD_URL}.`), prompt);
+});
+
+// GitHub gives a fenced code block a copy button, but not a quote or inline
+// code, so every prompt the walkthrough asks someone to paste is fenced.
+test("every prompt in the README's App walkthrough is fenced, so it has a copy button", async () => {
+  const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  const start = readme.indexOf("## Run Commit & Sip in the GitHub Copilot App");
+  assert.ok(start >= 0, "the walkthrough exists");
+  const lines = readme.slice(start, readme.indexOf("\n## ", start)).split("\n");
+  assert.deepEqual(lines.filter(line => /^\s*>/.test(line)), [], "no prompt is left as a quote");
+  const asks = lines.flatMap((line, index) => /\bask Copilot\b[^`]*:$/i.test(line) ? [index] : []);
+  assert.ok(asks.length >= 6, `${asks.length} prompts: the extension, its log, each canvas, and all three at once`);
+  for (const index of asks) {
+    const ask = lines[index];
+    const indent = " ".repeat((/^\s*\d+\. /.exec(ask) ?? /^\s*/.exec(ask))[0].length);   // inside the step it belongs to
+    const [blank, open, prompt, close] = lines.slice(index + 1, index + 5);
+    assert.deepEqual([blank, open, close], ["", `${indent}\`\`\`text`, `${indent}\`\`\``], `a fenced prompt follows: ${ask}`);
+    assert.ok(prompt.startsWith(indent) && prompt.trim(), `one line to paste: ${ask}`);
+  }
+});
+
 // Status statements go stale silently. These are the ones that were once true
 // and are not now: the live build refusing the client, a private repository,
 // no public destination at all. None may come back into the operator docs.

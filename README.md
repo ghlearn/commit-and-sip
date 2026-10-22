@@ -83,28 +83,55 @@ The Commit & Sip canvases ship with the repository as a project canvas extension
 
 ### Open the canvases
 
-Canvases open in the App's right side panel. Type each request into the session's prompt box.
+Canvases open in the App's right side panel. Copy each prompt below with its copy button and paste it into the session's prompt box.
 
 1. **Load the extension.** Ask Copilot:
 
-   > Reload extensions and list them.
+   ```text
+   Reload extensions and list them.
+   ```
 
-   Confirm the project extension `commit-and-sip` shows as **running**. If it is missing or failed, ask Copilot to show its log before continuing. A moderation warning on start means the blocklist is still unreviewed.
-2. **Open the attendee canvas.** Ask Copilot to open the `commit-and-sip` canvas with no input. The counter opens idle with **Start my order** and the house menu.
+   Confirm the project extension `commit-and-sip` shows as **running**. A moderation warning on start means the blocklist is still unreviewed. If the extension is missing or failed, ask Copilot for its log before continuing:
+
+   ```text
+   Show the log for the commit-and-sip extension.
+   ```
+
+2. **Open the attendee canvas.** Ask Copilot:
+
+   ```text
+   Open the commit-and-sip canvas with no input.
+   ```
+
+   The counter opens idle with **Start my order** and the house menu.
 
    ![Commit & Sip attendee canvas at rest, showing How it works, the Start my order button, and the house menu with its three house examples.](.github/images/copilot-app/booth-attendee-canvas.png)
 
-3. **Open the staff canvas.** Ask Copilot to open the `commit-and-sip-admin` canvas with no input. It shows event totals, station health, export, takedown, and end-of-event controls. Keep it off the attendee-facing screen: it shows staff names and removal reasons, and it can erase the event.
+3. **Open the staff canvas.** Ask Copilot:
+
+   ```text
+   Open the commit-and-sip-admin canvas with no input.
+   ```
+
+   It shows event totals, station health, export, takedown, and end-of-event controls. Keep it off the attendee-facing screen: it shows staff names and removal reasons, and it can erase the event.
 
    ![Commit & Sip booth staff dashboard showing event totals, station health, and the export results form.](.github/images/copilot-app/booth-staff-canvas.png)
 
-4. **Open the leaderboard.** Ask Copilot to open a browser canvas at <https://gh.io/commit-and-sip-leader>. The short link redirects to the live leaderboard service, which ranks every booth's drinks by score.
+4. **Open the leaderboard.** Ask Copilot:
+
+   ```text
+   Open a browser canvas at https://gh.io/commit-and-sip-leader.
+   ```
+
+   The short link redirects to the live leaderboard service, which ranks every booth's drinks by score. If your booth uses a different short leaderboard URL, put yours in this prompt and in the all-at-once prompt below (see [Leaderboard URLs](#leaderboard-urls)).
 
    ![Commit & Sip leaderboard in a browser canvas, showing the drink count, a ranked table of drinks and scores, and the How this was built panel with a QR code to the repository.](.github/images/copilot-app/leaderboard-browser-canvas.png)
 
 To open all three at once, ask Copilot:
 
-> Open the Commit & Sip attendee canvas, the Commit & Sip staff canvas, and a browser canvas at https://gh.io/commit-and-sip-leader.
+```text
+Open the Commit & Sip attendee canvas, the Commit & Sip staff canvas, and a browser canvas at https://gh.io/commit-and-sip-leader.
+```
 
 If Copilot reports that no canvas matches `commit-and-sip`, the extension has not loaded yet: reload extensions, confirm it is running, then ask again. Make sure the session was started from the project under **Projects**, not from **Chats**: the extension lives in the repository, and a chat has no project checkout.
 
@@ -175,7 +202,7 @@ The booth reads one optional ignored file, `booth/local-config.json`, with two i
 ```
 
 - `leaderboardApi` makes the booth **publish** to the leaderboard service, and lets takedowns retract from it. Write it with `npm run leaderboard:configure`, never by hand. Omit `staffKey` on a machine that should not take drinks down.
-- `leaderboardUrl` puts a **QR code** in front of attendees, linking to their own place on a public page of attendee names. It defaults to the event short link `https://gh.io/commit-and-sip-leader`, so leave it out of the file. Add `"leaderboardUrl": null` only to turn the QR off at this booth.
+- `leaderboardUrl` puts a **QR code** in front of attendees, linking to their own place on a public page of attendee names. It defaults to the event short link `https://gh.io/commit-and-sip-leader`, so leave it out of the file unless this booth uses a different board. Add `"leaderboardUrl": null` only to turn the QR off at this booth.
 
 Both URLs must be public HTTPS with no credentials, fragment, or nonstandard port. The file is readable only by its owner and is never packaged or committed. Retired pull-request keys such as `mode`, `runs`, `repo`, and `requiredChecks` are rejected on start rather than ignored, so a stale config cannot look configured. The two API keys belong in that file and nowhere else: not in the renderer, the repository, or a QR URL.
 
@@ -184,3 +211,18 @@ State persists in `$COPILOT_HOME/extensions/commit-and-sip/artifacts/ledger.json
 Exports and archives are written beside the ledger, under `exports/`, and never into the repository. **Deleting the cloned repository does not delete attendee data** — it deletes the reviewed blocklist and staff configuration while leaving every name and removal record on the machine. End an event through the dashboard, then copy the archive off the device.
 
 Neither a device's loopback renderer nor repository assets are public phone destinations, which is why the attendee QR points at the public short link.
+
+### Leaderboard URLs
+
+The setup steps and prompts in this README use the event's two leaderboard URLs. Each booth can change either one in `booth/local-config.json`:
+
+| | Leaderboard URL | Short leaderboard URL |
+| --- | --- | --- |
+| **What it is** | The leaderboard service. The booth publishes drinks to it and retracts takedowns from it. | The public link in each attendee's QR code. It opens the board on their own row. |
+| **Setting** | `leaderboardApi.url` | `leaderboardUrl` |
+| **How to set it** | `npm run leaderboard:configure -- --url https://<app>.azurewebsites.net` (the origin only, no path) | Add `"leaderboardUrl": "https://<your link>"` to the file, then reload extensions. `null` turns the QR off. |
+| **Current default** | None: a booth without it does not publish. This event's service is `https://commit-and-sip-leaderboard.azurewebsites.net`. | `https://gh.io/commit-and-sip-leader`, from `DEFAULT_LEADERBOARD_URL` in [`domain.mjs`](.github/extensions/commit-and-sip/domain.mjs). |
+
+- **Leaderboard URL.** The service answers at `https://<appName>.azurewebsites.net`, where `appName` is set in [`infra/main.parameters.json`](infra/main.parameters.json) (currently `commit-and-sip-leaderboard`), and the infrastructure deployment reports it as its `url` output. To publish to a different service, rerun `leaderboard:configure` with its URL on each booth, adding `--no-staff-key` on booth-only machines. That changes the URL and keeps the existing keys and `leaderboardUrl`.
+- **Short leaderboard URL.** The default is a gh.io redirect to the service that keeps the query string; the redirect itself is managed outside this repository. A replacement can be another short link or the service URL itself. It must open the board page and keep the `handle` and `ref` query parameters, so each attendee's code still opens their own row. On a publishing booth the file also holds the keys, so keep it readable only by its owner when you edit it, or the booth refuses to load it (`config_exposed`; the fix is in [copying the keys to another machine](booth/RUNBOOK.md#copying-the-keys-to-another-machine)). The staff dashboard shows the link the booth is using.
+- **Prompts.** The leaderboard prompts in [Open the canvases](#open-the-canvases) use the default short leaderboard URL. If your booth uses another, paste yours in its place.
