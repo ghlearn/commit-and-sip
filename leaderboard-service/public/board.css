@@ -61,8 +61,8 @@ h1 {
   font-weight: 800; line-height: 1.05; letter-spacing: -0.01em;
 }
 .lede { margin: 0; color: var(--muted); }
-.captured { margin: 0.6em 0 0; font-size: 1.1em; color: var(--text); }
-.captured-count { font-size: 1.6em; font-weight: 800; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+.drink-count { margin: 0.6em 0 0; font-size: 1.1em; color: var(--text); }
+.drink-count-number { font-size: 1.6em; font-weight: 800; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
 
 .status { margin: 0 0 0.75em; color: var(--muted); font-size: 0.85em; font-variant-numeric: tabular-nums; }
 .status.stale { color: var(--error); background: var(--error-surface); padding: 0.4em 0.7em; border: 1px solid var(--error); border-radius: 6px; }
