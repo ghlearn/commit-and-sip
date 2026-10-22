@@ -5,7 +5,7 @@ import {
 } from "../.github/extensions/commit-and-sip/services/moderation.mjs";
 import { loadNameRules, validateCoffeeName } from "../.github/extensions/commit-and-sip/services/coffee-name.mjs";
 import { readFileSync } from "node:fs";
-import { inspectEntries, falsePositives } from "../scripts/check-blocklist.mjs";
+import { EDGE_NAMES, inspectEntries, falsePositives } from "../scripts/check-blocklist.mjs";
 
 const shippedNotes = () => JSON.parse(
   readFileSync(new URL("../booth/blocked-terms.json", import.meta.url), "utf8")).review.notes;
@@ -102,6 +102,11 @@ test("the shipped blocklist is valid, wired to names, and honest about its own r
   }
   assert.equal(validateCoffeeName("Mona Moonrise", rules).id, "mona-moonrise",
     "an ordinary name must survive whatever list is shipped");
+  // Names that a term once matched across innocent word boundaries.
+  for (const name of EDGE_NAMES) {
+    const hit = findBlockedTerm(name, shipped);
+    assert.equal(hit, null, `"${name}" must not be refused (matched a ${hit?.match} entry)`);
+  }
 });
 
 test("an absent blocklist is not treated as a match", () => {

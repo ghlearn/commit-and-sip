@@ -285,7 +285,17 @@
     },
     {
       "term": "bitch",
-      "match": "substring",
+      "match": "word",
+      "note": "2; word: substring would refuse 8-bit Chai and Rabbit Chai; inflections listed below"
+    },
+    {
+      "term": "bitches",
+      "match": "word",
+      "note": "2"
+    },
+    {
+      "term": "bitchy",
+      "match": "word",
       "note": "2"
     },
     {
