@@ -1,19 +1,19 @@
 {
   "review": {
-    "placeholder": true,
-    "reviewedBy": null,
-    "reviewedAt": null,
-    "source": null,
+    "placeholder": false,
+    "reviewedBy": "arilivigni",
+    "reviewedAt": "2026-10-22",
+    "source": "Short curated English list (Option B in docs/blocklist-sourcing.md), drafted with GitHub Copilot from common slurs, profanity and hate codes; no external list vendored, so no licence applies. Each entry was checked with npm run blocklist and against edge-case cafe names, then accepted by the reviewer.",
     "notes": [
-      "This file is a shipped placeholder, not a moderation decision. The two entries below only demonstrate the match modes and block nothing real.",
-      "Before any event that publishes attendee names, replace entries, set placeholder to false, and record reviewedBy, reviewedAt and source. See docs/blocklist-sourcing.md for where terms should come from and why a short reviewable list is preferred to a large vendored one.",
+      "Reviewed for the universe-2026 event. Re-review before each event; this approval is not permanent.",
+      "Category decisions:",
+      "Category 1 of 6 (slurs): added. coon and boobs were left out because they are compared as con and bobs and would refuse Mona Con Leche and Bob's Copilot Brew. dyke also refuses a standalone Dyke token (Van Dyke); accepted.",
+      "Category 2 of 6 (sexual and profanity): added, including milder terms (sex, sexy, bastard, piss) for a family-friendly booth.",
+      "Category 3 of 6 (violence, self-harm, suicide): added. kill and killer are deliberately not listed, so a Killer Copilot Cold Brew is allowed.",
+      "Category 4 of 6 (hate groups and codes): added. kkk and 88 are not listed because they are compared as single letters; ku klux and 1488 are listed instead.",
+      "Category 5 of 6 (named real people): nothing to add. Staff takedown covers defamatory names.",
+      "Category 6 of 6 (event, venue, sponsor): sucks added, for names such as Copilot Sucks.",
       "Work the categories below and record a decision for each, including a deliberate 'nothing to add'. A category left unconsidered is the common failure, not a category judged empty.",
-      "Category 1 of 6: slurs targeting race, ethnicity, nationality, religion, sexual orientation, gender identity, or disability.",
-      "Category 2 of 6: sexual and sexually explicit terms.",
-      "Category 3 of 6: references to violence, self-harm, and suicide.",
-      "Category 4 of 6: hate-group names, slogans, and coded terms.",
-      "Category 5 of 6: named real people. Every name here contains mona, copilot or ducky, which makes defamatory constructions about a specific person easy to build.",
-      "Category 6 of 6: anything specific to this event, venue, or sponsor that would embarrass the booth on a public menu.",
       "Choose the match mode per term, not per category. Use substring only where the fragment is never part of an innocent word; several slurs are not, and an over-broad substring entry silently refuses ordinary names at the counter. Use word for anything that appears inside ordinary words, so Classic Mona Cold Brew is not rejected by an entry for a shorter word inside it.",
       "Do not add spaced, doubled or leetspeak spellings of a term you already list. Matching folds digits to letters, removes spaces, hyphens and apostrophes, and collapses repeated characters, so those variants are already covered and only add false positives.",
       "Numeric hate codes are not compared as digits. Folding rewrites 0 1 3 4 5 7 8 to o i e a s t b, while 2, 6 and 9 survive unchanged, so a code may not reduce to the letters you expect.",
@@ -25,14 +25,420 @@
   },
   "entries": [
     {
-      "term": "blocked-example-term",
-      "match": "substring",
-      "note": "Placeholder retained so the rejection path stays exercised until a reviewed list replaces this file."
+      "term": "nigger",
+      "match": "word",
+      "note": "1 slur; word: compared as niger, so substring would refuse Niger/Nigeria"
     },
     {
-      "term": "exampleword",
+      "term": "niggers",
+      "match": "word"
+    },
+    {
+      "term": "nigga",
+      "match": "word"
+    },
+    {
+      "term": "niggas",
+      "match": "word"
+    },
+    {
+      "term": "faggot",
+      "match": "substring",
+      "note": "1 slur"
+    },
+    {
+      "term": "fag",
+      "match": "word"
+    },
+    {
+      "term": "fags",
+      "match": "word"
+    },
+    {
+      "term": "kike",
       "match": "word",
-      "note": "Placeholder showing word mode: rejects the standalone word but not a longer word containing it."
+      "note": "1 slur"
+    },
+    {
+      "term": "kikes",
+      "match": "word"
+    },
+    {
+      "term": "spic",
+      "match": "word",
+      "note": "1 slur; word: substring would refuse spicy"
+    },
+    {
+      "term": "spics",
+      "match": "word"
+    },
+    {
+      "term": "chink",
+      "match": "word",
+      "note": "1 slur"
+    },
+    {
+      "term": "chinks",
+      "match": "word"
+    },
+    {
+      "term": "wetback",
+      "match": "substring",
+      "note": "1 slur"
+    },
+    {
+      "term": "beaner",
+      "match": "word",
+      "note": "1 slur"
+    },
+    {
+      "term": "beaners",
+      "match": "word"
+    },
+    {
+      "term": "gook",
+      "match": "word",
+      "note": "1 slur"
+    },
+    {
+      "term": "gooks",
+      "match": "word"
+    },
+    {
+      "term": "raghead",
+      "match": "substring",
+      "note": "1 slur"
+    },
+    {
+      "term": "towelhead",
+      "match": "substring",
+      "note": "1 slur"
+    },
+    {
+      "term": "paki",
+      "match": "word",
+      "note": "1 slur"
+    },
+    {
+      "term": "pakis",
+      "match": "word"
+    },
+    {
+      "term": "retard",
+      "match": "word",
+      "note": "1 slur; word: substring would refuse retardant"
+    },
+    {
+      "term": "retarded",
+      "match": "word"
+    },
+    {
+      "term": "retards",
+      "match": "word"
+    },
+    {
+      "term": "tranny",
+      "match": "word",
+      "note": "1 slur"
+    },
+    {
+      "term": "trannies",
+      "match": "word"
+    },
+    {
+      "term": "dyke",
+      "match": "word",
+      "note": "1 slur; word, but also refuses a standalone Dyke token (Van Dyke)"
+    },
+    {
+      "term": "dykes",
+      "match": "word"
+    },
+    {
+      "term": "fuck",
+      "match": "substring",
+      "note": "2"
+    },
+    {
+      "term": "cunt",
+      "match": "word",
+      "note": "2; word: substring would refuse Scunthorpe"
+    },
+    {
+      "term": "cunts",
+      "match": "word"
+    },
+    {
+      "term": "shit",
+      "match": "word",
+      "note": "2; word: substring would refuse shiitake"
+    },
+    {
+      "term": "shits",
+      "match": "word"
+    },
+    {
+      "term": "shitty",
+      "match": "word"
+    },
+    {
+      "term": "bullshit",
+      "match": "substring",
+      "note": "2"
+    },
+    {
+      "term": "cock",
+      "match": "word",
+      "note": "2; word: substring would refuse peacock, cocktail"
+    },
+    {
+      "term": "cocks",
+      "match": "word"
+    },
+    {
+      "term": "dick",
+      "match": "word",
+      "note": "2; word: substring would refuse Dickens"
+    },
+    {
+      "term": "dicks",
+      "match": "word"
+    },
+    {
+      "term": "pussy",
+      "match": "word",
+      "note": "2"
+    },
+    {
+      "term": "porn",
+      "match": "substring",
+      "note": "2"
+    },
+    {
+      "term": "penis",
+      "match": "word",
+      "note": "2"
+    },
+    {
+      "term": "vagina",
+      "match": "word",
+      "note": "2"
+    },
+    {
+      "term": "blowjob",
+      "match": "substring",
+      "note": "2"
+    },
+    {
+      "term": "dildo",
+      "match": "substring",
+      "note": "2"
+    },
+    {
+      "term": "cum",
+      "match": "word",
+      "note": "2; word: substring would refuse cumin, cucumber"
+    },
+    {
+      "term": "jizz",
+      "match": "substring",
+      "note": "2"
+    },
+    {
+      "term": "slut",
+      "match": "substring",
+      "note": "2"
+    },
+    {
+      "term": "whore",
+      "match": "substring",
+      "note": "2"
+    },
+    {
+      "term": "orgasm",
+      "match": "substring",
+      "note": "2"
+    },
+    {
+      "term": "anal",
+      "match": "word",
+      "note": "2; word: substring would refuse canal, analyst"
+    },
+    {
+      "term": "tits",
+      "match": "word",
+      "note": "2"
+    },
+    {
+      "term": "sex",
+      "match": "word",
+      "note": "2; word: substring would refuse Sussex"
+    },
+    {
+      "term": "sexy",
+      "match": "word"
+    },
+    {
+      "term": "asshole",
+      "match": "substring",
+      "note": "2; ass alone is compared as as, so it is not listed"
+    },
+    {
+      "term": "bitch",
+      "match": "substring",
+      "note": "2"
+    },
+    {
+      "term": "bastard",
+      "match": "word",
+      "note": "2"
+    },
+    {
+      "term": "piss",
+      "match": "word",
+      "note": "2; word: substring would refuse pistachio"
+    },
+    {
+      "term": "pissed",
+      "match": "word"
+    },
+    {
+      "term": "kill yourself",
+      "match": "substring",
+      "note": "3"
+    },
+    {
+      "term": "kys",
+      "match": "word",
+      "note": "3"
+    },
+    {
+      "term": "hang yourself",
+      "match": "substring",
+      "note": "3"
+    },
+    {
+      "term": "suicide",
+      "match": "substring",
+      "note": "3"
+    },
+    {
+      "term": "rape",
+      "match": "word",
+      "note": "3; word: substring would refuse grape, drape"
+    },
+    {
+      "term": "raped",
+      "match": "word"
+    },
+    {
+      "term": "rapes",
+      "match": "word"
+    },
+    {
+      "term": "rapist",
+      "match": "word",
+      "note": "3; word: substring would refuse therapist"
+    },
+    {
+      "term": "rapists",
+      "match": "word"
+    },
+    {
+      "term": "genocide",
+      "match": "substring",
+      "note": "3"
+    },
+    {
+      "term": "lynching",
+      "match": "substring",
+      "note": "3"
+    },
+    {
+      "term": "school shooting",
+      "match": "substring",
+      "note": "3"
+    },
+    {
+      "term": "terrorist",
+      "match": "word",
+      "note": "3"
+    },
+    {
+      "term": "terrorists",
+      "match": "word"
+    },
+    {
+      "term": "nazi",
+      "match": "word",
+      "note": "4; word: substring would refuse Ashkenazi"
+    },
+    {
+      "term": "nazis",
+      "match": "word"
+    },
+    {
+      "term": "neonazi",
+      "match": "word"
+    },
+    {
+      "term": "neonazis",
+      "match": "word"
+    },
+    {
+      "term": "hitler",
+      "match": "substring",
+      "note": "4"
+    },
+    {
+      "term": "heil",
+      "match": "word",
+      "note": "4"
+    },
+    {
+      "term": "sieg heil",
+      "match": "substring",
+      "note": "4"
+    },
+    {
+      "term": "swastika",
+      "match": "substring",
+      "note": "4"
+    },
+    {
+      "term": "ku klux",
+      "match": "substring",
+      "note": "4; kkk alone is compared as k, so it is not listed"
+    },
+    {
+      "term": "1488",
+      "match": "word",
+      "note": "4; compared as iab"
+    },
+    {
+      "term": "14 words",
+      "match": "word",
+      "note": "4"
+    },
+    {
+      "term": "white power",
+      "match": "substring",
+      "note": "4"
+    },
+    {
+      "term": "white pride",
+      "match": "substring",
+      "note": "4"
+    },
+    {
+      "term": "aryan",
+      "match": "word",
+      "note": "4"
+    },
+    {
+      "term": "sucks",
+      "match": "word",
+      "note": "6: e.g. Copilot Sucks on the public menu"
     }
   ]
 }

@@ -357,7 +357,8 @@ test("the service refuses to start with weak or shared keys", () => {
 });
 
 test("health reports whether moderation is still the placeholder", async t => {
-  const placeholder = { ...rules, blocklist: (await loadNameRules()).blocklist };
+  const { blocklist } = await loadNameRules();
+  const placeholder = { ...rules, blocklist: { ...blocklist, review: { ...blocklist.review, placeholder: true } } };
   const shipped = await service(t, { serviceRules: placeholder });
   assert.deepEqual(await (await fetch(`${shipped.url}/healthz`)).json(), { moderation: "placeholder", ok: true });
   const approved = await service(t);
