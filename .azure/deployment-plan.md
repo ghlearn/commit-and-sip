@@ -299,9 +299,9 @@ The tenant-root **MFA enforcement for resource write actions** cannot be evaluat
 | `scripts/{configure,package,republish}-leaderboard.mjs` | Staff operations | ✅ |
 | `tests/leaderboard-service.test.mjs` | Contract, security, persistence, packaging, infra tests | ✅ |
 
-## 10. Next Steps
+## 10. Deployment Record
 
-> Current: Deployed at the previous build. The review round 1 fixes are committed but **not deployed**: the deployer now holds only Reader. Step 4 (public QR) remains gated on the blocklist review and brand sign-off.
+> The service was redeployed from this branch on 2026-10-01 and verified end to end, as recorded in the [README](../README.md). The commands below document the deployment procedure; they are not outstanding actions. Public attendee QR use remains gated on the blocklist review and brand sign-off.
 
 1. azure-validate: `az bicep build`, `what-if`, packaging smoke test
 2. azure-deploy: `leaderboard:configure` → `az deployment sub create` → `leaderboard:package` → `az webapp deploy`

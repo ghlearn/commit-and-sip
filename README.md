@@ -39,8 +39,8 @@ It is **not** event-ready. Two human reviews are outstanding, and neither is cod
 
 Already in place:
 
-- **The leaderboard service is live, but its moderation is not.** [The service](docs/leaderboard-service.md) runs at <https://commit-and-sip-leaderboard.azurewebsites.net> (short link <https://gh.io/commit-and-sip-leader>). It was redeployed on 2026-10-01 from this branch and verified end to end through the canvases, so the current booth client works against it. Changes to `leaderboard-service/` made after that deploy reach the live site only when someone with Contributor redeploys (see the runbook). The board and the names on it are moderated with the same placeholder blocklist, so **the attendee QR (`leaderboardUrl`) stays a gated setting: leave it unset until the blocklist is reviewed.** The event owner has switched it on for one booth machine, ahead of that review, as a deliberate exception for staff testing; staff takedown is the only moderation there until the review is done. Publishing is local-first, so an unreachable service never blocks an attendee.
-- **Both short links resolve.** <https://gh.io/commit-and-sip-leader> redirects to the leaderboard service and keeps the query string, so each attendee's personal code (`?handle=…&ref=…`) still opens their own row once `leaderboardUrl` is set. <https://gh.io/commit-and-sip> points at this repository, which is public.
+- **The leaderboard service is live, but its moderation is not.** [The service](docs/leaderboard-service.md) runs at <https://commit-and-sip-leaderboard.azurewebsites.net> (short link <https://gh.io/commit-and-sip-leader>). It was redeployed on 2026-10-01 from this branch and verified end to end through the canvases, so the current booth client works against it. Changes to `leaderboard-service/` made after that deploy reach the live site only when someone with Contributor redeploys (see the runbook). **Every booth's attendee QR points at the short link by default**; set `leaderboardUrl` to `null` to turn it off at one booth. The board and the names on it are moderated with the same placeholder blocklist, so until that review is done, staff takedown is the main moderation of names on the public page. Publishing is local-first, so an unreachable service never blocks an attendee.
+- **Both short links resolve.** <https://gh.io/commit-and-sip-leader> redirects to the leaderboard service and keeps the query string, so each attendee's personal code (`?handle=…&ref=…`) still opens their own row. <https://gh.io/commit-and-sip> points at this repository, which is public.
 
 The earlier pull-request review flow, its live and canvas-pilot modes, and its provisioning scripts have been removed. No code path in this repository reads or writes GitHub.
 
@@ -108,7 +108,7 @@ To open all three at once, ask Copilot:
 
 If Copilot reports that no canvas matches `commit-and-sip`, the extension has not loaded yet: reload extensions, confirm it is running, then ask again. Make sure the session was started from the project under **Projects**, not from **Chats**: the extension lives in the repository, and a chat has no project checkout.
 
-Reopening a panel reads saved state, so closing one never resets the booth. Opening the leaderboard on a booth screen does not turn on the attendee QR code; that is still gated on `leaderboardUrl` (see [staff configuration](#staff-configuration-and-data)).
+Reopening a panel reads saved state, so closing one never resets the booth. The leaderboard panel is separate from the attendee QR code, which every booth shows by default (see [staff configuration](#staff-configuration-and-data)).
 
 The screenshots are the canvas pages captured with Playwright, not the surrounding App window. The barista handle on the leaderboard is blurred.
 
@@ -166,17 +166,16 @@ The approved outline is preserved verbatim, including its original proposals and
 
 ## Staff configuration and data
 
-The booth reads one optional ignored file, `booth/local-config.json`, with two independent settings:
+The booth reads one optional ignored file, `booth/local-config.json`, with two independent settings. A publishing booth's file looks like this:
 
 ```json
 {
-  "leaderboardApi": {"url": "https://<app>.azurewebsites.net", "boothKey": "<64 hex>", "staffKey": "<64 hex>"},
-  "leaderboardUrl": "https://<app>.azurewebsites.net/"
+  "leaderboardApi": {"url": "https://<app>.azurewebsites.net", "boothKey": "<64 hex>", "staffKey": "<64 hex>"}
 }
 ```
 
 - `leaderboardApi` makes the booth **publish** to the leaderboard service, and lets takedowns retract from it. Write it with `npm run leaderboard:configure`, never by hand. Omit `staffKey` on a machine that should not take drinks down.
-- `leaderboardUrl` puts a **QR code** in front of attendees, linking to their own place on a public page of attendee names. **Leave it unset until the moderation blocklist is reviewed.** Then set it to the short link `https://gh.io/commit-and-sip-leader`.
+- `leaderboardUrl` puts a **QR code** in front of attendees, linking to their own place on a public page of attendee names. It defaults to the event short link `https://gh.io/commit-and-sip-leader`, so leave it out of the file. Add `"leaderboardUrl": null` only to turn the QR off at this booth.
 
 Both URLs must be public HTTPS with no credentials, fragment, or nonstandard port. The file is readable only by its owner and is never packaged or committed. Retired pull-request keys such as `mode`, `runs`, `repo`, and `requiredChecks` are rejected on start rather than ignored, so a stale config cannot look configured. The two API keys belong in that file and nowhere else: not in the renderer, the repository, or a QR URL.
 
@@ -184,4 +183,4 @@ State persists in `$COPILOT_HOME/extensions/commit-and-sip/artifacts/ledger.json
 
 Exports and archives are written beside the ledger, under `exports/`, and never into the repository. **Deleting the cloned repository does not delete attendee data** — it deletes the reviewed blocklist and staff configuration while leaving every name and removal record on the machine. End an event through the dashboard, then copy the archive off the device.
 
-Neither a device's loopback renderer nor repository assets are public phone destinations. Do not publish an event QR until an approved, publicly reachable HTTPS leaderboard exists.
+Neither a device's loopback renderer nor repository assets are public phone destinations, which is why the attendee QR points at the public short link.

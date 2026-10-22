@@ -631,7 +631,7 @@ test("configuring keeps one set of keys, keeps them private, and never sets the 
   const saved = JSON.parse(await readFile(configFile, "utf8"));
   assert.match(saved.leaderboardApi.boothKey, /^[0-9a-f]{64}$/);
   assert.notEqual(saved.leaderboardApi.boothKey, saved.leaderboardApi.staffKey);
-  assert.equal(saved.leaderboardUrl, undefined, "the attendee QR waits for moderation and brand review");
+  assert.equal(saved.leaderboardUrl, undefined, "the attendee QR is left to the built-in event default");
   const parameters = JSON.parse(await readFile(parametersFile, "utf8")).parameters;
   assert.deepEqual([parameters.boothKey.value, parameters.staffKey.value],
     [saved.leaderboardApi.boothKey, saved.leaderboardApi.staffKey], "the deployment uses the booth's own keys");
@@ -663,6 +663,9 @@ test("configuring keeps one set of keys, keeps them private, and never sets the 
   await writeFile(join(directory, "kept.json"), JSON.stringify({ leaderboardUrl: "https://example.org/board" }));
   const kept = await configure({ configFile: join(directory, "kept.json"), url });
   assert.equal(kept.next.leaderboardUrl, "https://example.org/board");
+  await writeFile(join(directory, "off.json"), JSON.stringify({ leaderboardUrl: null }));
+  assert.equal((await configure({ configFile: join(directory, "off.json"), url })).next.leaderboardUrl, null,
+    "and a QR staff turned off stays off");
 
   await assert.rejects(() => configure({ configFile, url: "http://insecure.example.org" }), { code: "invalid_config" });
   assert.throws(() => parseArguments([]), /Usage/);

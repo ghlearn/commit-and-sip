@@ -1,5 +1,5 @@
 import { joinSession, createCanvas, CanvasError } from "@github/copilot-sdk/extension";
-import { DomainError, loadCatalog, loadStaffConfig } from "./domain.mjs";
+import { attendeeLeaderboardUrl, DomainError, loadCatalog, loadStaffConfig } from "./domain.mjs";
 import { dataDirectory, RunStore } from "./store.mjs";
 import { BoothEngine } from "./booth-engine.mjs";
 import { loadNameRules } from "./services/coffee-name.mjs";
@@ -27,10 +27,11 @@ async function guarded(fn) {
 const rules = await loadNameRules();
 // Publishing to the service (leaderboardApi) and advertising it to attendees
 // (leaderboardUrl, which drives the QR code) are configured separately on
-// purpose. The service can be proven end to end with staff entries while the
-// QR stays off until moderation and brand review allow a public destination.
+// purpose. The QR points at the event's short link unless this booth's config
+// sets leaderboardUrl to null, which turns it off.
+const leaderboardUrl = attendeeLeaderboardUrl(config);
 const engine = new BoothEngine({
-  store, catalog, rules, leaderboardUrl: config.leaderboardUrl ?? null,
+  store, catalog, rules, leaderboardUrl,
   leaderboardClient: leaderboardClientFromConfig(config),
 });
 
@@ -56,8 +57,8 @@ if (!moderation.ready) {
 // The QR falls back to a plain link when the encoder is missing, which is the
 // right behaviour but a silent one. Without this a booth that skipped `npm ci`
 // runs all day before anyone notices attendees are typing URLs. Only worth
-// saying when a leaderboard is configured, since otherwise there is no
-// destination to encode and the served screen shows no QR either way.
-if (config.leaderboardUrl && !(await qrEncoderAvailable())) {
+// saying when the attendee QR is on, since otherwise there is no destination
+// to encode and the served screen shows no QR either way.
+if (leaderboardUrl && !(await qrEncoderAvailable())) {
   await session.log("Commit & Sip cannot render QR codes: the qrcode encoder is not installed, so the served screen will show a plain link instead. Run npm ci at this booth.", { level: "warning" });
 }

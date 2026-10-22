@@ -2,7 +2,7 @@
 
 **The booth runs entirely in the canvas.** Attendees never open GitHub, a terminal, or an editor. Commands below are staff-only and run from the repository root unless stated otherwise.
 
-**Not event-ready.** The moderation blocklist is an unreviewed placeholder, and brand review has not happened. The leaderboard service is live and accepts the current booth client, but the attendee QR (`leaderboardUrl`) stays unset until the blocklist is reviewed. See those sections before running a public booth.
+**Not event-ready.** The moderation blocklist is an unreviewed placeholder, and brand review has not happened. The leaderboard service is live and accepts the current booth client, and every booth's attendee QR points at <https://gh.io/commit-and-sip-leader> by default, so until the blocklist is reviewed, staff takedown is the main moderation of names on the public page. See those sections before running a public booth.
 
 ## Exercise shape
 
@@ -19,7 +19,7 @@ Reload extensions after changing extension code or the step document.
 1. Use Node.js 22+ (`nvm use` reads the pinned `.nvmrc`) and a Copilot host supporting project canvas extensions.
 2. Run `npm ci`, `npm test`, and `npm run check`. The extension SDK is host-resolved; do not install it.
 
-   The booth *runs* without `npm ci` — a fresh clone serves both canvases and the whole attendee flow. What it loses is the **QR code on the served screen**: `qrcode` is a development dependency, so without it `renderQrDataUrl` returns `null` and the panel falls back to the plain link. That fallback is deliberate rather than a broken image, but it is easy to miss, so the extension now logs a warning at start-up when a leaderboard is configured and the encoder is absent. Treat it like the blocklist warning: read the start-up log. Verified by running a booth from a fresh clone both ways.
+   The booth *runs* without `npm ci` — a fresh clone serves both canvases and the whole attendee flow. What it loses is the **QR code on the served screen**: `qrcode` is a development dependency, so without it `renderQrDataUrl` returns `null` and the panel falls back to the plain link. That fallback is deliberate rather than a broken image, but it is easy to miss, so the extension now logs a warning at start-up when the attendee QR is on (the default) and the encoder is absent. Treat it like the blocklist warning: read the start-up log. Verified by running a booth from a fresh clone both ways.
 3. Keep the data directory writable by the booth operator and inaccessible to unrelated users. Default: `$COPILOT_HOME/extensions/commit-and-sip/artifacts/`, where `COPILOT_HOME` defaults to `~/.copilot`. To isolate a staff device, set `COMMIT_AND_SIP_DATA_DIR` to an approved absolute directory before launching the host. Do not point it into the repository.
 4. Reload extensions in the host. List loaded extensions, then inspect the project `commit-and-sip` entry and its log if it is failed. Reinspect after reload; file existence alone is not evidence the provider is running.
 5. **Read the start-up log.** A moderation warning means the blocklist is still an unreviewed placeholder. Treat it as a release blocker, not noise.
@@ -31,17 +31,16 @@ Choose a distinct panel `instanceId`. Actions address that instance; persistent 
 
 ## Staff configuration
 
-The booth reads one optional ignored file, `booth/local-config.json`, with two independent settings:
+The booth reads one optional ignored file, `booth/local-config.json`, with two independent settings. A publishing booth's file looks like this:
 
 ```json
 {
-  "leaderboardApi": {"url": "https://<app>.azurewebsites.net", "boothKey": "<64 hex>", "staffKey": "<64 hex>"},
-  "leaderboardUrl": "https://<app>.azurewebsites.net/"
+  "leaderboardApi": {"url": "https://<app>.azurewebsites.net", "boothKey": "<64 hex>", "staffKey": "<64 hex>"}
 }
 ```
 
 - `leaderboardApi` makes the booth publish to the leaderboard service and lets takedowns retract from it. Its `url` is the service's **origin only** (no path); anything else is refused at start-up. **Write it with `npm run leaderboard:configure`, never by hand** (see [Leaderboard service operations](#leaderboard-service-operations)). Leave out `staffKey` on a machine that should not take drinks down. The file is written readable by its owner only.
-- `leaderboardUrl` puts a QR code in front of attendees, to their own place on a public page of attendee names. **Leave it unset until the moderation blocklist is reviewed**, then set it to `https://gh.io/commit-and-sip-leader`. Following this runbook never exposes names before that review; switching the QR on earlier is a decision for the event owner, not a setup step.
+- `leaderboardUrl` puts a QR code in front of attendees, to their own place on a public page of attendee names. It defaults to the event short link `https://gh.io/commit-and-sip-leader`, so leave it out of the file. Add `"leaderboardUrl": null` only to turn the QR off at this booth; `leaderboard:configure` keeps that choice when it rewrites the file. The staff dashboard shows which state the booth is in.
 
 Both URLs must be public HTTPS with no credentials, fragment, or nonstandard port. Retired pull-request keys (`mode`, `runs`, `repo`, `requiredChecks`) are rejected on start with a `retired_config` diagnostic rather than ignored, so a stale config cannot look configured. A valid JSON file containing `null`, an array, or a scalar is not valid staff configuration; correct it using the explicit `invalid_config` diagnostic rather than treating it as a network error.
 
@@ -245,7 +244,7 @@ let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
 });'
 ```
 
-Then open `/healthz`. `moderation: "placeholder"` means the service is running with the unreviewed blocklist. A board the service creates, on the first deployment or a new `EVENT_ID`, starts closed to drinks (`/api/board` reports `rebuilding: true`). Do not open it yet. Open a new event's board only if every booth was **archived and reset before `eventId` changed**; then run `npm run leaderboard:republish -- --open` once from a staff machine. If any booth still holds drinks or takedowns, follow the `--takedowns`, then `--open`, then `--drinks` sequence in the troubleshooting table instead. If a booth was reset only after the change, see [starting a fresh board](#leaderboard-service-operations) below before doing anything else. Redeploying over an existing board leaves it as it was. That is fine for staff testing and a reason not to set `leaderboardUrl`.
+Then open `/healthz`. `moderation: "placeholder"` means the service is running with the unreviewed blocklist. A board the service creates, on the first deployment or a new `EVENT_ID`, starts closed to drinks (`/api/board` reports `rebuilding: true`). Do not open it yet. Open a new event's board only if every booth was **archived and reset before `eventId` changed**; then run `npm run leaderboard:republish -- --open` once from a staff machine. If any booth still holds drinks or takedowns, follow the `--takedowns`, then `--open`, then `--drinks` sequence in the troubleshooting table instead. If a booth was reset only after the change, see [starting a fresh board](#leaderboard-service-operations) below before doing anything else. Redeploying over an existing board leaves it as it was, test entries included; take those down before attendees scan the QR.
 
 Every infrastructure deployment needs the keys again (step 1 keeps the existing ones). Give each additional booth machine the **same deployed keys**, as below (add `--no-staff-key` on machines that should not take drinks down).
 
@@ -288,15 +287,17 @@ The booth itself holds to the same rule: the canvases and the staff commands ref
 
 Two short links exist. `https://gh.io/commit-and-sip-leader` redirects to the leaderboard service and keeps any query string. `https://gh.io/commit-and-sip` points at this (public) repository. The repository QR (`renderer/repo-qr.png`) is on the booth's served screen and on the public leaderboard, under **How this was built**. Print either code with a white margin: the supplied images have almost no quiet zone.
 
-The leaderboard **service** is deployed (see [Leaderboard service operations](#leaderboard-service-operations)). Once `leaderboardUrl` is set to the short link, each attendee's served screen shows a personal QR code (240 px, decoded off the screen) that opens the board on their own row. **That setting stays gated on the blocklist review**, which is still outstanding: leave it unset on every booth until the review is done. The event owner has turned it on for one booth machine ahead of the review, as a deliberate exception for staff testing; on that machine, staff takedown is the only moderation of names on the public page until the review is done. A local `127.0.0.1` renderer cannot host an attendee phone experience, and repository assets are not a public destination. Never use credential-bearing URLs to make private images appear public.
+The leaderboard **service** is deployed (see [Leaderboard service operations](#leaderboard-service-operations)). Every booth's attendee QR is **on by default**: each attendee's served screen shows a personal QR code (240 px, decoded off the screen) for the short link that opens the board on their own row. The blocklist review is still outstanding, so until it is done, staff takedown is the main moderation of names on the public page. To turn the QR off at one booth, add `"leaderboardUrl": null` to its `booth/local-config.json` and reload extensions. A local `127.0.0.1` renderer cannot host an attendee phone experience, and repository assets are not a public destination. Never use credential-bearing URLs to make private images appear public.
 
-After the public destination is approved and configured:
+The event owner has supplied and loaded static codes matching both short links. **These static codes are accepted for booth use; no regeneration is required.** The static leaderboard code opens the shared board, while the in-canvas code remains personalized to the attendee.
+
+`npm run qr` is optional tooling for generating a separate PNG artifact. It refuses URLs that redirect, including the leaderboard short link; this limitation does not block use of the supplied codes or require a follow-up for booth readiness. To generate an optional artifact for a non-redirecting destination:
 
 ```sh
-npm run qr -- <configured-HTTPS-leaderboard-URL>
+npm run qr -- <public-HTTPS-URL-that-does-not-redirect>
 ```
 
-Review the generated `.github/images/leaderboard-qr.png` and scan it from a personal phone on attendee Wi-Fi or cellular, without staff credentials. Confirm the exact destination, high contrast, quiet zone, descriptive alternative text, and a readable fallback link. No placeholder image may be labeled a scannable production QR.
+Scan the supplied code (or `.github/images/leaderboard-qr.png` if you generate an optional replacement) from a personal phone on attendee Wi-Fi or cellular, without staff credentials. Confirm the exact destination, high contrast, quiet zone, descriptive alternative text, and a readable fallback link. No placeholder image may be labeled a scannable production QR.
 
 The canvas renders its own QR server-side as a data URL, because the content security policy forbids remote scripts. This script is for producing a reviewable PNG artifact, not for the in-canvas code.
 
