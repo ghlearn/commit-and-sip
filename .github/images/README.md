@@ -18,20 +18,22 @@ Confirm each capture matches its alt text, status, and control labels; revise th
 
 Once the files exist, repository Markdown may reference them relatively.
 
-## Leaderboard QR — supplied, not generated here
+## Leaderboard QR — supplied static code accepted
 
 Optional committed output: `.github/images/leaderboard-qr.png`.
 
-Companion output: `.github/images/leaderboard-qr.png.json`, containing the encoded leaderboard URL, PNG SHA-256 digest, generation timestamp, and alt text. Review and retain the PNG and manifest together.
+When generating a PNG here, the companion output is `.github/images/leaderboard-qr.png.json`, containing the encoded leaderboard URL, PNG SHA-256 digest, generation timestamp, and alt text. Review and retain the generated PNG and manifest together.
 
-The event owner has supplied a static code for `https://gh.io/commit-and-sip-leader`, the event's leaderboard URL, which redirects to the leaderboard service. It is not committed here, because each booth renders the attendee's own code from that URL by default. The supplied image has almost no quiet zone (it decodes only once a white border is added), so print it with a margin. `npm run qr` cannot regenerate it yet: the generator refuses any URL that redirects. For a destination that does not redirect, run from the repository root:
+The event owner has supplied and loaded a static code matching `https://gh.io/commit-and-sip-leader`, the event's leaderboard URL, which redirects to the leaderboard service. **The supplied static code is accepted for booth use; no regeneration or committed replacement is required.** It opens the shared board; each booth separately renders the attendee's personalized code from that URL by default. The supplied image has almost no quiet zone (it decodes only once a white border is added), so print it with a margin.
+
+`npm run qr` is optional tooling and refuses URLs that redirect, including this short link. That limitation is not an outstanding booth requirement. To generate an optional artifact for a destination that does not redirect, run from the repository root:
 
 ```sh
 npm ci
 npm run qr -- <public-HTTPS-URL-that-does-not-redirect>
 ```
 
-A committed PNG alone is not a public phone destination. Approve a public HTTPS leaderboard, verify the generated code resolves to it, and never embed an access token or use a loopback or private-network address.
+A committed PNG alone is not a public phone destination. Verify the supplied code resolves to <https://gh.io/commit-and-sip-leader>, and never embed an access token or use a loopback or private-network address.
 
 The generator checks public destination reachability before writing either output, and an independent `jsqr` decoding test checks the generated image's payload. The canvas renders its own QR server-side as a data URL, so this script produces a reviewable artifact rather than the code attendees scan. None of these technical checks constitutes URL or branding approval, or replaces scanning the real destination on a phone.
 

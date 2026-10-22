@@ -289,13 +289,15 @@ Two short links exist. `https://gh.io/commit-and-sip-leader` redirects to the le
 
 The leaderboard **service** is deployed (see [Leaderboard service operations](#leaderboard-service-operations)). Every booth's attendee QR is **on by default**: each attendee's served screen shows a personal QR code (240 px, decoded off the screen) for the short link that opens the board on their own row. The blocklist review is still outstanding, so until it is done, staff takedown is the main moderation of names on the public page. To turn the QR off at one booth, add `"leaderboardUrl": null` to its `booth/local-config.json` and reload extensions. A local `127.0.0.1` renderer cannot host an attendee phone experience, and repository assets are not a public destination. Never use credential-bearing URLs to make private images appear public.
 
-The event owner has supplied static codes for both short links. `npm run qr` cannot regenerate the leaderboard one yet: it refuses any URL that redirects, and the short link does. For any other destination:
+The event owner has supplied and loaded static codes matching both short links. **These static codes are accepted for booth use; no regeneration is required.** The static leaderboard code opens the shared board, while the in-canvas code remains personalized to the attendee.
+
+`npm run qr` is optional tooling for generating a separate PNG artifact. It refuses URLs that redirect, including the leaderboard short link; this limitation does not block use of the supplied codes or require a follow-up for booth readiness. To generate an optional artifact for a non-redirecting destination:
 
 ```sh
 npm run qr -- <public-HTTPS-URL-that-does-not-redirect>
 ```
 
-Review the generated `.github/images/leaderboard-qr.png` and scan it from a personal phone on attendee Wi-Fi or cellular, without staff credentials. Confirm the exact destination, high contrast, quiet zone, descriptive alternative text, and a readable fallback link. No placeholder image may be labeled a scannable production QR.
+Scan the supplied code (or `.github/images/leaderboard-qr.png` if you generate an optional replacement) from a personal phone on attendee Wi-Fi or cellular, without staff credentials. Confirm the exact destination, high contrast, quiet zone, descriptive alternative text, and a readable fallback link. No placeholder image may be labeled a scannable production QR.
 
 The canvas renders its own QR server-side as a data URL, because the content security policy forbids remote scripts. This script is for producing a reviewable PNG artifact, not for the in-canvas code.
 
