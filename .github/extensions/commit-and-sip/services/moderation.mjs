@@ -22,9 +22,14 @@ export function canonicalizeForMatch(text) {
   return collapse(fold(text).replace(/[^a-z0-9]+/g, ""));
 }
 
-// Word mode needs the separators the joined form throws away.
+// Word mode needs the separators the joined form throws away. A possessive
+// "'s" attached to a word is dropped first: left as its own "s" token, the
+// run-joining in word mode would read "Mona's Hit" as "s"+"hit" or "Pi's" as
+// "pi"+"s". Only an "'s" glued to a preceding letter or digit and ending the
+// word counts, so a spaced-out "'s hit" or "pi'ss" is still caught.
 export function matchTokens(text) {
-  return fold(text).split(/[^a-z0-9]+/).filter(Boolean).map(collapse);
+  return fold(text).replace(/(?<=[a-z0-9])'s(?![a-z0-9])/g, "")
+    .split(/[^a-z0-9]+/).filter(Boolean).map(collapse);
 }
 
 export function validateBlocklist(list) {

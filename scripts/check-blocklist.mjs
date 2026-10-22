@@ -36,7 +36,8 @@ const VOCABULARY = [
 export const EDGE_NAMES = [
   "Copilot 8-bit Chai", "Ducky Bit Chocolate", "Mona Rabbit Chai",
   "Mona Con Leche", "Bob's Cold Brew", "Copilot Vapor Noir", "Mona Fuji Zest",
-  "Dill Donut Latte", "Mona's Lute", "Doctor Who Red Eye", "Cash Ole Mocha"
+  "Dill Donut Latte", "Mona's Lute", "Doctor Who Red Eye", "Cash Ole Mocha",
+  "Mona's Hit Cold Brew", "Mona's Ex-Presso", "Copilot Pi's Brew"
 ];
 
 function corpus(mascots, houseNames) {
@@ -47,6 +48,7 @@ function corpus(mascots, houseNames) {
       names.add(`${cap} ${word}`);
       names.add(`${word} ${cap}`);
       names.add(`Classic ${cap} ${word}`);
+      names.add(`${cap}'s ${word}`);
     }
   }
   return [...names];

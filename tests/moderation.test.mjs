@@ -50,8 +50,23 @@ test("word mode does not reject ordinary words that contain the term", () => {
 });
 
 test("tokenization keeps word boundaries that the joined form discards", () => {
-  assert.deepEqual(matchTokens("Mona's Cold-Brew"), ["mona", "s", "cold", "brew"]);
+  assert.deepEqual(matchTokens("Mona's Cold-Brew"), ["mona", "cold", "brew"], "a possessive stays with its word");
   assert.equal(canonicalizeForMatch("Mona's Cold-Brew"), "monascoldbrew");
+});
+
+test("a possessive is not joined to its neighbours in word mode", () => {
+  // Fixture terms shaped like the real collisions: "s" + "hard" and "la" + "s".
+  const shaped = validateBlocklist({
+    review: { placeholder: true },
+    entries: [{ term: "shard", match: "word" }, { term: "lass", match: "word" }]
+  });
+  for (const name of ["Mona's Hard Roast", "Copilot La's Brew", "Mona'S Hard"]) {
+    assert.equal(findBlockedTerm(name, shaped), null, `${name} should be allowed`);
+  }
+  // Spaced-out evasion still joins: the "s" stands alone, not glued to a word.
+  for (const name of ["Mona S Hard", "Mona s-h-a-r-d", "Mona 's hard", "Mona la'ss", "Mona Lass's Brew"]) {
+    assert.ok(findBlockedTerm(name, shaped), `${name} should be blocked`);
+  }
 });
 
 test("a blocklist must declare provenance and a usable match mode", () => {
