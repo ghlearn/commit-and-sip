@@ -98,13 +98,13 @@ API-level tests do not exercise HTML form validation or default-selected `<optio
 
 ### Launch gates
 
-The code is built and the leaderboard service is deployed. Two gates stand between this and attendees, and neither is code: the blocklist review and the brand review. The attendee QR is not a third gate: every booth shows it by default.
+The code is built and the leaderboard service is deployed. One gate stands between this and attendees, and it is not code: the brand review. The attendee QR is not a second gate: every booth shows it by default.
 
-The moderation blocklist needs reviewed content. The mechanism is built, the gap is reported at every start, and staff can now take a name down after the fact, but no list has been approved, and nothing in this repository certifies a list as adequate.
+Not a gate any more: the moderation blocklist. A short curated list was reviewed and approved on 2026-10-22, and the service was redeployed with it. Re-review it before each event; nothing in this repository certifies a list as adequate, and staff can take a name down after the fact.
 
-The leaderboard service is deployed (`leaderboard-service/`, <https://commit-and-sip-leaderboard.azurewebsites.net>) and serves the current booth client. The attendee QR (`leaderboardUrl`) defaults to <https://gh.io/commit-and-sip-leader> on every booth, so until the blocklist is reviewed, staff takedown is the main moderation of names on the public page. Publishing (`leaderboardApi`) and the attendee QR are configured separately; setting `leaderboardUrl` to `null` turns the QR off at a booth. Do not present a placeholder QR as a production link.
+The leaderboard service is deployed (`leaderboard-service/`, <https://commit-and-sip-leaderboard.azurewebsites.net>) and serves the current booth client. The attendee QR (`leaderboardUrl`) defaults to <https://gh.io/commit-and-sip-leader> on every booth, and names on the public page are moderated with the reviewed blocklist, with staff takedown covering what it misses. Publishing (`leaderboardApi`) and the attendee QR are configured separately; setting `leaderboardUrl` to `null` turns the QR off at a booth. Do not present a placeholder QR as a production link.
 
-Brand and trademark review of the mascot names and artwork has not happened. The cup illustration is original work carried over from the retired review page, but the froth now carries the official Mona mascot (`renderer/mona.png`), so unapproved official brand art is on the attendee screen today. Unlike the blocklist gate, this one is not something the repository merely withholds: it ships, and a negative review would require removing it. Provenance, modifications, and the outstanding decision are recorded in [the asset checklist](../.github/images/README.md).
+Brand and trademark review of the mascot names and artwork has not happened. The cup illustration is original work carried over from the retired review page, but the froth now carries the official Mona mascot (`renderer/mona.png`), so unapproved official brand art is on the attendee screen today. Unlike the blocklist, this one is not something the repository merely withholds: it ships, and a negative review would require removing it. Provenance, modifications, and the outstanding decision are recorded in [the asset checklist](../.github/images/README.md).
 
 Not a gate: the repository is public. Making it a template repository would be a separate change with its own review, and the event does not need it.
 

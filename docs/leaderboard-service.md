@@ -122,9 +122,8 @@ Live-updating push displays, per-booth boards, historical events, attendee accou
 
 ## What blocks launch, separately from build
 
-A public board publishes attendee-invented names to the internet. Two gates remain, and neither is engineering:
+A public board publishes attendee-invented names to the internet. One gate remains, and it is not engineering:
 
-- **The moderation blocklist is still an unreviewed placeholder** (see the [sourcing proposal](blocklist-sourcing.md)). Every booth's attendee QR points at this board by default (`leaderboardUrl` defaults to <https://gh.io/commit-and-sip-leader>), so until the list is reviewed, staff takedown is the main moderation of names on it.
 - **Brand review of the mascot art** (see [the asset checklist](../.github/images/README.md)).
 
 The service is configured separately from the QR code: `leaderboardApi` controls publishing, and `leaderboardUrl` controls the QR code. That separation is deliberate. Setting `leaderboardUrl` to `null` turns the QR off at a booth, so the whole pipeline can be proven with staff test entries while no QR is shown.

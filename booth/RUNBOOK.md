@@ -4,7 +4,7 @@ For an at-a-glance reference during a shift, use the [Booth staff cheat sheet](C
 
 **The booth runs entirely in the canvas.** Attendees never open GitHub, a terminal, or an editor. Commands below are staff-only and run from the repository root unless stated otherwise.
 
-**Not event-ready.** The moderation blocklist is an unreviewed placeholder, and brand review has not happened. The leaderboard service is live and accepts the current booth client, and every booth's attendee QR points at <https://gh.io/commit-and-sip-leader> by default, so until the blocklist is reviewed, staff takedown is the main moderation of names on the public page. See those sections before running a public booth.
+**Not event-ready.** Brand review has not happened. The moderation blocklist was reviewed on 2026-10-22; re-review it before each event. The leaderboard service is live, accepts the current booth client, and moderates with the same reviewed list, and every booth's attendee QR points at <https://gh.io/commit-and-sip-leader> by default. Staff takedown covers the names any list misses. See those sections before running a public booth.
 
 ## Exercise shape
 
@@ -223,7 +223,7 @@ Read ranks carefully when helping an attendee. "Rank 1 of 1 at this booth" is th
 
 ## Leaderboard service operations
 
-> **Current deployment (2026-10-02).** The live service runs `main` plus the board-clear route (`POST /api/board/clear`, deployed from its branch ahead of merge), including the board page's 24 px quiet zone around the repository QR, and accepts the current booth client. Its board is the `universe-2026` event, opened empty. A later change to `leaderboard-service/` reaches the site only when the code-deploy steps below are run from an identity with Contributor, followed by the version check.
+> **Current deployment (2026-10-22).** The live service runs `main` with the reviewed moderation blocklist (`/healthz` reports `moderation: "reviewed"`), including the board-clear route (`POST /api/board/clear`) and the board page's 24 px quiet zone around the repository QR, and accepts the current booth client. Its board is the `universe-2026` event, cleared on 2026-10-22 and open. A later change to `leaderboard-service/` reaches the site only when the code-deploy steps below are run from an identity with Contributor, followed by the version check.
 
 The service lives in `leaderboard-service/`, and its design and decisions are in [docs/leaderboard-service.md](../docs/leaderboard-service.md). It runs at <https://commit-and-sip-leaderboard.azurewebsites.net> as one App Service B1 instance in subscription **GitHub - NonProd - skills**, region `westus2`, resource group `rg-commit-and-sip-lb-westus2`. Every submission is re-checked there with this repository's own rubric and blocklist, so **redeploy the service whenever `booth/blocked-terms.json` or the rubric changes**. Otherwise booths and service disagree and submissions fail with `score_mismatch`.
 
@@ -304,7 +304,7 @@ The booth itself holds to the same rule: the canvases and the staff commands ref
 
 Two short links exist. `https://gh.io/commit-and-sip-leader` redirects to the leaderboard service and keeps any query string. `https://gh.io/commit-and-sip` points at this (public) repository. The repository QR (`renderer/repo-qr.png`) is on the booth's served screen and on the public leaderboard, under **How this was built**. Print either code with a white margin: the supplied images have almost no quiet zone.
 
-The leaderboard **service** is deployed (see [Leaderboard service operations](#leaderboard-service-operations)). Every booth's attendee QR is **on by default**: each attendee's served screen shows a personal QR code (240 px, decoded off the screen) for the short link that opens the board on their own row. The blocklist review is still outstanding, so until it is done, staff takedown is the main moderation of names on the public page. To turn the QR off at one booth, add `"leaderboardUrl": null` to its `booth/local-config.json` and reload extensions; to point it at another link, see [Leaderboard URLs](#leaderboard-urls). A local `127.0.0.1` renderer cannot host an attendee phone experience, and repository assets are not a public destination. Never use credential-bearing URLs to make private images appear public.
+The leaderboard **service** is deployed (see [Leaderboard service operations](#leaderboard-service-operations)). Every booth's attendee QR is **on by default**: each attendee's served screen shows a personal QR code (240 px, decoded off the screen) for the short link that opens the board on their own row. The blocklist was reviewed on 2026-10-22, and staff takedown covers the names it misses. To turn the QR off at one booth, add `"leaderboardUrl": null` to its `booth/local-config.json` and reload extensions; to point it at another link, see [Leaderboard URLs](#leaderboard-urls). A local `127.0.0.1` renderer cannot host an attendee phone experience, and repository assets are not a public destination. Never use credential-bearing URLs to make private images appear public.
 
 The event owner has supplied and loaded static codes matching both short links. **These static codes are accepted for booth use; no regeneration is required.** The static leaderboard code opens the shared board, while the in-canvas code remains personalized to the attendee.
 

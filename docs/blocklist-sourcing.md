@@ -1,8 +1,8 @@
 # Sourcing the moderation blocklist
 
-**Status: a proposal awaiting a human decision. Nothing here approves a list.**
+**Status: decided on 2026-10-22.** Option B below was adopted, and the reviewed list in `booth/blocked-terms.json` records who approved it and when. Re-review it before each event.
 
-`booth/blocked-terms.json` ships as a placeholder. This document exists so the person who owns that decision has the tradeoffs in front of them instead of starting from a blank file. It deliberately contains no candidate terms: choosing them is the reviewable act, and a document that quietly supplied them would let the review be skipped.
+`booth/blocked-terms.json` shipped as a placeholder. This document exists so the person who owns that decision has the tradeoffs in front of them instead of starting from a blank file. It deliberately contains no candidate terms: choosing them is the reviewable act, and a document that quietly supplied them would let the review be skipped.
 
 ## What the list is actually defending
 
