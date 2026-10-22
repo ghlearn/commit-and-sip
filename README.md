@@ -221,7 +221,7 @@ The setup steps and prompts in this README use the event's two leaderboard URLs.
 | --- | --- | --- |
 | **What it is** | The leaderboard service. The booth publishes drinks to it and retracts takedowns from it. | The public link in each attendee's QR code. It opens the board on their own row. |
 | **Setting** | `leaderboardApi.url` | `leaderboardUrl` |
-| **How to set it** | `npm run leaderboard:configure -- --url https://<app>.azurewebsites.net` (the origin only, no path) | Add `"leaderboardUrl": "https://<your link>"` to the file, then reload extensions. `null` turns the QR off. |
+| **How to set it** | `npm run leaderboard:configure -- --url https://<app>.azurewebsites.net` (the origin only, no path), then reload extensions and reopen the canvases. | Add `"leaderboardUrl": "https://<your link>"` to the file, then reload extensions. `null` turns the QR off. |
 | **Current default** | None: a booth without it does not publish. This event's service is `https://commit-and-sip-leaderboard.azurewebsites.net`. | `https://gh.io/commit-and-sip-leader`, from `DEFAULT_LEADERBOARD_URL` in [`domain.mjs`](.github/extensions/commit-and-sip/domain.mjs). |
 
 - **Leaderboard URL.** The service answers at `https://<appName>.azurewebsites.net`, where `appName` is set in [`infra/main.parameters.json`](infra/main.parameters.json) (currently `commit-and-sip-leaderboard`), and the infrastructure deployment reports it as its `url` output. To publish to a different service, rerun `leaderboard:configure` with its URL on each booth, adding `--no-staff-key` on booth-only machines. That changes the URL and keeps the existing keys and `leaderboardUrl`.
