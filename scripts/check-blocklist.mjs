@@ -30,14 +30,25 @@ const VOCABULARY = [
   "morning", "midnight", "sunrise", "velvet", "smooth", "bold", "dark", "light"
 ];
 
+// Names that once tripped an entry, kept as a regression set. Most collide only
+// after separators are stripped and characters folded, so a term straddles two
+// innocent words: "8-bit Chai" is compared as "bitchai".
+export const EDGE_NAMES = [
+  "Copilot 8-bit Chai", "Ducky Bit Chocolate", "Mona Rabbit Chai",
+  "Mona Con Leche", "Bob's Cold Brew", "Copilot Vapor Noir", "Mona Fuji Zest",
+  "Dill Donut Latte", "Mona's Lute", "Doctor Who Red Eye", "Cash Ole Mocha",
+  "Mona's Hit Cold Brew", "Mona's Ex-Presso", "Copilot Pi's Brew"
+];
+
 function corpus(mascots, houseNames) {
-  const names = new Set(houseNames);
+  const names = new Set([...houseNames, ...EDGE_NAMES]);
   for (const mascot of mascots) {
     const cap = mascot[0].toUpperCase() + mascot.slice(1);
     for (const word of VOCABULARY) {
       names.add(`${cap} ${word}`);
       names.add(`${word} ${cap}`);
       names.add(`Classic ${cap} ${word}`);
+      names.add(`${cap}'s ${word}`);
     }
   }
   return [...names];

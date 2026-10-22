@@ -58,7 +58,7 @@ A key proves which service a request is allowed into, not that the booth code is
 - The handle must be built from `booth/handle-words.json`, optionally with the eight-hex collision suffix, or the request is refused with `422 invalid_handle`.
 - Ranking is the booth's own `leaderboard()`: competition ranking, where equal scores share a rank and the next rank skips. The booth and the board cannot disagree about a tie.
 
-The service moderates with the blocklist deployed alongside it. Updating the blocklist means redeploying the service. `/healthz` reports `moderation: "placeholder"` until the list is reviewed, and the service logs a warning at start-up.
+The service moderates with the blocklist deployed alongside it. Updating the blocklist means redeploying the service. `/healthz` reports `moderation: "placeholder"` whenever the list is unreviewed, and the service then logs a warning at start-up.
 
 **Version skew is real.** A rubric change that reaches the service before the booths makes their submissions fail with `score_mismatch`. The booth shows those drinks as still being confirmed, and the reason is in its sync record. Deploy the service from the same commit the booths run.
 
@@ -98,8 +98,9 @@ Each `EVENT_ID` is a separate board file, so setting a new ID starts a fresh boa
 ```
 GET    /                        public board (the future QR destination)
 GET    /api/board[?handle=&ref=]    { asOf, boardId, captured, rebuilding, total, entries[<=20], you? }  (ref is opaque, never the drink ID)
-                                captured: every drink ever admitted to this board, for tracking. Only a
-                                clear resets it: takedowns leave it, resends do not add. total: drinks on the board now.
+                                captured: every drink ever admitted to this board, for staff tracking. Only a
+                                clear resets it: takedowns leave it, resends do not add. total: drinks on the board now,
+                                which is the count the public page shows, so a takedown lowers it.
 POST   /api/entries             booth key. 201 new, 200 same entry again (handle
                                 may be canonical), 409 duplicate_drink |
                                 unavailable_drink | handle_taken,
@@ -122,9 +123,8 @@ Live-updating push displays, per-booth boards, historical events, attendee accou
 
 ## What blocks launch, separately from build
 
-A public board publishes attendee-invented names to the internet. Two gates remain, and neither is engineering:
+A public board publishes attendee-invented names to the internet. One gate remains, and it is not engineering:
 
-- **The moderation blocklist is still an unreviewed placeholder** (see the [sourcing proposal](blocklist-sourcing.md)). Every booth's attendee QR points at this board by default (`leaderboardUrl` defaults to <https://gh.io/commit-and-sip-leader>), so until the list is reviewed, staff takedown is the main moderation of names on it.
 - **Brand review of the mascot art** (see [the asset checklist](../.github/images/README.md)).
 
 The service is configured separately from the QR code: `leaderboardApi` controls publishing, and `leaderboardUrl` controls the QR code. That separation is deliberate. Setting `leaderboardUrl` to `null` turns the QR off at a booth, so the whole pipeline can be proven with staff test entries while no QR is shown.

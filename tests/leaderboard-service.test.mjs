@@ -357,7 +357,8 @@ test("the service refuses to start with weak or shared keys", () => {
 });
 
 test("health reports whether moderation is still the placeholder", async t => {
-  const placeholder = { ...rules, blocklist: (await loadNameRules()).blocklist };
+  const { blocklist } = await loadNameRules();
+  const placeholder = { ...rules, blocklist: { ...blocklist, review: { ...blocklist.review, placeholder: true } } };
   const shipped = await service(t, { serviceRules: placeholder });
   assert.deepEqual(await (await fetch(`${shipped.url}/healthz`)).json(), { moderation: "placeholder", ok: true });
   const approved = await service(t);
@@ -3466,16 +3467,18 @@ test("a failed write does not count the drink it failed to store", async t => {
   assert.equal((await store.state()).captured, 0);
 });
 
-test("the board page carries the event title and shows the captured count", async () => {
+test("the board page carries the event title and shows the drinks on the board now", async () => {
   const html = await readFile(new URL("../leaderboard-service/public/index.html", import.meta.url), "utf8");
   const script = await readFile(new URL("../leaderboard-service/public/board.js", import.meta.url), "utf8");
   assert.match(html, /<h1>GitHub Learn at Universe leaderboard<\/h1>/);
   assert.match(html, /<title>Commit &amp; Sip · GitHub Learn at Universe leaderboard<\/title>/);
   assert.doesNotMatch(html, /House leaderboard/);
-  assert.match(html, /<span id="captured-count"/);
-  assert.match(script, /setText\(\$\("captured-count"\), board\.captured\.toLocaleString\(\)\)/);
-  assert.match(html, /<span id="captured-label">drink names captured so far<\/span>/, "attendees invent names, so the count is of names");
-  assert.match(script, /board\.captured === 1 \? "drink name captured so far" : "drink names captured so far"/);
+  assert.match(html, /<span id="drink-count"/);
+  // The live count, so a takedown lowers it; the all-time tally is for staff.
+  assert.match(script, /setText\(\$\("drink-count"\), board\.total\.toLocaleString\(\)\)/);
+  assert.doesNotMatch(script, /board\.captured/, "the public page must not show the all-time tally");
+  assert.match(html, /<span id="drink-count-label">drink names on the board<\/span>/, "attendees invent names, so the count is of names");
+  assert.match(script, /board\.total === 1 \? "drink name on the board" : "drink names on the board"/);
 });
 
 // The title must fit on one line at every width. Measured in Chromium at

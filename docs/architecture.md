@@ -52,7 +52,7 @@ The rubric lives in code rather than in a data file. `booth/scoring-rubric.json`
 
 `services/moderation.mjs` folds digits to letters, strips separators, and collapses repeats on both sides before matching, so `b4d`, `b a d`, and `baaad` cannot evade a listed term. Word-mode matching joins runs of consecutive tokens for the same reason. The name character set rejects non-ASCII before the blocklist runs, so homoglyph and zero-width evasion is structurally impossible and no confusable table is needed.
 
-`booth/blocked-terms.json` ships as an explicit placeholder and is the only list. Its content is a human moderation decision, not a generated list. `extension.mjs` logs a warning on every start while the list is unreviewed, so a booth cannot quietly publish attendee names behind an unapproved filter.
+`booth/blocked-terms.json` is the only list. It shipped as an explicit placeholder and now holds a short list reviewed on 2026-10-22. Its content is a human moderation decision, not a generated list. `extension.mjs` logs a warning on every start whenever the list is unreviewed, so a booth cannot quietly publish attendee names behind an unapproved filter.
 
 A blocklist only catches what someone predicted. `removeDrink` covers the rest: staff run `npm run remove` to take an entry off the menu and the standings, recording who removed it and why. The ID becomes a tombstone rather than a deletion, so the name stays reserved and cannot simply be retyped back onto the menu, and resubmission is refused with the same wording as a blocklist hit. Takedown is not exposed through `dispatch`, because the canvas runs unattended on a screen facing the queue. A removed run's screen withdraws its rank, QR, and menu claim instead of continuing to congratulate the attendee.
 
@@ -125,10 +125,11 @@ Real defects have reached a fully green suite and been caught only in a browser:
 ## Release evidence still needed
 
 1. Authentic App captures and a keyboard, touch, and accessibility walkthrough.
-2. A reviewed moderation blocklist, approved by a human before any public booth use.
-3. A deployed leaderboard service and a real public QR destination, verified by scanning from a phone.
-4. Brand and trademark review of the mascot names and artwork.
-5. A decision on public template visibility.
+2. A deployed leaderboard service and a real public QR destination, verified by scanning from a phone.
+3. Brand and trademark review of the mascot names and artwork.
+4. A decision on public template visibility.
+
+The moderation blocklist was reviewed and approved on 2026-10-22; it needs re-review before each event rather than first-time approval.
 
 Passing local tests is not acceptance evidence for any of these.
 

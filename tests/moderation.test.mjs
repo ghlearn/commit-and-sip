@@ -5,7 +5,7 @@ import {
 } from "../.github/extensions/commit-and-sip/services/moderation.mjs";
 import { loadNameRules, validateCoffeeName } from "../.github/extensions/commit-and-sip/services/coffee-name.mjs";
 import { readFileSync } from "node:fs";
-import { inspectEntries, falsePositives } from "../scripts/check-blocklist.mjs";
+import { EDGE_NAMES, inspectEntries, falsePositives } from "../scripts/check-blocklist.mjs";
 
 const shippedNotes = () => JSON.parse(
   readFileSync(new URL("../booth/blocked-terms.json", import.meta.url), "utf8")).review.notes;
@@ -50,8 +50,29 @@ test("word mode does not reject ordinary words that contain the term", () => {
 });
 
 test("tokenization keeps word boundaries that the joined form discards", () => {
-  assert.deepEqual(matchTokens("Mona's Cold-Brew"), ["mona", "s", "cold", "brew"]);
+  assert.deepEqual(matchTokens("Mona's Cold-Brew"), ["mona", "cold", "brew"], "a possessive stays with its word");
   assert.equal(canonicalizeForMatch("Mona's Cold-Brew"), "monascoldbrew");
+});
+
+test("a possessive is not joined to its neighbours in word mode", () => {
+  // Fixture terms shaped like the real collisions: "s" + "hard" and "la" + "s".
+  const shaped = validateBlocklist({
+    review: { placeholder: true },
+    entries: [{ term: "shard", match: "word" }, { term: "lass", match: "word" }]
+  });
+  for (const name of ["Mona's Hard Roast", "Copilot La's Brew", "Mona'S Hard"]) {
+    assert.equal(findBlockedTerm(name, shaped), null, `${name} should be allowed`);
+  }
+  // Spaced-out evasion still joins: the "s" stands alone, not glued to a word.
+  for (const name of ["Mona S Hard", "Mona s-h-a-r-d", "Mona 's hard", "Mona la'ss", "Mona Lass's Brew"]) {
+    assert.ok(findBlockedTerm(name, shaped), `${name} should be blocked`);
+  }
+  // A term split around a possessive keeps its inner "s" ("ba's tard").
+  const inner = validateBlocklist({ review: { placeholder: true }, entries: [{ term: "toast", match: "word" }] });
+  for (const name of ["Mona toa's t", "Mona to a's t Latte", "Mona Toast's Brew"]) {
+    assert.ok(findBlockedTerm(name, inner), `${name} should be blocked`);
+  }
+  assert.equal(findBlockedTerm("Mona Toa's Brew", inner), null, "a possessive ending a run adds nothing");
 });
 
 test("a blocklist must declare provenance and a usable match mode", () => {
@@ -102,6 +123,11 @@ test("the shipped blocklist is valid, wired to names, and honest about its own r
   }
   assert.equal(validateCoffeeName("Mona Moonrise", rules).id, "mona-moonrise",
     "an ordinary name must survive whatever list is shipped");
+  // Names that a term once matched across innocent word boundaries.
+  for (const name of EDGE_NAMES) {
+    const hit = findBlockedTerm(name, shipped);
+    assert.equal(hit, null, `"${name}" must not be refused (matched a ${hit?.match} entry)`);
+  }
 });
 
 test("an absent blocklist is not treated as a match", () => {
