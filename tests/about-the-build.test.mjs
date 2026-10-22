@@ -109,19 +109,21 @@ test("each attendee's leaderboard code is encoded with a four-module margin", as
   assert.ok(options.margin >= 4, `margin ${options.margin}`);
 });
 
-// Following the documentation must never expose attendee names before the
-// moderation review: the attendee QR is a gated setting in every setup step.
-test("the setup docs keep the attendee QR gated on the blocklist review", async () => {
+// Every booth shows the attendee QR by default, so the setup docs must say
+// where it points and how staff turn it off at one booth.
+test("the setup docs give the attendee QR's default destination and how to turn it off", async () => {
   const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
   const runbook = await readFile(new URL("../booth/RUNBOOK.md", import.meta.url), "utf8");
+  const { DEFAULT_LEADERBOARD_URL } = await import("../.github/extensions/commit-and-sip/domain.mjs");
   const setting = text => text.split("\n").find(line => line.startsWith("- `leaderboardUrl` puts a"));
   for (const [label, text] of [["README", readme], ["runbook", runbook]]) {
     const line = setting(text);
     assert.ok(line, `${label} describes the setting`);
-    assert.match(line, /Leave it unset until the moderation blocklist is reviewed/, `${label}: the gate comes first`);
+    assert.ok(line.includes(`defaults to the event short link \`${DEFAULT_LEADERBOARD_URL}\``), `${label}: the default it ships with`);
+    assert.match(line, /`"leaderboardUrl": null` only to turn the QR off/, `${label}: how to turn it off`);
   }
   const readiness = runbook.slice(runbook.indexOf("## Leaderboard and QR readiness"));
-  assert.match(readiness, /stays gated on the blocklist review/);
+  assert.match(readiness, /attendee QR is \*\*on by default\*\*/);
 });
 
 // Status statements go stale silently. These are the ones that were once true
@@ -132,7 +134,8 @@ test("the operator docs describe the current deployment, not an earlier one", as
     /current booth client does not work/i, /repository it opens is private/, /there is no public QR destination/i,
     /no attendee-facing QR code points at it/i, /gated on the blocklist review and the service redeploy/,
     /one such change is waiting/, /change not yet live is the board page's 24 px quiet zone/,
-    /deployer here holds Reader only/, /have not been run against the live service/];
+    /deployer here holds Reader only/, /have not been run against the live service/,
+    /leave it unset until/i, /stays unset until the blocklist/i, /Leaderboard QR — not generated yet/];
   for (const file of ["../README.md", "../booth/RUNBOOK.md", "../docs/leaderboard-service.md", "../docs/integration-contract.md",
     "../docs/architecture.md", "../.github/images/README.md"]) {
     const text = await readFile(new URL(file, import.meta.url), "utf8");

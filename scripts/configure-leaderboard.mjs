@@ -17,8 +17,9 @@ guardNodeVersion();
 // writes the secure deployment parameters the Bicep needs from the same keys.
 // Both files are readable by this user only and neither is committed.
 //
-// It deliberately does not set leaderboardUrl. That setting puts a QR code in
-// front of attendees, and it waits for the blocklist review and brand sign-off.
+// It does not touch leaderboardUrl, the attendee QR code. Booths default to
+// the event's short link; a config that sets leaderboardUrl to null keeps the
+// QR off, and that choice survives a rerun.
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const execFileAsync = promisify(execFile);

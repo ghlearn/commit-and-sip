@@ -1,6 +1,6 @@
 # Leaderboard service
 
-**Status: deployed at <https://commit-and-sip-leaderboard.azurewebsites.net> (short link <https://gh.io/commit-and-sip-leader>), redeployed on 2026-10-01 and verified end to end through the booth canvases. The attendee QR (`leaderboardUrl`) stays unset until the blocklist is reviewed; the event owner has switched it on for one booth machine ahead of that review, for staff testing.**
+**Status: deployed at <https://commit-and-sip-leaderboard.azurewebsites.net> (short link <https://gh.io/commit-and-sip-leader>), redeployed on 2026-10-01 and verified end to end through the booth canvases. Every booth's attendee QR (`leaderboardUrl`) points at the short link by default.**
 
 > **What is live.** Everything in this document is deployed, including the captured tally, the board page's 24 px quiet zone around the repository QR, and `POST /api/board/clear` (deployed on 2026-10-02 from the branch that adds it, ahead of its merge). A later change ships with the next code deploy from an identity with Contributor (`npm run leaderboard:package`, then the `az webapp deploy … --async true` command and the version check in the runbook).
 
@@ -124,7 +124,7 @@ Live-updating push displays, per-booth boards, historical events, attendee accou
 
 A public board publishes attendee-invented names to the internet. Two gates remain, and neither is engineering:
 
-- **The moderation blocklist is still an unreviewed placeholder** (see the [sourcing proposal](blocklist-sourcing.md)). Until it is reviewed, do not set `leaderboardUrl`, which is the setting that puts a QR code in front of attendees.
+- **The moderation blocklist is still an unreviewed placeholder** (see the [sourcing proposal](blocklist-sourcing.md)). Every booth's attendee QR points at this board by default (`leaderboardUrl` defaults to <https://gh.io/commit-and-sip-leader>), so until the list is reviewed, staff takedown is the main moderation of names on it.
 - **Brand review of the mascot art** (see [the asset checklist](../.github/images/README.md)).
 
-The service is configured separately from the QR code: `leaderboardApi` controls publishing, and `leaderboardUrl` controls the QR code. That separation is deliberate. The whole pipeline can be proven with staff test entries while the QR code stays off.
+The service is configured separately from the QR code: `leaderboardApi` controls publishing, and `leaderboardUrl` controls the QR code. That separation is deliberate. Setting `leaderboardUrl` to `null` turns the QR off at a booth, so the whole pipeline can be proven with staff test entries while no QR is shown.

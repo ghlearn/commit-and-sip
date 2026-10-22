@@ -18,17 +18,17 @@ Confirm each capture matches its alt text, status, and control labels; revise th
 
 Once the files exist, repository Markdown may reference them relatively.
 
-## Leaderboard QR — not generated yet
+## Leaderboard QR — supplied, not generated here
 
-Required committed output: `.github/images/leaderboard-qr.png`.
+Optional committed output: `.github/images/leaderboard-qr.png`.
 
 Companion output: `.github/images/leaderboard-qr.png.json`, containing the encoded leaderboard URL, PNG SHA-256 digest, generation timestamp, and alt text. Review and retain the PNG and manifest together.
 
-The event owner has supplied a static code for `https://gh.io/commit-and-sip-leader`, which redirects to the leaderboard service. It is not committed here, because the booth renders each attendee's own code from `leaderboardUrl`. Advertising it is still gated on the blocklist review. The supplied image has almost no quiet zone (it decodes only once a white border is added), so print it with a margin. After approval, run from the repository root:
+The event owner has supplied a static code for `https://gh.io/commit-and-sip-leader`, the event's leaderboard URL, which redirects to the leaderboard service. It is not committed here, because each booth renders the attendee's own code from that URL by default. The supplied image has almost no quiet zone (it decodes only once a white border is added), so print it with a margin. `npm run qr` cannot regenerate it yet: the generator refuses any URL that redirects. For a destination that does not redirect, run from the repository root:
 
 ```sh
 npm ci
-npm run qr -- <configured-HTTPS-leaderboard-URL>
+npm run qr -- <public-HTTPS-URL-that-does-not-redirect>
 ```
 
 A committed PNG alone is not a public phone destination. Approve a public HTTPS leaderboard, verify the generated code resolves to it, and never embed an access token or use a loopback or private-network address.

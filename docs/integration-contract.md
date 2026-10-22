@@ -21,7 +21,7 @@ The booth exercise is a creative naming competition run entirely inside the Copi
 | Naming | The attendee types one name that must contain `mona`, `copilot`, or `ducky`, and chooses where it sits: at the start, in the middle, at the end, or blended into a word such as `Monachino`. `mascotPlacement` reports the placement actually used, and a declared mascot or placement is checked against the typed name rather than quietly overridden. The mascot is something to build on, so a bare `Mona` is rejected — the attendee has to add something of their own. `validateCoffeeName` applies the structural anti-injection rules and the single moderation list in `booth/blocked-terms.json`. |
 | Uniqueness | Enforced on the canonical menu ID, so casing and spacing variants collide. The attendee is told which existing drink clashed, including when it is a house example. A refused name costs nothing: the phase, menu, and ledger are unchanged, and they simply try again. |
 | Scoring | A deterministic rubric in `services/name-score.mjs` scores 1-5000 over alliteration, coffee craft, wordplay, house shape, and invention. Placement is recorded but never scored, so no position is worth more than another and the choice stays free. |
-| Result | The canvas shows the score breakdown, the updated house menu, and the attendee's rank. A leaderboard link or QR appears only once staff configure an approved public destination. |
+| Result | The canvas shows the score breakdown, the updated house menu, and the attendee's rank, with a link and QR code to their place on the event leaderboard unless staff turned the QR off at that booth. |
 | Completion | `complete` closes out the attendee so the booth can be handed to the next one. It requires a served drink, is idempotent against a double click, and finishes the run rather than erasing it: the drink stays on the house menu and the leaderboard, and remains unavailable to later attendees. The next attendee is a new run with a new handle. |
 
 ### Scoring is a rubric, not a judge
@@ -46,7 +46,7 @@ A receipt is accepted only when its handle, ID, name, and score match what was s
 
 `syncView` keeps two facts apart that are easy to conflate: the booth standing is local and the booth owns it, while an event rank exists only once the service confirms it. Until then the canvas says the place is still being confirmed, and the booth rank is labelled "at this booth" so it cannot be read as an event-wide placing.
 
-The leaderboard destination is <https://gh.io/commit-and-sip-leader>. `leaderboardUrl` stays null unless staff configure an approved destination, and no link or QR is invented. Public attendee use remains gated on the blocklist review. `BoothEngine` refuses a non-web `leaderboardUrl` at construction rather than rendering a code that scans to nothing, exposes `attendeeUrl` only after the attendee has played, and leaves it null when nothing is configured. The requirement for an approved publicly reachable HTTPS destination and a real scannable QR is unchanged.
+The leaderboard destination is <https://gh.io/commit-and-sip-leader>, and every booth uses it by default (`DEFAULT_LEADERBOARD_URL`). Staff can point a booth elsewhere or set `leaderboardUrl` to `null` to show no link or QR; nothing else is invented. `BoothEngine` refuses a non-web `leaderboardUrl` at construction rather than rendering a code that scans to nothing, exposes `attendeeUrl` only after the attendee has played, and leaves it null when the QR is off. The requirement for a publicly reachable HTTPS destination and a real scannable QR is unchanged.
 
 ### Moderation
 
@@ -98,11 +98,11 @@ API-level tests do not exercise HTML form validation or default-selected `<optio
 
 ### Launch gates
 
-The code is built and the leaderboard service is deployed. Two gates stand between this and attendees, and neither is code: the blocklist review and the brand review. The attendee QR is not a third gate; it waits on the blocklist review.
+The code is built and the leaderboard service is deployed. Two gates stand between this and attendees, and neither is code: the blocklist review and the brand review. The attendee QR is not a third gate: every booth shows it by default.
 
 The moderation blocklist needs reviewed content. The mechanism is built, the gap is reported at every start, and staff can now take a name down after the fact, but no list has been approved, and nothing in this repository certifies a list as adequate.
 
-The leaderboard service is deployed (`leaderboard-service/`, <https://commit-and-sip-leaderboard.azurewebsites.net>) and serves the current booth client. The attendee QR (`leaderboardUrl`) is gated on the blocklist review: leave it unset until then. The event owner has switched it on for one booth machine ahead of the review, for staff testing. Publishing (`leaderboardApi`) and the attendee QR are configured separately, so the service can be proven with staff entries while the QR stays off. Do not present a placeholder QR as a production link.
+The leaderboard service is deployed (`leaderboard-service/`, <https://commit-and-sip-leaderboard.azurewebsites.net>) and serves the current booth client. The attendee QR (`leaderboardUrl`) defaults to <https://gh.io/commit-and-sip-leader> on every booth, so until the blocklist is reviewed, staff takedown is the main moderation of names on the public page. Publishing (`leaderboardApi`) and the attendee QR are configured separately; setting `leaderboardUrl` to `null` turns the QR off at a booth. Do not present a placeholder QR as a production link.
 
 Brand and trademark review of the mascot names and artwork has not happened. The cup illustration is original work carried over from the retired review page, but the froth now carries the official Mona mascot (`renderer/mona.png`), so unapproved official brand art is on the attendee screen today. Unlike the blocklist gate, this one is not something the repository merely withholds: it ships, and a negative review would require removing it. Provenance, modifications, and the outstanding decision are recorded in [the asset checklist](../.github/images/README.md).
 

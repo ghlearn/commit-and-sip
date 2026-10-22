@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RunStore } from "../.github/extensions/commit-and-sip/store.mjs";
 import { BoothEngine } from "../.github/extensions/commit-and-sip/booth-engine.mjs";
-import { loadCatalog } from "../.github/extensions/commit-and-sip/domain.mjs";
+import { attendeeLeaderboardUrl, DEFAULT_LEADERBOARD_URL, loadCatalog, validateStaffConfig } from "../.github/extensions/commit-and-sip/domain.mjs";
 import { loadNameRules } from "../.github/extensions/commit-and-sip/services/coffee-name.mjs";
 
 const catalog = await loadCatalog();
@@ -109,10 +109,26 @@ test("handles stay unique across attendees at the same booth", async t => {
 test("the booth never invents a leaderboard URL", async t => {
   const plain = await booth(t);
   assert.equal((await plain.engine.open({ runId: "booth-1" })).leaderboardUrl, null,
-    "no QR or link is offered until staff configure an approved destination");
+    "the engine offers no QR or link unless it is given a destination");
 
   const configured = await booth(t, { leaderboardUrl: "https://sip.example.com/board" });
   assert.equal((await configured.engine.open({ runId: "booth-1" })).leaderboardUrl, "https://sip.example.com/board");
+});
+
+test("every booth points attendees at the event leaderboard unless staff turn the QR off", async t => {
+  assert.equal(DEFAULT_LEADERBOARD_URL, "https://gh.io/commit-and-sip-leader");
+  assert.equal(attendeeLeaderboardUrl({}), DEFAULT_LEADERBOARD_URL, "an unconfigured booth uses the event short link");
+  assert.equal(attendeeLeaderboardUrl({ leaderboardUrl: null }), null, "null turns the attendee QR off");
+  assert.equal(attendeeLeaderboardUrl({ leaderboardUrl: "https://sip.example.com/board" }), "https://sip.example.com/board");
+  assert.deepEqual(validateStaffConfig({ leaderboardUrl: null }), { leaderboardUrl: null });
+  assert.throws(() => validateStaffConfig({ leaderboardUrl: 42 }), { code: "invalid_config" });
+
+  // The default must pass the same public-HTTPS rule as a configured URL.
+  const { engine } = await booth(t, { leaderboardUrl: attendeeLeaderboardUrl({}) });
+  await engine.open({ runId: "booth-1" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  assert.equal(served.leaderboardUrl, DEFAULT_LEADERBOARD_URL);
+  assert.equal(served.attendeeUrl, DEFAULT_LEADERBOARD_URL, "a booth that has not published links the plain board");
 });
 
 test("booth runs and other exercise modes never collide on a run ID", async t => {

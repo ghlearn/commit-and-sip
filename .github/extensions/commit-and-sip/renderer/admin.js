@@ -162,7 +162,7 @@
         : "Event leaderboard publishing: on, without a staff key. This machine publishes drinks but cannot take them down.");
     line(list, state.leaderboardUrl
       ? `Attendee link (QR): set (${state.leaderboardUrl}).`
-      : "Attendee link (QR): not set. Attendees are told there is nothing to scan.");
+      : "Attendee link (QR): off (leaderboardUrl is null). Attendees are not shown a code.");
   }
 
   function menu(state) {

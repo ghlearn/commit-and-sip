@@ -56,9 +56,20 @@ export function validateStaffConfig(config) {
   const retired = RETIRED_KEYS.filter(key => Object.hasOwn(config, key));
   requireValue(retired.length === 0, "retired_config",
     `Remove retired pull-request settings from booth/local-config.json: ${retired.join(", ")}.`, 400);
-  requireValue(config.leaderboardUrl === undefined || typeof config.leaderboardUrl === "string",
-    "invalid_config", "A configured leaderboardUrl must be a string.", 400);
+  requireValue(config.leaderboardUrl === undefined || config.leaderboardUrl === null || typeof config.leaderboardUrl === "string",
+    "invalid_config", "A configured leaderboardUrl must be a string, or null to turn the attendee QR code off.", 400);
   return config;
+}
+
+// The event's one public leaderboard. It redirects to the leaderboard service
+// and keeps the query string, so each attendee's personal code still opens
+// their own row. Every booth uses it unless its config says otherwise.
+export const DEFAULT_LEADERBOARD_URL = "https://gh.io/commit-and-sip-leader";
+
+// The attendee QR destination: the event default when leaderboardUrl is
+// absent, none when staff set it to null, and otherwise what they configured.
+export function attendeeLeaderboardUrl(config) {
+  return config.leaderboardUrl === undefined ? DEFAULT_LEADERBOARD_URL : config.leaderboardUrl;
 }
 
 // On Windows a file's mode says nothing about who can read it; its ACL does.
