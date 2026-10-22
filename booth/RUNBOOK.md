@@ -1,5 +1,7 @@
 # Commit & Sip booth runbook
 
+For an at-a-glance reference during a shift, use the [Booth staff cheat sheet](CHEAT-SHEET.md).
+
 **The booth runs entirely in the canvas.** Attendees never open GitHub, a terminal, or an editor. Commands below are staff-only and run from the repository root unless stated otherwise.
 
 **Not event-ready.** The moderation blocklist is an unreviewed placeholder, and brand review has not happened. The leaderboard service is live and accepts the current booth client, and every booth's attendee QR points at <https://gh.io/commit-and-sip-leader> by default, so until the blocklist is reviewed, staff takedown is the main moderation of names on the public page. See those sections before running a public booth.
@@ -40,11 +42,26 @@ The booth reads one optional ignored file, `booth/local-config.json`, with two i
 ```
 
 - `leaderboardApi` makes the booth publish to the leaderboard service and lets takedowns retract from it. Its `url` is the service's **origin only** (no path); anything else is refused at start-up. **Write it with `npm run leaderboard:configure`, never by hand** (see [Leaderboard service operations](#leaderboard-service-operations)). Leave out `staffKey` on a machine that should not take drinks down. The file is written readable by its owner only.
-- `leaderboardUrl` puts a QR code in front of attendees, to their own place on a public page of attendee names. It defaults to the event short link `https://gh.io/commit-and-sip-leader`, so leave it out of the file. Add `"leaderboardUrl": null` only to turn the QR off at this booth; `leaderboard:configure` keeps that choice when it rewrites the file. The staff dashboard shows which state the booth is in.
+- `leaderboardUrl` puts a QR code in front of attendees, to their own place on a public page of attendee names. It defaults to the event short link `https://gh.io/commit-and-sip-leader`, so leave it out of the file unless this booth uses a different board. Add `"leaderboardUrl": null` only to turn the QR off at this booth; `leaderboard:configure` keeps that choice when it rewrites the file. The staff dashboard shows which state the booth is in.
 
 Both URLs must be public HTTPS with no credentials, fragment, or nonstandard port. Retired pull-request keys (`mode`, `runs`, `repo`, `requiredChecks`) are rejected on start with a `retired_config` diagnostic rather than ignored, so a stale config cannot look configured. A valid JSON file containing `null`, an array, or a scalar is not valid staff configuration; correct it using the explicit `invalid_config` diagnostic rather than treating it as a network error.
 
 The two leaderboard API keys belong in that file and nowhere else. Never put them, or any other credential, in the renderer, the repository, a QR URL, or a chat or issue. The file is never packaged: the deploy packager refuses to include it.
+
+### Leaderboard URLs
+
+This runbook and the README use the event's two leaderboard URLs. Each booth can change either one in `booth/local-config.json`:
+
+| | Leaderboard URL | Short leaderboard URL |
+| --- | --- | --- |
+| **What it is** | The leaderboard service. The booth publishes drinks to it and retracts takedowns from it. | The public link in each attendee's QR code. It opens the board on their own row. |
+| **Setting** | `leaderboardApi.url` | `leaderboardUrl` |
+| **How to set it** | `npm run leaderboard:configure -- --url https://<app>.azurewebsites.net` (the origin only, no path), then reload extensions and reopen the canvases. | Add `"leaderboardUrl": "https://<your link>"` to the file, then reload extensions. `null` turns the QR off. |
+| **Current default** | None: a booth without it does not publish. This event's service is `https://commit-and-sip-leaderboard.azurewebsites.net`. | `https://gh.io/commit-and-sip-leader`, from `DEFAULT_LEADERBOARD_URL` in [`domain.mjs`](../.github/extensions/commit-and-sip/domain.mjs). |
+
+- **Leaderboard URL.** The service answers at `https://<appName>.azurewebsites.net`, where `appName` is set in [`infra/main.parameters.json`](../infra/main.parameters.json) (currently `commit-and-sip-leaderboard`), and the infrastructure deployment reports it as its `url` output. The commands in [Leaderboard service operations](#leaderboard-service-operations) use this event's URL and names; substitute yours. To publish to a different service, rerun `leaderboard:configure` with its URL on each booth, adding `--no-staff-key` on booth-only machines. That changes the URL and keeps the existing keys and `leaderboardUrl`. The booth reads the file only when the extension starts, so then reload extensions and reopen the canvases; until then a running booth keeps publishing and retracting against the previous service.
+- **Short leaderboard URL.** The default is a gh.io redirect to the service that keeps the query string; the redirect itself is managed outside this repository. A replacement can be another short link or the service URL itself. It must open the board page and keep the `handle` and `ref` query parameters, so each attendee's code still opens their own row. On a publishing booth the file also holds the keys, so keep it readable only by its owner when you edit it, or the booth refuses to load it (`config_exposed`; the fix is in [copying the keys to another machine](#copying-the-keys-to-another-machine)). The staff dashboard shows the link the booth is using.
+- **Prompts.** The leaderboard prompts in the README's [Open the canvases](../README.md#open-the-canvases) use the default short leaderboard URL. If your booth uses another, paste yours in its place.
 
 ## Moderation blocklist — review required before publishing attendee names
 
@@ -287,7 +304,7 @@ The booth itself holds to the same rule: the canvases and the staff commands ref
 
 Two short links exist. `https://gh.io/commit-and-sip-leader` redirects to the leaderboard service and keeps any query string. `https://gh.io/commit-and-sip` points at this (public) repository. The repository QR (`renderer/repo-qr.png`) is on the booth's served screen and on the public leaderboard, under **How this was built**. Print either code with a white margin: the supplied images have almost no quiet zone.
 
-The leaderboard **service** is deployed (see [Leaderboard service operations](#leaderboard-service-operations)). Every booth's attendee QR is **on by default**: each attendee's served screen shows a personal QR code (240 px, decoded off the screen) for the short link that opens the board on their own row. The blocklist review is still outstanding, so until it is done, staff takedown is the main moderation of names on the public page. To turn the QR off at one booth, add `"leaderboardUrl": null` to its `booth/local-config.json` and reload extensions. A local `127.0.0.1` renderer cannot host an attendee phone experience, and repository assets are not a public destination. Never use credential-bearing URLs to make private images appear public.
+The leaderboard **service** is deployed (see [Leaderboard service operations](#leaderboard-service-operations)). Every booth's attendee QR is **on by default**: each attendee's served screen shows a personal QR code (240 px, decoded off the screen) for the short link that opens the board on their own row. The blocklist review is still outstanding, so until it is done, staff takedown is the main moderation of names on the public page. To turn the QR off at one booth, add `"leaderboardUrl": null` to its `booth/local-config.json` and reload extensions; to point it at another link, see [Leaderboard URLs](#leaderboard-urls). A local `127.0.0.1` renderer cannot host an attendee phone experience, and repository assets are not a public destination. Never use credential-bearing URLs to make private images appear public.
 
 The event owner has supplied and loaded static codes matching both short links. **These static codes are accepted for booth use; no regeneration is required.** The static leaderboard code opens the shared board, while the in-canvas code remains personalized to the attendee.
 
