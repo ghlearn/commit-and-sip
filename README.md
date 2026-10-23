@@ -89,7 +89,7 @@ Canvases open in the App's right side panel. Copy each prompt below with its cop
 
 ```text
 Ask me for the location of the folder or file that holds the booth's local-config.json (the leaderboard keys).
-Copy it, don't symlink it, to booth/local-config.json, make it owner-only (chmod 600 and chmod -N on macOS), and never print or echo the keys.
+Copy it, don't symlink it, to booth/local-config.json without ever exposing the keys: first create an empty temporary file next to the destination and make it owner-only (chmod 600 and chmod -N on macOS), then copy the contents into that file, then rename it over booth/local-config.json. Never print or echo the keys.
 Reload extensions and confirm commit-and-sip is running.
 Then open the Commit & Sip attendee canvas, the Commit & Sip staff canvas, and a browser canvas at https://gh.io/commit-and-sip-leader.
 ```
