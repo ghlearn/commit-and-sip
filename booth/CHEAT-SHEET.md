@@ -8,6 +8,17 @@ Quick reference for a configured booth. [First-time setup](../README.md#run-comm
 
 Start an **Interactive** session under **Projects** for this repository, not **Chats**. Copy these prompts into Copilot using each block's copy button.
 
+**One-prompt setup.** Copilot asks for the location of `local-config.json` first, and you give it a path, never the keys:
+
+```text
+Ask me for the location of the folder or file that holds the booth's local-config.json (the leaderboard keys).
+Copy it, don't symlink it, to booth/local-config.json without ever exposing the keys: first create an empty temporary file next to the destination and make it owner-only (chmod 600 and chmod -N on macOS), then copy the contents into that file, then rename it over booth/local-config.json. Never print or echo the keys.
+Reload extensions and confirm commit-and-sip is running.
+Then open the Commit & Sip attendee canvas, the Commit & Sip staff canvas, and a browser canvas at https://gh.io/commit-and-sip-leader.
+```
+
+Or step by step:
+
 ```text
 Reload extensions and list them.
 ```
