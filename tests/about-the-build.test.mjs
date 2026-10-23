@@ -161,7 +161,7 @@ test("the setup docs say how to set each leaderboard URL and what it defaults to
   }
   // The prompts paste the default, so a new default has to reach them too.
   const prompts = readme.split("\n").filter(line => line.includes("browser canvas at https://"));
-  assert.equal(prompts.length, 2, "the leaderboard prompt and the all-at-once prompt");
+  assert.equal(prompts.length, 3, "the one-prompt setup, the leaderboard prompt, and the all-at-once prompt");
   for (const prompt of prompts) assert.ok(prompt.endsWith(`browser canvas at ${DEFAULT_LEADERBOARD_URL}.`), prompt);
 });
 

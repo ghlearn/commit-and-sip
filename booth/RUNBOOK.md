@@ -27,6 +27,8 @@ Reload extensions after changing extension code or the step document.
 5. **Read the start-up log.** A moderation warning means the blocklist is still an unreviewed placeholder. Treat it as a release blocker, not noise.
 6. Open `commit-and-sip` with no input, or `{}`, and complete a warm-up run yourself. Check keyboard access, text status, visible error messages, and that hand-over returns the counter to idle.
 
+**Shortcut for a booth that already has its keys.** Paste one prompt and let Copilot ask where `local-config.json` is kept (give it the path, never the keys). It copies the file to `booth/local-config.json` as an owner-only copy (not a symlink), reloads extensions, and opens the attendee canvas, the staff canvas, and the leaderboard in a browser canvas. The prompt is in the [README](../README.md#open-the-canvases) and the [cheat sheet](CHEAT-SHEET.md#open-the-booth). It does not create keys: for a new booth use `leaderboard:configure` as described below.
+
 Host tool sequence: `extensions_reload` → `extensions_manage` with `list`/`inspect` → `list_canvas_capabilities` → `open_canvas`. These names are not terminal commands. Use the actual loaded extension ID and log location reported by the host.
 
 Choose a distinct panel `instanceId`. Actions address that instance; persistent data uses the run ID the station mints.
