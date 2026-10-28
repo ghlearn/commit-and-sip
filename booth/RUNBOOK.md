@@ -8,7 +8,7 @@ For an at-a-glance reference during a shift, use the [Booth staff cheat sheet](C
 
 ## Exercise shape
 
-There is one learner step: **Name a drink for the house menu**. The [canonical instructions](../.github/steps/1-name-a-drink.md) match what the screen tells the attendee. Getting a handle, choosing a mascot and its placement, submitting a name, reading the score, and handing over are activities within that one step, not separate lessons.
+There is one learner step: **Name a drink for the house menu**. The [canonical instructions](../.github/steps/1-name-a-drink.md) match what the screen tells the attendee. Getting a handle, typing a name with a mascot in it, reading the score, and handing over are activities within that one step, not separate lessons.
 
 The attendee flow is `idle → naming → served → complete`. Marking complete clears the counter for the next attendee; it does not remove the served drink from the house menu or the booth standings.
 
@@ -85,7 +85,7 @@ The blocklist is one layer. The name charset already rejects non-ASCII, so homog
 
 1. Open the canvas and confirm the counter is idle before the attendee sits down.
 2. Have them choose **Start my order**. The station mints their barista handle; write nothing down for them, the screen holds it.
-3. Let them pick a mascot and where it sits, then type a name. The mascot may appear anywhere in the name; that placement is their choice, not a rule.
+3. Let them type a name. The screen asks only for the name, with a hint that a mascot is required. The mascot may appear anywhere in the name; that placement is their choice, not a rule.
 4. If the name is rejected, read the actual message and do not paraphrase it. A duplicate names itself — "Mona Meridian is already on the menu" — because that drink is already visible on the menu in front of them, so there is nothing to protect. The generic "That name is not available. Try another." means something else: a blocklist hit or a drink staff took down. Those two are worded identically on purpose, so never speculate aloud about which, and in particular never guess "someone already had that" — a duplicate would have said so itself.
 5. Read the score breakdown with them. It is a published rubric, not Copilot's opinion, and every component is explainable from the screen.
 6. Point out that "rank 1 of 1 at this booth" is this booth's menu only. Only a confirmed event line reflects the wider competition.

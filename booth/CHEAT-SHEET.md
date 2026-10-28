@@ -42,7 +42,7 @@ Keep the staff panel out of view of the queue. It exposes staff details and dest
 ## One attendee
 
 1. Choose **Start my order**. The screen assigns a barista handle; no GitHub account, terminal, or editor is needed.
-2. Let them invent a name containing `mona`, `ducky`, or `copilot` anywhere, with more than the mascot alone. Mascot and placement pickers are optional; if used, they must match the typed name.
+2. Let them invent a name containing `mona`, `ducky`, or `copilot` anywhere, with more than the mascot alone. The screen has only a name field, with a hint that a mascot is required; the station reads the mascot and placement from the name.
 3. Choose **Add it to the menu**. The score is **1 to 5,000**, from a deterministic rubric, not an AI judge. Mid-range scores are normal; placement, speed, and retries do not affect points. House examples are never scored or ranked.
 4. Let them scan their personal leaderboard QR or use its link before choosing **I'm done - hand over to the next barista**. Confirm the counter is idle before inviting the next person. Hand-over keeps their drink and score.
 

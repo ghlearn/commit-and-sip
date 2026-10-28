@@ -51,6 +51,20 @@ test("richer names outrank plainer ones", () => {
   assert.ok(score("Mona Mocha") > score("Mona Nebula"), "a coffee term beats a bare invented word");
 });
 
+test("more mascots earn a Mascot crew bonus, not Invention credit", () => {
+  const part = (name, label) => scoreCoffeeName(name, rules).breakdown.find(item => item.label === label);
+  assert.equal(part("Mona Mocha", "Mascot crew").points, 0);
+  assert.equal(part("Mona Ducky Mocha", "Mascot crew").points, 300);
+  assert.equal(part("Mona Ducky Copilot Mocha", "Mascot crew").points, 600);
+  assert.equal(part("Monachino Ducky", "Mascot crew").points, 300, "a blended mascot still joins the crew");
+  assert.deepEqual(part("Mona Ducky Copilot Mocha", "Invention").detail, [], "mascots are not invented words");
+
+  const score = name => scoreCoffeeName(name, rules).score;
+  assert.ok(score("Mona Ducky Copilot Mocha") > score("Mona Ducky Mocha"));
+  assert.ok(score("Mona Ducky Mocha") > score("Mona Mocha"));
+  assert.ok(score("Mona Ducky Mocha") > score("Mona Nebula Mocha"), "a second mascot beats an ordinary invented word");
+});
+
 test("the house examples are never scored", () => {
   for (const name of ["Mona Latte", "Copilot Cortado", "Ducky Cold Brew", "  mona   latte  "]) {
     assert.throws(() => scoreCoffeeName(name, rules), { code: "example_name", status: 400 });

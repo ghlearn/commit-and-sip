@@ -42,20 +42,9 @@
         <fieldset id="name-fields">
           <legend>Your drink</legend>
 
-          <label for="pick-mascot">Mascot</label>
-          <select id="pick-mascot" aria-describedby="mascot-help">
-            <option value="">Any - I'll just type it</option>
-          </select>
-          <p id="mascot-help">Optional. Your name must contain one mascot; pick one here only if you want it checked.</p>
-
-          <label for="pick-placement">Where does the mascot go?</label>
-          <select id="pick-placement" aria-describedby="placement-help">
-            <option value="">Anywhere - I'll just type it</option>
-          </select>
-          <p id="placement-help">Optional. Pick a spot and we'll check your name matches it.</p>
-
           <label for="pick-name">Drink name</label>
-          <input id="pick-name" type="text" required minlength="3" maxlength="40" autocomplete="off" spellcheck="false" aria-describedby="name-help">
+          <input id="pick-name" type="text" required minlength="3" maxlength="40" autocomplete="off" spellcheck="false" aria-describedby="mascot-hint name-help">
+          <p id="mascot-hint"><strong>Required:</strong> include a mascot: Copilot, Ducky, or Mona. Example: Monachino. Use more than one mascot name for bonus points.</p>
           <p id="name-help">3 to 40 characters. Letters, numbers, spaces, hyphens, and apostrophes.</p>
 
           <button id="name-submit" class="primary" type="submit">Add it to the menu</button>

@@ -6,7 +6,7 @@ You are the guest barista at the Level Up Lounge. Invent one drink name in about
 
 The booth canvas opens idle at the counter. Choose **Start my order**. The station mints your barista handle, which is how your entry is identified on the house menu and the leaderboard. Complete instructions are in [Step 1: Name a drink for the house menu](../.github/steps/1-name-a-drink.md).
 
-Every drink must carry **mona**, **ducky**, or **copilot**, anywhere in the name; the mascot does not have to come first. The mascot and placement pickers are optional, and placement earns no points, so put the mascot where you like. A bare mascot on its own is rejected, so add something of your own.
+Every drink must carry **mona**, **ducky**, or **copilot**, anywhere in the name; the mascot does not have to come first, and it can be blended into a word such as Monachino. There is nothing to pick: the station reads the mascot from what you type, and placement earns no points, so put the mascot where you like. A bare mascot on its own is rejected, so add something of your own.
 
 Type your name and choose **Add it to the menu**. The menu is first come, first served, so if a name is already taken the station says so and you try another. Mona Latte, Copilot Cortado, and Ducky Cold Brew are worked examples; they are never scored and never reach the leaderboard.
 

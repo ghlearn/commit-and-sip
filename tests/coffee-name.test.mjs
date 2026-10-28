@@ -55,6 +55,8 @@ test("a mascot must appear somewhere, but the attendee chooses where", () => {
   assert.equal(validateCoffeeName("Iced Copilot Cup", rules).placement, "middle");
   assert.equal(validateCoffeeName("Monastery Blend", rules).placement, "blend");
   assert.equal(validateCoffeeName("Monastery Blend", rules).mascot, "mona");
+  assert.equal(validateCoffeeName("Mona Ducky Copilot Mocha", rules).mascot, "mona",
+    "names may include multiple mascot names");
 });
 
 test("the mascot is something to build on, not the whole drink", () => {
