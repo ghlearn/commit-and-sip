@@ -127,8 +127,11 @@ export class RunStore {
         await file.close();
       }
       await rename(temp, this.path);
-      const dir = await open(this.directory, "r");
-      try { await dir.sync(); } finally { await dir.close(); }
+      // Windows cannot open or fsync a directory; the rename above is already durable there.
+      if (process.platform !== "win32") {
+        const dir = await open(this.directory, "r");
+        try { await dir.sync(); } finally { await dir.close(); }
+      }
       return result;
     } finally {
       await lock.close();
