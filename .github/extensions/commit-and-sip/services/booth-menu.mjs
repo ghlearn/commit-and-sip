@@ -63,8 +63,6 @@ export function addDrink(menu, { rawName, rules, runId, handle, choice = {}, rem
   return entry;
 }
 
-// Equal scores share a rank, matching the completion authority's convention.
-
 // Taking a name down is a staff moderation decision and never self-service, so
 // this is not reachable from the canvas. A blocklist can only ever be a guess
 // about what someone will type; this is the control that works after the fact,
@@ -96,16 +94,22 @@ export function removeDrink(menu, removals, id, { removedBy, reason, now = new D
   return record;
 }
 
+// Every drink gets its own place, so an event cannot end in a tie for first.
+// An equal score goes to the drink that got there first: on the event board
+// that is when the service admitted it, at a booth when the booth served it.
+// The ID only separates two drinks stamped in the same millisecond, so the
+// order never depends on the order the menu happens to be stored in. A row
+// without a usable time sorts after every row that has one.
+const reachedAt = entry => {
+  const time = Date.parse(entry.createdAt);
+  return Number.isNaN(time) ? Infinity : time;
+};
+
 export function leaderboard(menu) {
-  const scored = menu.filter(entry => !entry.example && Number.isFinite(entry.score));
-  return scored
-    .map(entry => ({
-      handle: entry.handle,
-      name: entry.name,
-      rank: 1 + scored.filter(other => other.score > entry.score).length,
-      score: entry.score,
-    }))
-    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  return menu
+    .filter(entry => !entry.example && Number.isFinite(entry.score))
+    .sort((a, b) => b.score - a.score || reachedAt(a) - reachedAt(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((entry, index) => ({ handle: entry.handle, name: entry.name, rank: index + 1, score: entry.score }));
 }
 
 export function standingFor(menu, runId) {

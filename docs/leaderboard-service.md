@@ -56,7 +56,7 @@ A key proves which service a request is allowed into, not that the booth code is
 
 - `scoreCoffeeName` rechecks the name rules, the blocklist, and the house-example exclusion, and recomputes the score. The request is refused with `422 score_mismatch` if the score or ID differ, and with `422 rejected_name` if the name is refused.
 - The handle must be built from `booth/handle-words.json`, optionally with the eight-hex collision suffix, or the request is refused with `422 invalid_handle`.
-- Ranking is the booth's own `leaderboard()`: competition ranking, where equal scores share a rank and the next rank skips. The booth and the board cannot disagree about a tie.
+- Ranking is the booth's own `leaderboard()`, and no two drinks share a place. A tied score goes to the drink the service admitted first (its stored `createdAt`), and two drinks admitted in the same millisecond are ordered by drink ID. The booth and the board break a tie by the same rule. Admission time comes from the service's own clock, never from the booth, so a leaked booth key cannot claim an earlier place. A rebuild (`npm run leaderboard:republish -- --drinks`) admits every drink again, so after one, tied drinks keep the order in which the booths replayed them, not the order of the original event.
 
 The service moderates with the blocklist deployed alongside it. Updating the blocklist means redeploying the service. `/healthz` reports `moderation: "placeholder"` whenever the list is unreviewed, and the service then logs a warning at start-up.
 

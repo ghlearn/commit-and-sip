@@ -12,7 +12,7 @@ Type your name and choose **Add it to the menu**. The menu is first come, first 
 
 A deterministic local rubric scores the name out of 5,000 and shows the breakdown. The same name always earns the same score, and no model writes your feedback. Most invented names land well short of the maximum, so a mid-range score is a normal result.
 
-Your drink then joins the house menu and the leaderboard, and equal scores share a rank. The leaderboard is at <https://gh.io/commit-and-sip-leader>, and the station shows a scannable code that opens it on your own row. If staff have turned the code off at this booth, none is shown; ask them where to see the results. Finally, choose **I'm done - hand over to the next barista** to clear the counter. Your drink and your entry stay.
+Your drink then joins the house menu and the leaderboard. If two drinks score the same, the one that reached the leaderboard first ranks higher. The leaderboard is at <https://gh.io/commit-and-sip-leader>, and the station shows a scannable code that opens it on your own row. If staff have turned the code off at this booth, none is shown; ask them where to see the results. Finally, choose **I'm done - hand over to the next barista** to clear the counter. Your drink and your entry stay.
 
 ## Resume and recovery
 

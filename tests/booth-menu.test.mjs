@@ -91,11 +91,14 @@ test("a removed drink is refused in the same words as a blocklist hit, and a dup
   assert.notEqual(duplicate, removed);
 });
 
-test("the leaderboard ranks by score and shares rank on ties", () => {
+test("the leaderboard ranks by score and gives a tie to the drink served first", () => {
   const menu = seedMenu(catalog);
-  add(menu, "Mona Moonlight Mocha", "run-1", "brave-brewing-otter");
-  add(menu, "Ducky Dawn Drip", "run-2", "keen-frothing-vole");
-  add(menu, "Mona Nebula", "run-3", "calm-pouring-heron");
+  const at = (rawName, runId, handle, now) => addDrink(menu, { rawName, rules, runId, handle, now });
+  // Served in the opposite order to the names' alphabetical and ID order, so
+  // only the time can put the first-served drink on top.
+  at("Mona Moonlight Mocha", "run-1", "brave-brewing-otter", "2026-01-01T09:00:00.000Z");
+  at("Ducky Dawn Drip", "run-2", "keen-frothing-vole", "2026-01-01T09:05:00.000Z");
+  at("Mona Nebula", "run-3", "calm-pouring-heron", "2026-01-01T09:10:00.000Z");
 
   const board = leaderboard(menu);
   assert.equal(board.length, 3);
@@ -103,12 +106,30 @@ test("the leaderboard ranks by score and shares rank on ties", () => {
   // here with an obvious reason rather than somewhere downstream.
   assert.equal(board[0].score, board[1].score, "this fixture relies on the top two names tying");
   assert.notEqual(board[1].score, board[2].score);
-  assert.deepEqual(board.map(row => row.rank), [1, 1, 3], "equal scores share rank and the next rank skips");
+  assert.deepEqual(board.map(row => row.name), ["Mona Moonlight Mocha", "Ducky Dawn Drip", "Mona Nebula"],
+    "the tied drink served first ranks above the one served later");
+  assert.deepEqual(board.map(row => row.rank), [1, 2, 3], "no two drinks share a place");
 
-  const standing = standingFor(menu, "run-3");
+  const standing = standingFor(menu, "run-2");
   assert.equal(standing.entries, 3);
-  assert.equal(standing.rank, 3);
+  assert.equal(standing.rank, 2);
   assert.equal(standingFor(menu, "unknown-run"), null);
+});
+
+test("a tie in score and time still ranks the same however the menu is stored", () => {
+  const menu = seedMenu(catalog);
+  // `add` stamps every drink with the same instant, so only the ID separates these two.
+  const first = add(menu, "Mona Moonlight Mocha", "run-1", "brave-brewing-otter");
+  const second = add(menu, "Ducky Dawn Drip", "run-2", "keen-frothing-vole");
+  assert.equal(first.score, second.score, "this fixture relies on the two names tying");
+  // An ID that would sort first, so only the missing time can put it last.
+  menu.push({ ...first, createdAt: undefined, handle: "calm-pouring-heron", id: "aaa-undated", name: "Undated Drink", runId: "run-3" });
+
+  const board = leaderboard(menu);
+  assert.deepEqual(board.map(row => row.rank), [1, 2, 3]);
+  assert.deepEqual(board.map(row => row.name), ["Ducky Dawn Drip", "Mona Moonlight Mocha", "Undated Drink"],
+    "the same instant falls back to the drink ID, and a row with no time comes last");
+  assert.deepEqual(leaderboard([...menu].reverse()), board, "storage order never changes the board");
 });
 
 test("a drink cannot be added without a run and handle to attribute it to", () => {

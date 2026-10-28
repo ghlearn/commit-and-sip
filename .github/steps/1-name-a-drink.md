@@ -32,7 +32,7 @@ A mid-range score is a normal result. Most invented names land well below the ma
 
 ## Take your place and hand over
 
-Your drink joins the house menu and the leaderboard for the rest of the event. Equal scores share a rank.
+Your drink joins the house menu and the leaderboard for the rest of the event. If two drinks score the same, the one that reached the leaderboard first ranks higher.
 
 The leaderboard is at <https://gh.io/commit-and-sip-leader>. The station shows a scannable code and a link to your place on it. If staff have turned the code off at this booth, no code is shown; nothing is invented to fill the space.
 

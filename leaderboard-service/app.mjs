@@ -15,7 +15,8 @@ import { BoardChangedError, ClosedError, HandleTakenError, KeyMismatchError, Res
 // with the booth's own modules, so even a leaked booth key cannot post a score
 // the rubric did not award, a name the blocklist refuses, or a handle that was
 // not built from the curated word lists. Ranking is the booth's own
-// `leaderboard()`, so the booth and this board cannot disagree about a tie.
+// `leaderboard()`, so the booth and this board break a tie by the same rule:
+// the drink that got there first, which here is the one admitted first.
 
 const MAX_BODY_BYTES = 2048;
 const BOARD_SIZE = 20;

@@ -36,7 +36,7 @@ The three house drinks are worked examples. They are seeded on the menu unscored
 
 One booth is authoritative only for its own menu and cannot know what was invented elsewhere, so cross-booth uniqueness and the global ranking belong to the leaderboard service. `addDrink` takes the menu as input, so a caller may merge remotely known IDs before calling and have the same duplicate check cover both. Stored entries carry the run ID, handle, name, and score needed to reconcile a booth with the service.
 
-Booth standings rank by score with equal scores sharing a rank: `1 + the number of entries with a strictly higher score`. A service should use the same convention so a booth and the event never disagree about what a tie means.
+Booth standings rank by score, and no two drinks share a place: a tied score goes to the drink that got there first, then to the lower drink ID if both have the same timestamp. At a booth, "first" means the booth served it first. On the event board, it means the service admitted it first. The service ranks with the same `leaderboard()`, so a booth and the event never disagree about what breaks a tie.
 
 Handles are unique within a booth. `generateHandle` draws from curated word lists and, once the phrase pool is exhausted, keeps the curated phrase with a deterministic eight-hex suffix. Global uniqueness across booths is the service's responsibility. The service keeps the first entry under a phrase, and stores a later one under `canonicalHandle(handle, id)` (`services/leaderboard.mjs`): the phrase plus eight hex characters derived from the drink ID. It returns that value in its receipt. `validateReceipt` accepts the submitted handle or exactly that canonical form, the attendee's QR link uses the confirmed handle, and the booth never regenerates one.
 
@@ -137,7 +137,7 @@ The submitted payload is deliberately minimal — handle, drink ID, name, score,
 
 A receipt is accepted only when its handle, ID, name, and score match what was sent (the handle may instead be its canonical form, when another booth used the phrase first). Anything else is recorded as a failure and never displayed, so a service answering about a different entry cannot be shown as this attendee's rank. Failed publications retry on the next refresh.
 
-Cross-booth uniqueness and global ranking belong to the service. One booth is authoritative only for its own menu and cannot know what was invented elsewhere. `addDrink` takes the menu as input, so a caller may merge remotely known IDs before calling and have the same duplicate check cover both. Equal scores share a rank.
+Cross-booth uniqueness and global ranking belong to the service. One booth is authoritative only for its own menu and cannot know what was invented elsewhere. `addDrink` takes the menu as input, so a caller may merge remotely known IDs before calling and have the same duplicate check cover both. A tied score goes to the drink the service admitted first.
 
 Any configured URL must pass `validateLeaderboardUrl` in `services/public-url.mjs`: HTTPS only, no credentials, fragment, or nonstandard port, and no private, loopback, reserved, or reserved-suffix host. `BoothEngine` refuses a non-conforming URL at construction rather than rendering a code that scans to nothing. `verifyPublicUrl` additionally performs an unauthenticated, non-redirecting HEAD with DNS pinned at socket creation, so a second lookup cannot turn a previously public address into an internal target.
 

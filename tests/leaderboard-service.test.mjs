@@ -35,8 +35,8 @@ const words = JSON.parse(await readFile(new URL("../booth/handle-words.json", im
 const HANDLE = `${words.adjectives[0]}-${words.verbs[0]}-${words.nouns[0]}`;
 const OTHER_HANDLE = `${words.adjectives[1]}-${words.verbs[1]}-${words.nouns[1]}`;
 
-async function service(t, { store = new MemoryStore(), serviceRules = rules } = {}) {
-  const app = createApp({ boothKey: BOOTH_KEY, reservationKey: RESERVATION_KEY, rules: serviceRules, staffKey: STAFF_KEY, store, words });
+async function service(t, { store = new MemoryStore(), serviceRules = rules, now } = {}) {
+  const app = createApp({ boothKey: BOOTH_KEY, now, reservationKey: RESERVATION_KEY, rules: serviceRules, staffKey: STAFF_KEY, store, words });
   const server = createServer(app).listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(() => new Promise(resolve => server.close(resolve)));
@@ -241,8 +241,11 @@ test("a retried submission is a success, but a clashing name is not", async t =>
   assert.equal((await board(url)).entries[0].handle, HANDLE);
 });
 
-test("equal scores share a rank exactly as they do at the booth", async t => {
-  const { url, store } = await service(t);
+test("a tie goes to the drink the board admitted first, by the booth's own rule", async t => {
+  // A clock that moves a second per admission, so admission order is the only
+  // thing separating the tied pair, never two arrivals in one millisecond.
+  let tick = Date.parse("2026-10-28T09:00:00.000Z");
+  const { url, store } = await service(t, { now: () => new Date(tick += 1000) });
   const candidates = ["Mocha", "Latte", "Crema", "Brew", "Roast", "Drip", "Chai", "Frappe"].flatMap(coffee =>
     ["Moonrise", "Sunset", "Velvet", "Ember", "Harbor", "Meadow"].map(word => `Mona ${word} ${coffee}`));
   const byScore = new Map();
@@ -250,32 +253,35 @@ test("equal scores share a rank exactly as they do at the booth", async t => {
     const { score } = scoreCoffeeName(name, rules);
     byScore.set(score, [...(byScore.get(score) ?? []), name]);
   }
-  // A tie with something strictly above it, so the tied pair's shared rank is
-  // 2 and cannot be satisfied by an accident of ordering.
+  // A tie with something strictly above and below it, so the tied pair must
+  // land on 2 and 3, and nothing under them may skip a place.
   const top = Math.max(...byScore.keys());
   const [tiedScore, tied] = [...byScore.entries()].find(([score, names]) => names.length >= 2 && score < top) ?? [];
   assert.ok(tied, "the candidate list should contain a tie below the top score");
   const higher = [...byScore.entries()].find(([score]) => score > tiedScore);
-  // And one below it. Dense ranking (1, 2, 2, 3) agrees with the booth's
-  // competition ranking (1, 2, 2, 4) until something sits under a tie.
   const lower = [...byScore.entries()].find(([score]) => score < tiedScore);
   assert.ok(lower, "the candidate list should contain a score below the tie");
+  // Admit the tied drink whose ID sorts later first, so neither ID nor name
+  // order can explain it winning the tie.
+  const [laterId, earlierId] = tied.slice(0, 2).sort((a, b) =>
+    scoreCoffeeName(b, rules).id.localeCompare(scoreCoffeeName(a, rules).id));
 
   const handles = [HANDLE, OTHER_HANDLE, `${words.adjectives[2]}-${words.verbs[2]}-${words.nouns[2]}`,
     `${words.adjectives[3]}-${words.verbs[3]}-${words.nouns[3]}`];
-  const sent = [tied[0], tied[1], higher[1][0], lower[1][0]].map((name, index) => submission(name, handles[index]));
+  const sent = [laterId, earlierId, higher[1][0], lower[1][0]].map((name, index) => submission(name, handles[index]));
   for (const body of sent) assert.equal((await post(url, body)).status, 201);
   // Receipts are read after every entry has landed. A receipt issued while an
   // entry was still alone on the board would say rank 1 whatever the rule is.
   const receipts = [];
   for (const body of sent) receipts.push(await (await post(url, body)).json());
-  assert.equal(receipts[0].rank, receipts[1].rank, "a tie is one rank, not two");
-  assert.equal(receipts[0].rank, 2, "both tied drinks sit one place below the higher score");
   assert.equal(receipts[2].rank, 1);
-  assert.equal(receipts[3].rank, 4, "the next drink after a two-way tie at 2 is 4th, as at the booth");
+  assert.equal(receipts[0].rank, 2, "the tied drink admitted first takes the higher place");
+  assert.equal(receipts[1].rank, 3, "the tied drink admitted second sits directly below it");
+  assert.equal(receipts[3].rank, 4);
   const expected = leaderboard(await store.list());
   assert.deepEqual((await board(url)).entries, expected.map(({ handle, name, rank, score }) => ({ handle, name, rank, score })),
     "the public board ranks exactly as the booth's own leaderboard()");
+  assert.equal(new Set(expected.map(row => row.rank)).size, expected.length, "no two drinks share a place");
 });
 
 test("the board shows a window, the true total, and an attendee's own place", async t => {
