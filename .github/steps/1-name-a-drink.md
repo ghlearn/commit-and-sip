@@ -12,11 +12,11 @@ Choose Start my order. The station mints a barista handle for you, in the style 
 
 The handle is generated at the counter and is unique within this event's menu. It is not a GitHub account and it is not tied to your identity.
 
-## Pick your mascot and where it sits
+## Put a mascot in the name
 
-Every drink must carry one mascot: mona, ducky, or copilot. The mascot may sit anywhere in the name, not only at the front. Monsoon Mona Cold Brew and Ducky's Last Stand are as valid as Mona Moonrise.
+Every drink must carry at least one mascot: mona, ducky, or copilot. You can use more than one mascot name in your drink name, and each extra mascot earns a Mascot crew bonus. The screen says so under the name field: Required: include a mascot: Copilot, Ducky, or Mona. Example: Monachino. Use more than one mascot name for bonus points. A mascot may sit anywhere in the name, not only at the front, and can be blended into a word as in Monachino. Monsoon Mona Cold Brew and Ducky's Last Stand are as valid as Mona Moonrise.
 
-The mascot picker and the placement picker are optional. Leave them alone and the station reads the mascot straight from what you typed. Set them and they become a claim the station checks against your name, so a disagreement is reported back to you rather than silently corrected. Placement earns no points; choose the position you like best.
+There is nothing else to pick. The station reads the mascot and where it sits straight from what you typed. Placement earns no points; choose the position you like best.
 
 ## Invent the name
 
@@ -26,7 +26,7 @@ The menu is first come, first served. If someone has already used your name, the
 
 ## Read your score
 
-A rubric scores the name out of 5,000 and shows you the breakdown: base credit, alliteration, craft, wordplay, how well it fits the house style, and invention. The rubric is deterministic. The same name always earns the same score, and no model generates your feedback or your score.
+A rubric scores the name out of 5,000 and shows you the breakdown: base credit, alliteration, craft, wordplay, how well it fits the house style, mascot crew (a bonus for using two or all three mascots), and invention. The rubric is deterministic. The same name always earns the same score, and no model generates your feedback or your score.
 
 A mid-range score is a normal result. Most invented names land well below the maximum, because every category has to be earned.
 

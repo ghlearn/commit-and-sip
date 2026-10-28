@@ -20,7 +20,7 @@ You need only the booth's preconfigured Copilot App. No coding, cloning, account
 
 **Open:** click **Commit & Sip** with no input. The booth canvas is the default canvas and takes no open input; the counter opens idle and ready.
 
-**Start:** choose **Start my order**. The station mints a barista handle, then follow **Step 1: Name a drink for the house menu**: pick a mascot and where it sits, type your name, and choose **Add it to the menu**. The [canonical learner step](.github/steps/1-name-a-drink.md) matches what the screen tells you.
+**Start:** choose **Start my order**. The station mints a barista handle, then follow **Step 1: Name a drink for the house menu**: type a name that includes a mascot (Copilot, Ducky, or Mona) and choose **Add it to the menu**. The [canonical learner step](.github/steps/1-name-a-drink.md) matches what the screen tells you.
 
 **Finish:** read the score breakdown, take your place on the leaderboard, then choose **I'm done - hand over to the next barista**. That clears the counter for the next attendee; your drink stays on the menu and your entry stays on the leaderboard. See the [reset procedure](booth/RUNBOOK.md#reset-between-attendees).
 
@@ -179,7 +179,7 @@ npm run check
 
 ## What attendees practice
 
-- Read the constraints before submitting: one mascot, a chosen placement, an allowed character set, and no duplicate already on the menu.
+- Read the constraints before submitting: one mascot placed anywhere, an allowed character set, and no duplicate already on the menu.
 - Treat a published rubric as something you can reason about and improve against, rather than guessing at a black box.
 - See their own contribution land on a shared artifact that the rest of the event can see.
 

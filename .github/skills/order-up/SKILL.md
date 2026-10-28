@@ -28,7 +28,7 @@ The canvas owns progression. Actions only validate the repository; never wait on
 
 - `begin({})`: mints the barista handle and starts the order. One station holds one order at a time, so this is refused while an order is open. Finish or hand over first.
 - Let the attendee read **How it works** themselves. The three house drinks are worked examples; say plainly that they are not scored and never reach the leaderboard.
-- `submit_name({name})`: adds and scores the drink. `mascot` and `placement` are optional. Send them only when the attendee actually chose them, because they are checked as a claim against the typed name and a disagreement is reported back rather than corrected.
+- `submit_name({name})`: adds and scores the drink. The attendee screen sends only the typed name and reads the mascot and placement from it. The action still accepts optional `mascot` and `placement`, but do not send them for an attendee: they are checked as a claim against the typed name, and a disagreement is reported back rather than corrected.
 - Let the attendee type their own name. Do not invent one for them, do not autocorrect their spelling into something that scores better, and do not retry a rejected name on their behalf without telling them what was wrong.
 - `complete({})`: clears the station for the next attendee. `refresh({})` reads saved state; it is not a way to manufacture a new result.
 

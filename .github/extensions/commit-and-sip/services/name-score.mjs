@@ -76,10 +76,23 @@ function economyPoints(name) {
   return count === 1 ? 250 : 150;
 }
 
-function rarityPoints(name, mascot) {
+function mascotsIn(name, mascots) {
+  const list = tokens(name);
+  return mascots.filter(mascot => list.some(token => token.includes(mascot)));
+}
+
+// Bringing more than one mascot to the party is rewarded deliberately here,
+// rather than by accident through Invention.
+function crewPoints(crew) {
+  if (crew.length >= 3) return 600;
+  return crew.length === 2 ? 300 : 0;
+}
+
+function rarityPoints(name, mascots) {
   const inventive = new Set(tokens(name).filter(token =>
-    !token.includes(mascot) && !COFFEE_TERMS.includes(token) && !COMMON_WORDS.includes(token)));
-  return { points: Math.min(inventive.size, 3) * 400, inventive: [...inventive] };
+    !mascots.some(mascot => token.includes(mascot))
+    && !COFFEE_TERMS.includes(token) && !COMMON_WORDS.includes(token)));
+  return { points: Math.min(inventive.size, 3) * 200, inventive: [...inventive] };
 }
 
 export function scoreCoffeeName(raw, rules) {
@@ -89,14 +102,16 @@ export function scoreCoffeeName(raw, rules) {
 
   const craft = craftPoints(name);
   const play = wordplayPoints(name, mascot);
-  const rarity = rarityPoints(name, mascot);
+  const crew = mascotsIn(name, rules.mascots);
+  const rarity = rarityPoints(name, rules.mascots);
   const breakdown = [
     { label: "Valid house name", max: 600, points: 600 },
     { label: "Alliteration", max: 800, points: alliterationPoints(name, mascot) },
     { label: "Coffee craft", max: 900, points: craft.points, detail: craft.found },
     { label: "Wordplay", max: 900, points: play.points, detail: play.signals },
     { label: "House shape", max: 600, points: economyPoints(name) },
-    { label: "Invention", max: 1200, points: rarity.points, detail: rarity.inventive },
+    { label: "Mascot crew", max: 600, points: crewPoints(crew), detail: crew },
+    { label: "Invention", max: 600, points: rarity.points, detail: rarity.inventive },
   ];
   const total = breakdown.reduce((sum, part) => sum + part.points, 0);
   // Clamped so a rubric change can never emit an out-of-range competition score.

@@ -36,13 +36,13 @@ The engine owns every authoritative fact. The browser renders a projection and r
 idle → naming → served → complete → (reset for the next attendee)
 ```
 
-An attendee starts, receives a curated three-word handle, chooses a mascot and where to place it, submits a name, receives a rubric score, sees their standing, scans a QR code, and marks complete. Marking complete clears the counter for the next attendee; it does not erase the served result or the house menu.
+An attendee starts, receives a curated three-word handle, types a name that includes a mascot anywhere, receives a rubric score, sees their standing, scans a QR code, and marks complete. Marking complete clears the counter for the next attendee; it does not erase the served result or the house menu.
 
 There are no pull requests, GitHub writes, issues, reviewers, merges, or checks in this flow. The earlier pull-request review mode, its provisioning scripts, and its canvas pilot were removed rather than left dormant, so no code path can silently reach GitHub.
 
 ## Naming rules and scoring
 
-A name must match the allowed character set, contain exactly one of the three mascots in the attendee's chosen placement, stay within length limits, avoid duplicates already on the house menu, and pass the blocklist. Duplicate detection compares normalized names so spacing and case cannot smuggle a repeat onto the menu.
+A name must match the allowed character set, contain exactly one of the three mascots (in any declared placement, when an API caller declares one), stay within length limits, avoid duplicates already on the house menu, and pass the blocklist. Duplicate detection compares normalized names so spacing and case cannot smuggle a repeat onto the menu.
 
 Scoring is a deterministic rubric in `services/name-score.mjs`, not a language model. The same name always scores the same, a rank can be recomputed from stored names, and staff can explain any score from the returned breakdown. The component maximums sum to exactly 5,000 and a test pins that total, so "out of 5,000" stays true. The three seeded drinks are worked examples and are never scored or ranked. Never describe a rubric score as Copilot's opinion.
 

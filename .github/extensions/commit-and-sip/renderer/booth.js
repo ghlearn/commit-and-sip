@@ -9,7 +9,6 @@
   // checking while the outcome is still open: pending, or failed and due for
   // a retry (the panel retries on its poll). Confirmed and rejected are final.
   let confirming = false;
-  let populated = false;
 
   function fail(message) {
     $("booth-error-message").textContent = message;
@@ -46,22 +45,6 @@
       clearTimeout(timeout);
     }
   }
-
-  function options(select, values, label) {
-    for (const value of values) {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label(value);
-      select.append(option);
-    }
-  }
-
-  const PLACEMENT_TEXT = {
-    blend: "Blended into a word, like Monachino",
-    end: "At the end, like Cold Brew Ducky",
-    middle: "In the middle, like Iced Ducky Cup",
-    start: "At the start, like Mona Mocha"
-  };
 
   function fillMenu(state) {
     const menu = $("house-menu");
@@ -113,11 +96,6 @@
   }
 
   function fillNaming(state) {
-    if (!populated) {
-      options($("pick-mascot"), state.mascots, value => value);
-      options($("pick-placement"), state.placements, value => PLACEMENT_TEXT[value] ?? value);
-      populated = true;
-    }
     $("naming-handle").textContent = state.handle;
   }
 
@@ -240,22 +218,13 @@
   $("name-form").addEventListener("submit", async event => {
     event.preventDefault();
     if (busy || !$("name-form").reportValidity()) return;
-    const mascot = $("pick-mascot").value;
-    const placement = $("pick-placement").value;
     $("name-problem").hidden = true;
     busy = true;
     controls();
     try {
-      render(await request("/api/action", {
-        action: "submit_name",
-        // Both pickers are claims the attendee opted into. Sending a default
-      // would reject a typed ducky name for a mona the attendee never chose.
-      input: {
-        name: $("pick-name").value,
-        ...(mascot ? { mascot } : {}),
-        ...(placement ? { placement } : {})
-      }
-      }));
+      // Only the typed name is sent. The station reads the mascot and its
+      // placement from it, so the attendee makes no separate claim to check.
+      render(await request("/api/action", { action: "submit_name", input: { name: $("pick-name").value } }));
     } catch (error) {
       // A refused name costs the attendee nothing, so keep them on this screen
       // with what they typed rather than sending them back to the counter.

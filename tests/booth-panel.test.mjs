@@ -230,31 +230,29 @@ test("two stations at one booth share the menu but not the attendee", async t =>
     { code: "duplicate_drink" });
 });
 
-test("no required control on the booth form defaults to an unselectable value", async () => {
-  // A required <select> whose default option has an empty value fails
-  // reportValidity(), which silently blocks every submit with no message.
+test("the booth form asks only for the name and says a mascot is required", async () => {
+  // The station reads the mascot and its placement from the typed name, so
+  // the attendee form offers no pickers that could make a claim they never
+  // chose. The hint sits on the name field so assistive tech reads it too.
   const html = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/booth.html", import.meta.url), "utf8");
-  const selects = html.match(/<select\b[^>]*>[\s\S]*?<\/select>/g) ?? [];
-  assert.ok(selects.length >= 2, "the mascot and placement pickers are on the form");
-  for (const select of selects) {
-    if (!/\brequired\b/.test(select)) continue;
-    assert.doesNotMatch(select, /<option value=""/,
-      `a required select offers an empty default and would block submission: ${select.slice(0, 60)}`);
-  }
-  // The placement picker is explicitly optional, so it must not be required.
-  assert.doesNotMatch(html.match(/<select id="pick-placement"[^>]*>/)[0], /\brequired\b/);
+  const form = html.match(/<form id="name-form"[\s\S]*?<\/form>/)[0];
+  assert.doesNotMatch(form, /<select\b/, "the attendee form has no pickers");
+  assert.doesNotMatch(html, /pick-mascot|pick-placement/);
+  const hint = form.match(/<p id="mascot-hint">([\s\S]*?)<\/p>/);
+  assert.ok(hint, "the name field carries the mascot hint");
+  assert.equal(hint[1].replace(/<[^>]+>/g, ""),
+    "Required: include a mascot: Copilot, Ducky, or Mona. Example: Monachino. Use more than one mascot name for bonus points.");
+  assert.match(form, /<input id="pick-name"[^>]*aria-describedby="mascot-hint name-help"/);
+  const script = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/booth.js", import.meta.url), "utf8");
+  assert.doesNotMatch(script, /pick-mascot|pick-placement/);
 });
 
-test("the optional pickers default to no claim at all", async () => {
-  // A picker that defaults to a real mascot makes a claim the attendee never
-  // chose, so a typed "Ducky Driftwood" is rejected for a mona they never
-  // picked. Both pickers must start on an empty value.
-  const html = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/booth.html", import.meta.url), "utf8");
-  for (const id of ["pick-mascot", "pick-placement"]) {
-    const select = html.match(new RegExp(`<select id="${id}"[^>]*>[\\s\\S]*?</select>`))[0];
-    assert.match(select, /<option value=""/, `${id} must offer an empty default`);
-    assert.doesNotMatch(select, /\brequired\b/, `${id} is optional and must not be required`);
-  }
+test("the hint's example is a name the station accepts", async t => {
+  const booth = await station(t);
+  await booth.act("begin");
+  const served = await booth.act("submit_name", { name: "Monachino" });
+  assert.equal(served.status, 200);
+  assert.equal(served.body.submission.name, "Monachino");
 });
 
 test("a removed drink never keeps congratulating the attendee", async () => {
