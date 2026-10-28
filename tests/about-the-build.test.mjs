@@ -66,6 +66,13 @@ test("the public leaderboard says how it was built, serves the same code, and sh
   const css = await readFile(new URL("../leaderboard-service/public/board.css", import.meta.url), "utf8");
 });
 
+test("the public leaderboard shows how it was built above the leaders", () => {
+  const built = boardHtml.indexOf('aria-labelledby="built-heading"');
+  const leaders = boardHtml.indexOf('<table id="board"');
+  assert.ok(built !== -1 && leaders !== -1, "the section and the board table are both on the page");
+  assert.ok(built < leaders, "the section comes before the list of leaders");
+});
+
 test("both screens make the same factual claims about the build", () => {
   for (const [label, html] of [["booth", about(boothHtml)], ["board", about(boardHtml)]]) {
     for (const claim of [/built with GitHub Copilot/, /a canvas: a small web app that runs inside the GitHub Copilot App as an extension/,

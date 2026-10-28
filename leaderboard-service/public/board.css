@@ -90,9 +90,9 @@ tr.mine th, tr.mine .handle { color: var(--text); }
   overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 
-/* For whoever is curious, below the board. The QR is for the monitor; on a
+/* For whoever is curious, above the board. The QR is for the monitor; on a
    phone the link is the way in, so the code is hidden there. */
-.built { margin-top: 2.5em; padding-top: 1em; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.85em; }
+.built { margin: 0 0 1.5em; padding-bottom: 1em; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 0.85em; }
 .built::after { content: ""; display: block; clear: both; }
 .built h2 { margin: 0 0 0.4em; color: var(--text); font-size: 1.1em; font-weight: 700; }
 .built p { max-width: 60ch; margin: 0 0 0.6em; }
