@@ -67,12 +67,11 @@ function wordplayPoints(name, mascot) {
   return { points: Math.min(points, 900), signals };
 }
 
-// Two to four words is the house shape. This band is deliberately flat so a
-// richer name is not penalised for having room to be inventive.
+// Six words leave room for a mascot, two coffee terms, and three inventive
+// words, so every category maximum can be earned at once.
 function economyPoints(name) {
   const count = words(name).length;
-  if (count >= 2 && count <= 4) return 600;
-  if (count === 5) return 350;
+  if (count >= 2 && count <= 6) return 600;
   return count === 1 ? 250 : 150;
 }
 

@@ -93,6 +93,14 @@ The blocklist is one layer. The name charset already rejects non-ASCII, so homog
 
 Scores run from 1 to 5,000. Speed, retries, and accessibility assistance never reduce a score. Mona Latte, Copilot Cortado, and Ducky Cold Brew are worked examples: never scored, never ranked. Never describe a rubric score as model output, and never invent a judge's commentary.
 
+### Updating the scoring rubric
+
+The code awards full House shape points to two through six words, so a valid name can earn all 5,000 points. Compared with the earlier two-to-four-word band, five-word names gain 250 points and six-word names gain 450; all other scoring rules and the 40-character limit are unchanged.
+
+**Upgrade between events, not during a competition.** Stored scores and breakdowns are not automatically recomputed, and `leaderboard:republish` sends their saved values rather than migrating them. Even after every machine is upgraded, an older saved score may be refused with `422 score_mismatch` by the new service.
+
+Finish the current event on its existing booth and service versions first. Follow [Ending an event](#ending-an-event) on every booth, preserve the archives, and clear the public board only after every booth has ended its event. Then deploy the leaderboard service and update every booth from the same commit, reload extensions, and verify the versions before accepting names for the new event. Do not edit recorded scores or clear the active competition merely to enable the new rubric.
+
 ## Reset between attendees
 
 Hand-over is the reset. The attendee chooses **I'm done — hand over to the next barista** and the counter returns to idle for the next person. There is no reset command and none is needed.

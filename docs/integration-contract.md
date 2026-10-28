@@ -26,9 +26,11 @@ The booth exercise is a creative naming competition run entirely inside the Copi
 
 ### Scoring is a rubric, not a judge
 
-The score is a pure function of the submitted name, so the same name always scores the same, a rank can be recomputed server-side from stored names, and staff can explain any score at the booth from the returned breakdown. This preserves rather than amends the existing rule that primary rank is deterministic and server-recomputable.
+For a fixed rubric version, the score is a pure function of the submitted name, so the same name always scores the same, a rank can be recomputed server-side from stored names, and staff can explain any score at the booth from the returned breakdown. This preserves rather than amends the existing rule that primary rank is deterministic and server-recomputable.
 
-No model call is involved and no model output is implied. Copilot commentary remains unavailable unless a real attributed, moderated, trusted judge is configured, and would remain commentary rather than rank. The component maximums sum to exactly 5000, which a test pins, so attendees can only be told "out of 5000" while that remains true.
+No model call is involved and no model output is implied. Copilot commentary remains unavailable unless a real attributed, moderated, trusted judge is configured, and would remain commentary rather than rank. The component maximums sum to exactly 5000, and a regression test also proves a valid name can earn all of them simultaneously within the 40-character limit. Merely adding the category limits is not evidence that the maximum is attainable.
+
+House shape awards 600 points for two through six space-separated words after normalization, 250 for one word, and 150 for seven or more. Six words leave room for a mascot-containing word, two distinct coffee terms, and three distinct inventive words; coffee terms and mascot-containing words do not earn invention points. This replaces the earlier two-to-four-word full-credit band without changing any other category. Roll out rubric changes [between events](../booth/RUNBOOK.md#updating-the-scoring-rubric), with every booth and the leaderboard service on the same commit; saved results are not automatically rescored.
 
 The three house drinks are worked examples. They are seeded on the menu unscored, are refused for scoring, and never appear on the leaderboard, so nobody competes against the demo entries.
 

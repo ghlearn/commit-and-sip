@@ -62,6 +62,8 @@ The service moderates with the blocklist deployed alongside it. Updating the blo
 
 **Version skew is real.** A rubric change that reaches the service before the booths makes their submissions fail with `score_mismatch`. The booth shows those drinks as still being confirmed, and the reason is in its sync record. Deploy the service from the same commit the booths run.
 
+Rubric changes must be [rolled out between events](../booth/RUNBOOK.md#updating-the-scoring-rubric). Stored scores are not automatically migrated, and republishing reuses those scores, so updating both sides does not make old affected submissions compatible. Finish and archive the old event before deploying the new rubric; do not mix scoring versions in one competition.
+
 ### Retraction: delete the entry, reserve the name everywhere
 
 Staff take a drink down from the admin canvas or with `npm run remove`. The booth commits the removal locally first. The network is never on that path. It then asks the service to retract the drink.

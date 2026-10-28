@@ -81,6 +81,23 @@ test("the service's real receipt passes the booth's own receipt check", async t 
   assert.deepEqual({ entries: receipt.entries, rank: receipt.rank }, { entries: 1, rank: 1 });
 });
 
+test("the service admits an earned 5000 and rejects the old six-word score", async t => {
+  const { url } = await service(t);
+  const sent = submission("MonaDuckyCopilot Mocha Moka Lot Joy Wit");
+  assert.equal(sent.score, 5000);
+
+  const stale = await post(url, { ...sent, score: 4550 });
+  assert.equal(stale.status, 422);
+  assert.equal((await stale.json()).error, "score_mismatch");
+  assert.equal((await board(url)).total, 0, "a stale rubric must not publish a different score");
+
+  const response = await post(url, sent);
+  assert.equal(response.status, 201);
+  const receipt = validateReceipt(await response.json(), sent);
+  assert.equal(receipt.score, 5000);
+  assert.equal((await board(url)).entries[0].score, 5000);
+});
+
 test("a booth publishes, the board shows it, and a takedown clears it", async t => {
   const { url } = await service(t);
   const directory = await mkdtemp(join(tmpdir(), "sip-lb-"));
@@ -90,12 +107,15 @@ test("a booth publishes, the board shows it, and a takedown clears it", async t 
   const engine = new BoothEngine({ catalog, leaderboardClient: client, rules, store });
 
   await engine.open({ runId: "booth-1" });
-  const served = await engine.dispatch("booth-1", "submit_name", { name: "Ducky Dawn Drizzle" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "MonaDuckyCopilot Mocha Moka Lot Joy Wit" });
+  assert.equal(served.submission.score, 5000);
   await engine.publish("booth-1");
   const sync = (await store.read()).runs["booth-1"].sync;
   assert.equal(sync.state, "confirmed", `publish should be confirmed, got ${sync.state}: ${sync.reason ?? ""}`);
   assert.equal(sync.receipt.rank, 1);
+  assert.equal(sync.receipt.score, 5000);
   assert.deepEqual((await board(url)).entries.map(row => row.name), [served.submission.name]);
+  assert.equal((await board(url)).entries[0].score, 5000);
 
   const record = await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
   assert.equal(record.published, "retracted");

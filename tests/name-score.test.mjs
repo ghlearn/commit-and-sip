@@ -9,7 +9,47 @@ test("the rubric is bounded and its parts sum to the advertised maximum", () => 
   assert.equal(MAX_SCORE, 5000);
   const { breakdown } = scoreCoffeeName("Mona Mocha", rules);
   assert.equal(breakdown.reduce((sum, part) => sum + part.max, 0), MAX_SCORE,
-    "an attendee can only be told the score is out of 5000 if the parts really reach it");
+    "the displayed category limits must sum to the advertised maximum");
+});
+
+test("a valid name can earn every category maximum at once", () => {
+  const name = "MonaDuckyCopilot Mocha Moka Lot Joy Wit";
+  assert.ok(name.length <= rules.maxLength, "the maximum must be reachable within the name-length limit");
+  for (const raw of [name, name.toUpperCase(), `  ${name.replaceAll(" ", "\t ")}  `]) {
+    const { score, breakdown } = scoreCoffeeName(raw, rules);
+    assert.equal(score, 5000, raw);
+    assert.equal(breakdown.reduce((sum, part) => sum + part.points, 0), score);
+    for (const part of breakdown) assert.equal(part.points, part.max, part.label);
+  }
+});
+
+test("House shape awards full points for two through six normalized words", () => {
+  const cases = [
+    ["Monachino", 250],
+    ["Mona Spark", 600],
+    ["Mona Spark Mocha", 600],
+    ["Mona Spark Mocha Moka", 600],
+    ["Mona Spark Mocha Moka Glow", 600],
+    ["Mona Spark Mocha Moka Glow Joy", 600],
+    ["Mona Spark Mocha Moka Glow Joy Wit", 150],
+  ];
+  for (const [name, expected] of cases) {
+    for (const raw of [name, `  ${name.replaceAll(" ", "\t ")}  `]) {
+      const shape = scoreCoffeeName(raw, rules).breakdown.find(part => part.label === "House shape");
+      assert.equal(shape.points, expected, raw);
+    }
+  }
+});
+
+test("the expanded house shape preserves scores for shorter names", () => {
+  for (const [name, expected] of [
+    ["Monachino", 1300],
+    ["Mona Mocha", 2250],
+    ["Mona Moonlight Mocha", 2800],
+    ["Mona-Ducky-Copilot Mochalot Mocha Moka", 4600],
+  ]) {
+    assert.equal(scoreCoffeeName(name, rules).score, expected, name);
+  }
 });
 
 test("a score is a pure, reproducible function of the name alone", () => {
