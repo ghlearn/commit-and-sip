@@ -76,9 +76,12 @@ function economyPoints(name) {
   return count === 1 ? 250 : 150;
 }
 
+// Same unbroken-text rule validateCoffeeName uses, so crew credit never exceeds
+// the mascots validation recognises. Punctuation is deliberately not stripped
+// here: "Co-pilot" is not Copilot, while a blend such as "Monachino" still counts.
 function mascotsIn(name, mascots) {
-  const list = tokens(name);
-  return mascots.filter(mascot => list.some(token => token.includes(mascot)));
+  const lower = name.toLowerCase();
+  return mascots.filter(mascot => lower.includes(mascot));
 }
 
 // Bringing more than one mascot to the party is rewarded deliberately here,

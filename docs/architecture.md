@@ -42,7 +42,7 @@ There are no pull requests, GitHub writes, issues, reviewers, merges, or checks 
 
 ## Naming rules and scoring
 
-A name must match the allowed character set, contain exactly one of the three mascots (in any declared placement, when an API caller declares one), stay within length limits, avoid duplicates already on the house menu, and pass the blocklist. Duplicate detection compares normalized names so spacing and case cannot smuggle a repeat onto the menu.
+A name must match the allowed character set, contain at least one of the three mascots, spelled out unbroken (in any declared placement, when an API caller declares one), stay within length limits, avoid duplicates already on the house menu, and pass the blocklist. Duplicate detection compares normalized names so spacing and case cannot smuggle a repeat onto the menu.
 
 Scoring is a deterministic rubric in `services/name-score.mjs`, not a language model. The same name always scores the same, a rank can be recomputed from stored names, and staff can explain any score from the returned breakdown. The component maximums sum to exactly 5,000 and a test pins that total, so "out of 5,000" stays true. The three seeded drinks are worked examples and are never scored or ranked. Never describe a rubric score as Copilot's opinion.
 
