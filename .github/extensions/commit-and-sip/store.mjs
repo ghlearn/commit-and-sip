@@ -127,8 +127,12 @@ export class RunStore {
         await file.close();
       }
       await rename(temp, this.path);
-      const dir = await open(this.directory, "r");
-      try { await dir.sync(); } finally { await dir.close(); }
+      // Windows does not support directory fsync. Keep the atomic rename,
+      // accepting the durability trade-off of skipping the directory flush.
+      if (process.platform !== "win32") {
+        const dir = await open(this.directory, "r");
+        try { await dir.sync(); } finally { await dir.close(); }
+      }
       return result;
     } finally {
       await lock.close();
