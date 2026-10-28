@@ -179,7 +179,7 @@ npm run check
 
 ## What attendees practice
 
-- Read the constraints before submitting: one mascot placed anywhere, an allowed character set, and no duplicate already on the menu.
+- Read the constraints before submitting: at least one mascot placed anywhere, an allowed character set, and no duplicate already on the menu.
 - Treat a published rubric as something you can reason about and improve against, rather than guessing at a black box.
 - See their own contribution land on a shared artifact that the rest of the event can see.
 

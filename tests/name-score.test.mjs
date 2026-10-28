@@ -65,6 +65,23 @@ test("more mascots earn a Mascot crew bonus, not Invention credit", () => {
   assert.ok(score("Mona Ducky Mocha") > score("Mona Nebula Mocha"), "a second mascot beats an ordinary invented word");
 });
 
+test("Mascot crew only counts mascots the name validator recognises", () => {
+  const crew = name => scoreCoffeeName(name, rules).breakdown.find(item => item.label === "Mascot crew");
+  const members = name => [...crew(name).detail].sort();
+
+  // Validation needs a mascot's text unbroken, so punctuation inside a word
+  // cannot earn crew credit that validation itself would not give.
+  assert.deepEqual(crew("Mona Du'cky Co-pilot Mocha"), { label: "Mascot crew", max: 600, points: 0, detail: ["mona"] });
+  assert.deepEqual(members("Mona Du-cky Mocha"), ["mona"]);
+  assert.deepEqual(members("Mona Ducky Co-pilot Mocha"), ["ducky", "mona"]);
+  assert.equal(crew("Mona Ducky Co-pilot Mocha").points, 300, "only the unbroken mascots join the crew");
+
+  // Blends and neighbouring punctuation still count, because the mascot's own
+  // letters are unbroken.
+  assert.deepEqual(members("Monachino Ducky's Mocha"), ["ducky", "mona"]);
+  assert.equal(crew("Mona-chino Ducky").points, 300);
+});
+
 test("the house examples are never scored", () => {
   for (const name of ["Mona Latte", "Copilot Cortado", "Ducky Cold Brew", "  mona   latte  "]) {
     assert.throws(() => scoreCoffeeName(name, rules), { code: "example_name", status: 400 });
