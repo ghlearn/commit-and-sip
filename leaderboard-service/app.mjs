@@ -174,9 +174,10 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
       let admitted;
       try {
         // One store operation, so a retraction cannot land between checking
-        // the reservation and writing the entry.
-        admitted = await store.admit({ ...fields, createdAt: now().toISOString(), tokenHash },
-          { fingerprint: fingerprint(submission.id), handles });
+        // the reservation and writing the entry. The store stamps the entry
+        // time inside that operation, so it follows admission order.
+        admitted = await store.admit({ ...fields, tokenHash },
+          { fingerprint: fingerprint(submission.id), handles, now });
       } catch (error) {
         // Taken down at some booth. Worded exactly as the booth words a
         // blocklist hit, so nobody can tell the two apart and guess why.

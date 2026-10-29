@@ -1223,6 +1223,54 @@ test("a takedown on one instance stops a submission arriving at the other", asyn
   assert.equal(await b.isReserved(fp("moonrise")), true);
 });
 
+test("a drink that waited for another instance's write is entered after it, not when it arrived", async t => {
+  const directory = await tempDirectory(t);
+  const [a, b] = await Promise.all([openStore({ directory }), openStore({ directory })]);
+  let tick = Date.parse("2026-10-28T09:00:00.000Z");
+  const now = () => new Date(tick += 1000);
+  // The interleaving from the review: B holds the lock, admitting one drink,
+  // while a tied drink that arrived earlier waits at A for that lock. Each
+  // carries the time it arrived, which is what used to be stored.
+  const arrived = seconds => new Date(Date.parse("2026-10-28T08:00:00.000Z") + seconds * 1000).toISOString();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let stalled;
+  const writing = new Promise(resolve => { stalled = resolve; });
+  const persist = b.persist.bind(b);
+  b.persist = async (text, owner) => { stalled(); await gate; return persist(text, owner); };
+  const first = b.admit({ ...entry("mona-admitted-first"), createdAt: arrived(5) },
+    { fingerprint: fp("first"), handles: [entry("mona-admitted-first").handle], now });
+  await writing;
+  const second = a.admit({ ...entry("mona-waited"), createdAt: arrived(0) },
+    { fingerprint: fp("waited"), handles: [entry("mona-waited").handle], now });
+  release();
+  await Promise.all([first, second]);
+  const stored = await (await openStore({ directory })).list();
+  const at = id => Date.parse(stored.find(item => item.id === id).createdAt);
+  assert.ok(at("mona-waited") > at("mona-admitted-first"), "entered when it was admitted, after the drink ahead of it");
+  assert.deepEqual(leaderboard(stored).map(row => row.name), ["mona-admitted-first", "mona-waited"],
+    "the tie goes to the drink the board admitted first");
+});
+
+test("entry times follow admission order across instances, whatever either clock says", async t => {
+  const directory = await tempDirectory(t);
+  const [a, b] = await Promise.all([openStore({ directory }), openStore({ directory })]);
+  // B's clock runs an hour behind A's, so on its own it would enter every
+  // drink it admits ahead of A's.
+  const start = Date.parse("2026-10-28T09:00:00.000Z");
+  const clocks = new Map([[a, () => new Date(start + 60 * 60 * 1000)], [b, () => new Date(start)]]);
+  const order = [["mona-1", a], ["mona-2", b], ["mona-3", a], ["mona-4", b]];
+  for (const [id, store] of order) {
+    await store.admit(entry(id), { fingerprint: fp(id), handles: [entry(id).handle], now: clocks.get(store) });
+  }
+  const stored = await (await openStore({ directory })).list();
+  const times = order.map(([id]) => Date.parse(stored.find(item => item.id === id).createdAt));
+  times.slice(1).forEach((time, index) => assert.ok(time > times[index], `${order[index + 1][0]} is entered after ${order[index][0]}`));
+  assert.equal(times[0], start + 60 * 60 * 1000, "a drink on an empty board takes its instance's clock");
+  assert.deepEqual(leaderboard(stored).map(row => row.name), order.map(([id]) => id),
+    "every drink scores 1,000, so the board follows admission order");
+});
+
 test("a lock left by a dead instance is taken over; a live one is waited for", async t => {
   const directory = await tempDirectory(t);
   const lock = join(directory, "default.json.lock");
