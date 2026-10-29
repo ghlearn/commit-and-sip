@@ -56,7 +56,7 @@ A key proves which service a request is allowed into, not that the booth code is
 
 - `scoreCoffeeName` rechecks the name rules, the blocklist, and the house-example exclusion, and recomputes the score. The request is refused with `422 score_mismatch` if the score or ID differ, and with `422 rejected_name` if the name is refused.
 - The handle must be built from `booth/handle-words.json`, optionally with the eight-hex collision suffix, or the request is refused with `422 invalid_handle`.
-- Ranking is the booth's own `leaderboard()`: competition ranking, where equal scores share a rank and the next rank skips. The booth and the board cannot disagree about a tie.
+- Ranking is the booth's own `leaderboard()`, and no two drinks share a place. A tied score goes to the drink the service admitted first (its stored `createdAt`). The store stamps that time inside the admission itself, under the write lock, and always later than every drink already on the board, so entry times follow admission order even when a request waited for the lock or a second instance's clock runs behind. Two rows with the same time, possible only on a board written before that rule, are ordered by drink ID. The booth and the board break a tie by the same rule. Admission time comes from the service's own clock, never from the booth, so a leaked booth key cannot claim an earlier place. A rebuild (`npm run leaderboard:republish -- --drinks`) admits every drink again, so after one, tied drinks keep the order in which the booths replayed them, not the order of the original event.
 
 The service moderates with the blocklist deployed alongside it. Updating the blocklist means redeploying the service. `/healthz` reports `moderation: "placeholder"` whenever the list is unreviewed, and the service then logs a warning at start-up.
 
@@ -78,7 +78,7 @@ The service replies with `{handle, id, name, score, rank, entries}`. `id`, `name
 
 ### The public page
 
-`GET /` shows rank, drink, barista handle, and score, for the top 20 plus the true total. With `?handle=…&ref=…` it also shows "your drink" wherever it ranks. **Both are required:** a handle is unique only at one booth, so a handle alone returns no personal row, and `ref` is the opaque publication reference the booth puts in the attendee's QR link. It shows no booth identity, run IDs, or staff attribution, and **no mascot art**, because `mona.png` is not cleared for publication. It polls every 10 seconds. If polling fails, it keeps the last board and says how old it is, so a dropped connection gives a visibly stale board rather than a silently wrong one.
+`GET /` shows rank, drink, barista handle, and score, for the top 20 plus the true total. First place is highlighted with a **Leader** badge and the time its drink was entered, because a tied top score goes to the drink that reached the board first. That time is the only one the API publishes (`leaderEnteredAt`, the leader's stored `createdAt`); rows carry none. With `?handle=…&ref=…` it also shows "your drink" wherever it ranks. **Both are required:** a handle is unique only at one booth, so a handle alone returns no personal row, and `ref` is the opaque publication reference the booth puts in the attendee's QR link. It shows no booth identity, run IDs, or staff attribution, and **no mascot art**, because `mona.png` is not cleared for publication. It polls every 10 seconds. If polling fails, it keeps the last board and says how old it is, so a dropped connection gives a visibly stale board rather than a silently wrong one.
 
 Security measures:
 
@@ -97,10 +97,11 @@ Each `EVENT_ID` is a separate board file, so setting a new ID starts a fresh boa
 
 ```
 GET    /                        public board (the future QR destination)
-GET    /api/board[?handle=&ref=]    { asOf, boardId, captured, rebuilding, total, entries[<=20], you? }  (ref is opaque, never the drink ID)
+GET    /api/board[?handle=&ref=]    { asOf, boardId, captured, leaderEnteredAt, rebuilding, total, entries[<=20], you? }  (ref is opaque, never the drink ID)
                                 captured: every drink ever admitted to this board, for staff tracking. Only a
                                 clear resets it: takedowns leave it, resends do not add. total: drinks on the board now,
                                 which is the count the public page shows, so a takedown lowers it.
+                                leaderEnteredAt: when the first-place drink was admitted, or null on an empty board.
 POST   /api/entries             booth key. 201 new, 200 same entry again (handle
                                 may be canonical), 409 duplicate_drink |
                                 unavailable_drink | handle_taken,

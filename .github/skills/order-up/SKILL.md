@@ -44,7 +44,7 @@ Most invented names land well short of 5,000. Say so before the score appears, s
 
 ## Finish and hand over
 
-The drink joins the house menu and the leaderboard for the rest of the event, and equal scores share a rank. Completion releases only the station; the entry stays.
+The drink joins the house menu and the leaderboard for the rest of the event. If two drinks score the same, the one that reached the leaderboard first ranks higher. Completion releases only the station; the entry stays.
 
 The leaderboard is at <https://gh.io/commit-and-sip-leader>, and every booth shows a scannable code for it on the served screen by default. Staff can turn the code off at a booth; then no code is shown. Do not invent a URL, describe a placeholder as a production code, or tell an attendee to scan something that resolves to nothing.
 

@@ -221,7 +221,7 @@ The booth publishes only when `leaderboardApi` is configured; otherwise the canv
 
 A failed submission is retried on the booth screen's refresh, on the staff dashboard's **Refresh and retry**, and automatically from the idle screen at most every 30 seconds. That includes attendees who have already handed over, so a brief network outage recovers without staff. A refusal the service will not change (`rejected`) is never retried. A receipt whose handle, ID, name, or score does not match what was sent (the handle may instead be its canonical form, when another booth used the phrase first) is recorded as a failure, not displayed: a service answering about a different entry must never be shown as this attendee's rank. Check the extension log if entries stay unconfirmed.
 
-Read ranks carefully when helping an attendee. "Rank 1 of 1 at this booth" is this booth's own menu and nothing more. Only a confirmed event line reflects the wider competition.
+Read ranks carefully when helping an attendee. "Rank 1 of 1 at this booth" is this booth's own menu and nothing more. Only a confirmed event line reflects the wider competition. No two drinks share a place: a tied score goes to the drink that reached the event board first, so there is always a single first place. At a booth, a tie goes to the drink this booth served first.
 
 ## Leaderboard service operations
 

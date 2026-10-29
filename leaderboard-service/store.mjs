@@ -140,7 +140,9 @@ export class MemoryStore {
   // `entries` is the whole board as it stood at this admission, taken inside
   // the same step. A receipt ranked from a later read could find the entry
   // already retracted by a takedown queued behind this one.
-  async admit(entry, { fingerprint, handles }) {
+  // `createdAt` is stamped here too, from `now`; any the caller passes is
+  // ignored. A resent drink keeps the time it was first admitted.
+  async admit(entry, { fingerprint, handles, now = () => new Date() }) {
     if (this.closed) throw new ClosedError();
     if (this.reserved.has(fingerprint)) throw new ReservedError();
     const board = () => [...this.entries.values()].map(item => ({ ...item }));
@@ -149,7 +151,15 @@ export class MemoryStore {
     const used = new Set([...this.entries.values()].map(item => item.handle));
     const handle = handles.find(candidate => !used.has(candidate));
     if (!handle) throw new HandleTakenError();
-    const stored = { ...entry, handle };
+    // A tied score goes to the drink admitted first, so entry times must follow
+    // admission order. Stamped inside the admission (under the write lock, for
+    // the file store), not when the request arrived: a request that waited for
+    // the lock could otherwise carry an earlier time than one admitted before
+    // it. And always after every drink already on the board, so a second
+    // instance with a slower clock cannot put a later drink ahead.
+    const latest = Math.max(...[...this.entries.values()].map(item => Date.parse(item.createdAt)).filter(Number.isFinite));
+    const createdAt = new Date(Math.max(now().getTime(), latest + 1)).toISOString();
+    const stored = { ...entry, createdAt, handle };
     this.entries.set(entry.id, stored);
     this.captured += 1;
     return { created: true, entries: board(), entry: { ...stored } };

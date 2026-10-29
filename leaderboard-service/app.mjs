@@ -15,7 +15,8 @@ import { BoardChangedError, ClosedError, HandleTakenError, KeyMismatchError, Res
 // with the booth's own modules, so even a leaked booth key cannot post a score
 // the rubric did not award, a name the blocklist refuses, or a handle that was
 // not built from the curated word lists. Ranking is the booth's own
-// `leaderboard()`, so the booth and this board cannot disagree about a tie.
+// `leaderboard()`, so the booth and this board break a tie by the same rule:
+// the drink that got there first, which here is the one admitted first.
 
 const MAX_BODY_BYTES = 2048;
 const BOARD_SIZE = 20;
@@ -132,8 +133,13 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
     async "GET /api/board"(request, url) {
       const { boardId, captured, closed, entries } = await store.view();
       const board = leaderboard(entries);
+      // When the leader's drink was admitted, and nobody else's: a tied top
+      // score goes to the drink that got there first, so the page shows the
+      // leader's time beside it. Rows still carry no timestamp.
+      const leader = board[0] && entries.find(entry => entry.handle === board[0].handle && entry.name === board[0].name);
       const body = { asOf: now().toISOString(), boardId, entries: board.slice(0, BOARD_SIZE).map(publicRow),
-        captured, rebuilding: closed, total: board.length };
+        captured, leaderEnteredAt: leader ? new Date(leader.createdAt).toISOString() : null, rebuilding: closed,
+        total: board.length };
       const handle = url.searchParams.get("handle");
       if (handle !== null) {
         // With a publication reference the lookup is exact. A QR scanned
@@ -168,9 +174,10 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
       let admitted;
       try {
         // One store operation, so a retraction cannot land between checking
-        // the reservation and writing the entry.
-        admitted = await store.admit({ ...fields, createdAt: now().toISOString(), tokenHash },
-          { fingerprint: fingerprint(submission.id), handles });
+        // the reservation and writing the entry. The store stamps the entry
+        // time inside that operation, so it follows admission order.
+        admitted = await store.admit({ ...fields, tokenHash },
+          { fingerprint: fingerprint(submission.id), handles, now });
       } catch (error) {
         // Taken down at some booth. Worded exactly as the booth words a
         // blocklist hit, so nobody can tell the two apart and guess why.
