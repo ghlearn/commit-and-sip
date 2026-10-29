@@ -78,10 +78,24 @@ tbody th { width: 3.5em; font-weight: 800; color: var(--accent-ink); }
 .handle { color: var(--muted); overflow-wrap: anywhere; }
 .num { text-align: right; white-space: nowrap; }
 td.num { font-weight: 700; }
+/* First place, which a tied score gives to the drink that reached the board
+   first. On --surface the green rank (4.52:1) and the muted handle and entry
+   time (4.61:1) still clear 4.5:1. Declared before tr.mine, so an attendee's
+   own row keeps its highlight when it is also the leader's. */
+tr.leader { background: var(--surface); }
+tr.leader th { box-shadow: inset 0.3em 0 0 var(--accent); }
+tr.leader .drink, tr.leader td.num { font-size: 1.15em; }
+.leader-badge {
+  display: inline-block; margin-left: 0.3em; padding: 0.1em 0.55em; border-radius: 999px;
+  background: var(--accent); color: var(--text); font-size: 0.6em; font-weight: 800;
+  letter-spacing: 0.06em; text-transform: uppercase; vertical-align: 0.2em; white-space: nowrap;
+}
+.entered { display: block; margin-top: 0.1em; color: var(--muted); font-size: 0.7em; font-weight: 500; }
 tr.mine { background: var(--board); }
 /* On the highlighted row the green rank (4.35:1) and the muted handle (4.45:1)
    fall below 4.5:1 against --board, and on a phone neither is large text. */
 tr.mine th, tr.mine .handle { color: var(--text); }
+tr.mine .entered { color: var(--text); }
 
 .empty { padding: 2em 0; color: var(--muted); font-size: 1.1em; }
 

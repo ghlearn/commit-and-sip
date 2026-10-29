@@ -133,8 +133,13 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
     async "GET /api/board"(request, url) {
       const { boardId, captured, closed, entries } = await store.view();
       const board = leaderboard(entries);
+      // When the leader's drink was admitted, and nobody else's: a tied top
+      // score goes to the drink that got there first, so the page shows the
+      // leader's time beside it. Rows still carry no timestamp.
+      const leader = board[0] && entries.find(entry => entry.handle === board[0].handle && entry.name === board[0].name);
       const body = { asOf: now().toISOString(), boardId, entries: board.slice(0, BOARD_SIZE).map(publicRow),
-        captured, rebuilding: closed, total: board.length };
+        captured, leaderEnteredAt: leader ? new Date(leader.createdAt).toISOString() : null, rebuilding: closed,
+        total: board.length };
       const handle = url.searchParams.get("handle");
       if (handle !== null) {
         // With a publication reference the lookup is exact. A QR scanned

@@ -7,6 +7,7 @@ import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import vm from "node:vm";
 import { CONTENT_SECURITY_POLICY, createApp, handleIsCurated } from "../leaderboard-service/app.mjs";
 import { ConflictError, FileStore, MemoryStore, reservationKey } from "../leaderboard-service/store.mjs";
 import { BoothEngine } from "../.github/extensions/commit-and-sip/booth-engine.mjs";
@@ -282,6 +283,43 @@ test("a tie goes to the drink the board admitted first, by the booth's own rule"
   assert.deepEqual((await board(url)).entries, expected.map(({ handle, name, rank, score }) => ({ handle, name, rank, score })),
     "the public board ranks exactly as the booth's own leaderboard()");
   assert.equal(new Set(expected.map(row => row.rank)).size, expected.length, "no two drinks share a place");
+});
+
+test("the board says when its leader was entered, and no other drink's time", async t => {
+  let tick = Date.parse("2026-10-28T09:00:00.000Z");
+  const { url, store } = await service(t, { now: () => new Date(tick += 1000) });
+  assert.equal((await board(url)).leaderEnteredAt, null, "an empty board has no leader");
+
+  const byScore = new Map();
+  for (const name of ["Mocha", "Latte", "Crema", "Brew", "Roast", "Drip"].flatMap(coffee =>
+    ["Moonrise", "Sunset", "Velvet", "Ember"].map(word => `Mona ${word} ${coffee}`))) {
+    const { score } = scoreCoffeeName(name, rules);
+    byScore.set(score, [...(byScore.get(score) ?? []), name]);
+  }
+  // The top of this board is a tie, so only admission order picks the leader.
+  const [tiedScore, tied] = [...byScore.entries()].sort(([a], [b]) => b - a).find(([, names]) => names.length >= 2) ?? [];
+  assert.ok(tied, "the candidate list should contain a tie");
+  const lower = [...byScore.entries()].find(([score]) => score < tiedScore);
+  assert.ok(lower, "the candidate list should contain a score below the tie");
+  // The ID that sorts later goes in first, so only its time can make it lead.
+  const [first, second] = tied.slice(0, 2).sort((a, b) =>
+    scoreCoffeeName(b, rules).id.localeCompare(scoreCoffeeName(a, rules).id));
+  const handles = [HANDLE, OTHER_HANDLE, `${words.adjectives[2]}-${words.verbs[2]}-${words.nouns[2]}`];
+  const sent = [first, second, lower[1][0]].map((name, index) => submission(name, handles[index]));
+  for (const body of sent) assert.equal((await post(url, body)).status, 201);
+
+  const enteredAt = async id => (await store.list()).find(entry => entry.id === id).createdAt;
+  const shown = await board(url);
+  assert.equal(shown.entries[0].name, first, "the tied drink entered first leads");
+  assert.equal(shown.leaderEnteredAt, await enteredAt(sent[0].id), "and the board says when it was entered");
+  assert.deepEqual(shown.entries.map(row => Object.keys(row).sort()), shown.entries.map(() => ["handle", "name", "rank", "score"]),
+    "no row carries a time of its own");
+
+  // Take the leader down: the next drink leads, and its own time is shown.
+  assert.equal((await del(url, sent[0].id)).status, 204);
+  const after = await board(url);
+  assert.equal(after.entries[0].name, second);
+  assert.equal(after.leaderEnteredAt, await enteredAt(sent[1].id));
 });
 
 test("the board shows a window, the true total, and an attendee's own place", async t => {
@@ -819,6 +857,90 @@ test("the board highlights only the attendee's own row, not every row sharing a 
   const script = await readFile(new URL("../leaderboard-service/public/board.js", import.meta.url), "utf8");
   assert.doesNotMatch(script, /entry\.handle === handle\b/, "matching on the handle parameter alone highlights strangers");
   assert.match(script, /board\.you/);
+});
+
+// Runs the real page script against a minimal DOM and one canned board, and
+// returns the rendered rows. Text only ever arrives through textContent, so
+// the stand-in has no HTML parser to hide behind.
+async function renderBoard(body) {
+  class Element {
+    constructor(tag) { Object.assign(this, { children: [], className: "", hidden: false, parentElement: null, tagName: tag }); }
+    get textContent() { return this.children.map(child => (typeof child === "string" ? child : child.textContent)).join(""); }
+    set textContent(text) { this.children = [String(text)]; }
+    append(...nodes) {
+      for (const node of nodes) {
+        if (typeof node !== "string") node.parentElement = this;
+        this.children.push(node);
+      }
+    }
+    replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
+  }
+  const elements = new Map();
+  const byId = id => {
+    if (!elements.has(id)) elements.set(id, Object.assign(new Element("p"), { parentElement: new Element("p") }));
+    return elements.get(id);
+  };
+  const context = vm.createContext({
+    AbortSignal, URLSearchParams, location: { search: "" },
+    document: { createElement: tag => new Element(tag), getElementById: byId },
+    fetch: async () => ({ ok: true, json: async () => body }),
+    setInterval: () => 0, setTimeout: () => 0,
+  });
+  vm.runInContext(await readFile(new URL("../leaderboard-service/public/board.js", import.meta.url), "utf8"), context);
+  await new Promise(resolve => setImmediate(resolve));
+  return byId("rows").children;
+}
+
+test("the board marks its leader, and only its leader, with a badge and the time it was entered", async () => {
+  const entries = ["Mona Moonrise Mocha", "Ducky Dawn Drip", "Copilot Crema"].map((name, index) =>
+    ({ handle: `${words.adjectives[index]}-${words.verbs[index]}-${words.nouns[index]}`, name, rank: index + 1, score: 4600 - index * 100 }));
+  const base = { asOf: new Date().toISOString(), boardId: "a".repeat(32), captured: 3, entries, rebuilding: false, total: 3 };
+  const spans = row => row.children[1].children.filter(child => typeof child !== "string");
+  const clock = date => date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+  const now = new Date();
+  const rows = await renderBoard({ ...base, leaderEnteredAt: now.toISOString(), you: entries[1] });
+  assert.deepEqual(rows.map(row => row.className), ["leader", "mine", ""], "first place is marked apart from the attendee's own row");
+  assert.deepEqual(spans(rows[0]).map(span => [span.className, span.textContent]),
+    [["leader-badge", "Leader"], ["entered", `Entered ${clock(now)}`]], "today's entry shows its time alone");
+  assert.equal(rows[0].children[1].textContent, `Mona Moonrise Mocha Leader Entered ${clock(now)}`,
+    "words stay apart for a screen reader");
+  assert.deepEqual([spans(rows[1]), spans(rows[2])], [[], []], "no other row carries a badge or a time");
+
+  const yesterday = new Date(Date.now() - 36 * 60 * 60 * 1000);
+  const old = await renderBoard({ ...base, leaderEnteredAt: yesterday.toISOString(), you: entries[0] });
+  assert.equal(old[0].className, "mine leader", "an attendee who leads keeps both highlights");
+  assert.equal(spans(old[0])[1].textContent,
+    `Entered ${yesterday.toLocaleDateString([], { month: "short", day: "numeric" })}, ${clock(yesterday)}`,
+    "an entry from another day says which day");
+
+  for (const leaderEnteredAt of [undefined, null, "not a time"]) {
+    const plain = await renderBoard({ ...base, leaderEnteredAt });
+    assert.deepEqual(spans(plain[0]).map(span => span.className), ["leader-badge"],
+      `no usable time (${leaderEnteredAt}) still names the leader but invents no time`);
+  }
+});
+
+test("the leader's row keeps every text colour above 4.5:1, and an attendee's own highlight wins", async () => {
+  const css = await readFile(new URL("../leaderboard-service/public/board.css", import.meta.url), "utf8");
+  const token = name => new RegExp(`--${name}:\\s*(#[0-9a-f]{6})`, "i").exec(css)[1];
+  const luminance = hex => {
+    const [r, g, b] = [1, 3, 5].map(index => parseInt(hex.slice(index, index + 2), 16) / 255)
+      .map(value => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a, b) => {
+    const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (light + 0.05) / (dark + 0.05);
+  };
+  assert.match(css, /tr\.leader \{ background: var\(--surface\); \}/);
+  for (const ink of ["accent-ink", "muted", "text"]) {
+    assert.ok(contrast(token(ink), token("surface")) >= 4.5, `--${ink} on the leader's row`);
+  }
+  assert.match(css, /\.leader-badge \{[^}]*background: var\(--accent\); color: var\(--text\);/);
+  assert.ok(contrast(token("text"), token("accent")) >= 4.5, "the badge text");
+  assert.ok(css.indexOf("tr.leader {") < css.indexOf("tr.mine {"), "an attendee's own row keeps its colour when it leads");
+  assert.match(css, /tr\.mine \.entered \{ color: var\(--text\); \}/, "the muted entry time is too faint on --board");
 });
 
 test("a takedown with no recorded outcome, or made before a staff key existed, is retried", async t => {

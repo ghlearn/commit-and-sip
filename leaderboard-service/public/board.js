@@ -49,15 +49,37 @@ function announce(message) {
   $("announce").textContent = message;
 }
 
+// When the leader's drink reached the board, with the date as well if that was
+// not today, so a monitor left on overnight never passes off yesterday's time
+// as today's. Null for anything that is not a time.
+function enteredText(value) {
+  const date = new Date(value);
+  if (typeof value !== "string" || Number.isNaN(date.getTime())) return null;
+  const clock = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return date.toDateString() === new Date().toDateString()
+    ? `Entered ${clock}`
+    : `Entered ${date.toLocaleDateString([], { month: "short", day: "numeric" })}, ${clock}`;
+}
+
 function render(board) {
   const rows = board.entries.map(entry => {
     const row = document.createElement("tr");
     // Only the row the service identified, never every row sharing a phrase.
-    if (board.you && entry.handle === board.you.handle && entry.name === board.you.name) row.className = "mine";
+    const mine = board.you && entry.handle === board.you.handle && entry.name === board.you.name;
+    // First place. No two drinks share a place, and a tied score goes to the
+    // drink that reached the board first, so the leader carries its entry time.
+    const leader = entry.rank === 1;
+    const classes = [mine && "mine", leader && "leader"].filter(Boolean).join(" ");
+    if (classes) row.className = classes;
     const rank = cell("th", String(entry.rank));
     rank.scope = "row";
-    row.append(rank, cell("td", entry.name, "drink"), cell("td", entry.handle, "handle"),
-      cell("td", entry.score.toLocaleString(), "num"));
+    const drink = cell("td", entry.name, "drink");
+    if (leader) {
+      drink.append(" ", cell("span", "Leader", "leader-badge"));
+      const entered = enteredText(board.leaderEnteredAt);
+      if (entered) drink.append(" ", cell("span", entered, "entered"));
+    }
+    row.append(rank, drink, cell("td", entry.handle, "handle"), cell("td", entry.score.toLocaleString(), "num"));
     return row;
   });
   $("rows").replaceChildren(...rows);
