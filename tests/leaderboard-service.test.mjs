@@ -1271,6 +1271,24 @@ test("entry times follow admission order across instances, whatever either clock
     "every drink scores 1,000, so the board follows admission order");
 });
 
+test("a resent drink keeps the place and entry time it was first given", async t => {
+  const directory = await tempDirectory(t);
+  const [a, b] = await Promise.all([openStore({ directory }), openStore({ directory })]);
+  const at = iso => () => new Date(iso);
+  const admit = (store, id, now) => store.admit(entry(id), { fingerprint: fp(id), handles: [entry(id).handle], now });
+  await admit(a, "mona-leader", at("2026-10-28T09:00:00.000Z"));
+  await admit(b, "mona-runner-up", at("2026-10-28T09:05:00.000Z"));
+  // A booth that lost the first reply resends, later and through the other
+  // instance. That is a retry, so the drink must not be entered again.
+  const resent = await b.admit({ ...entry("mona-leader"), createdAt: "2026-10-28T10:00:00.000Z" },
+    { fingerprint: fp("mona-leader"), handles: [entry("mona-leader").handle], now: at("2026-10-28T10:00:00.000Z") });
+  assert.equal(resent.created, false, "a resend is recognised as the same drink");
+  assert.equal(resent.entry.createdAt, "2026-10-28T09:00:00.000Z", "and is answered with its original entry time");
+  const stored = await (await openStore({ directory })).list();
+  assert.equal(stored.find(item => item.id === "mona-leader").createdAt, "2026-10-28T09:00:00.000Z", "the stored time is untouched");
+  assert.deepEqual(leaderboard(stored).map(row => row.name), ["mona-leader", "mona-runner-up"], "so it keeps the lead");
+});
+
 test("a lock left by a dead instance is taken over; a live one is waited for", async t => {
   const directory = await tempDirectory(t);
   const lock = join(directory, "default.json.lock");
