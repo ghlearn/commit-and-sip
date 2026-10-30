@@ -183,7 +183,7 @@ npm run check
 - Treat a published rubric as something you can reason about and improve against, rather than guessing at a black box.
 - See their own contribution land on a shared artifact that the rest of the event can see.
 
-Scores run from 1 to **5,000** and come from a deterministic rubric in code, not a language model. The same name always scores the same. Speed, retries, and accessibility assistance do not reduce a score. Mona Latte, Copilot Cortado, and Ducky Cold Brew are worked examples: never scored, never ranked.
+Scores run from 1 to **5,000**, a score one valid name can actually reach, and come from a deterministic rubric in code, not a language model. The same name always scores the same, and no two drinks share a score: if another drink already holds yours, tweak the name and submit again. With the event leaderboard configured, a drink joins the menu only once the leaderboard admits it. Speed, retries, and accessibility assistance do not reduce a score. Mona Latte, Copilot Cortado, and Ducky Cold Brew are worked examples: never scored, never ranked.
 
 ## Documentation
 

@@ -22,11 +22,11 @@ There is nothing else to pick. The station reads the mascot and where it sits st
 
 Type your drink name and choose Add it to the menu. A bare mascot on its own is rejected, because Mona or Ducky alone would let the first attendee permanently claim a name nobody invented. Add something of your own to it.
 
-The menu is first come, first served. If someone has already used your name, the station says so and you try another. Names are compared after normalizing case, spacing, and punctuation, so Mona Moonrise and mona-moonrise are the same drink.
+The menu is first come, first served. If someone has already used your name, the station says so and you try another. No two drinks share a score either: if another drink already has the score yours earns, tweak your name (add, swap, or respell a word) and submit again. If the event leaderboard can't be reached, your drink isn't added yet; try again in a moment. Names are compared after normalizing case, spacing, and punctuation, so Mona Moonrise and mona-moonrise are the same drink.
 
 ## Read your score
 
-A rubric scores the name out of 5,000 and shows you the breakdown: base credit, alliteration, craft, wordplay, how well it fits the house style, mascot crew (a bonus for using two or all three mascots), and invention. The rubric is deterministic. The same name always earns the same score, and no model generates your feedback or your score.
+A rubric scores the name out of 5,000 and shows you the breakdown: base credit, alliteration, craft, wordplay, how well it fits the house style, mascot crew (a bonus for using two or all three mascots), invention, and letter value (every letter counts, A as 1 up to Z as 26, to a cap). One name can earn every category's maximum and reach 5,000. The rubric is deterministic. The same name always earns the same score, and no model generates your feedback or your score.
 
 A mid-range score is a normal result. Most invented names land well below the maximum, because every category has to be earned.
 

@@ -93,15 +93,10 @@ export class BoothPanel {
     }
     if (this.runId) await this.currentRun();
     requireValue(this.runId, "not_started", "Start an order at this station first.", 409);
+    // With an event leaderboard, submit_name answers only once the board has
+    // admitted the drink (and it is served) or said why not, so there is no
+    // background publish left to start here.
     const state = await this.engine.dispatch(this.runId, action, input);
-    // Serving commits locally first; publishing to the event leaderboard is a
-    // separate step that must not be able to fail or slow the attendee's
-    // submission. It runs in the background: the screen answers at once with
-    // the drink "still being confirmed", and polls until the service answers.
-    if (action === "submit_name") {
-      this.backgroundPublish = this.engine.publish(this.runId).catch(() => {});
-      return this.decorate(state);
-    }
     // Completing hands the station to the next attendee. The run itself stays
     // finished in the store; only this panel's cursor is released.
     if (action === "complete") {

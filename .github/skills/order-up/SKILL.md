@@ -38,6 +38,8 @@ Every drink must carry `mona`, `ducky`, or `copilot`, anywhere in the name. A ba
 
 The menu is first come, first served after normalizing case, spacing, and punctuation. A duplicate is reported as already on the menu; treat that as a normal outcome, not an attendee error.
 
+No two drinks share a score. If another drink already holds the score a name earns, the drink is refused with `score_taken` and the attendee stays on the naming screen: let them tweak the name themselves (add, swap, or respell a word). With an event leaderboard configured, a drink joins the menu only once the board admits it. If the board cannot be reached, nothing is served: the attendee tries again in a moment, and a retry never adds the drink twice.
+
 The 1-to-5,000 score comes from a deterministic local rubric. The same name always earns the same score. No model writes the feedback and no model assigns the score. Never present the rubric breakdown as Copilot commentary, and never impersonate a judge. Copilot commentary is unavailable unless a real attributed, moderated, trusted judge is configured.
 
 Most invented names land well short of 5,000. Say so before the score appears, so a mid-range result reads as normal rather than as failure.

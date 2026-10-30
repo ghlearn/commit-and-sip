@@ -51,6 +51,18 @@ export class HandleTakenError extends Error {
   }
 }
 
+// No two drinks on a board share a score, so a rank is never a tie. The
+// rubric pays in single points, but a finite range cannot give every name its
+// own total, so a different drink whose score is already taken is refused and
+// the attendee tweaks the name. A takedown frees the score.
+export class ScoreTakenError extends Error {
+  constructor() {
+    super("Another drink on the board already has that score.");
+    this.name = "ScoreTakenError";
+    this.code = "score_taken";
+  }
+}
+
 // The board is closed to new entries while it is being rebuilt. Takedowns
 // are replayed first, and no drink may land before every booth has reserved
 // the names it took down, so admission waits (a booth keeps the drink and
@@ -148,10 +160,15 @@ export class MemoryStore {
     const board = () => [...this.entries.values()].map(item => ({ ...item }));
     const existing = this.entries.get(entry.id);
     if (existing) return { created: false, entries: board(), entry: { ...existing } };
+    // Checked here, inside the one admission step (under the write lock, for
+    // the file store), so two drinks racing for the same score cannot both win.
+    if ([...this.entries.values()].some(item => item.score === entry.score)) throw new ScoreTakenError();
     const used = new Set([...this.entries.values()].map(item => item.handle));
     const handle = handles.find(candidate => !used.has(candidate));
     if (!handle) throw new HandleTakenError();
-    // A tied score goes to the drink admitted first, so entry times must follow
+    // Admission refuses a taken score, but a board written before that rule
+    // can still hold a tie, and it goes to the drink admitted first. So entry
+    // times must follow
     // admission order. Stamped inside the admission (under the write lock, for
     // the file store), not when the request arrived: a request that waited for
     // the lock could otherwise carry an earlier time than one admitted before

@@ -8,9 +8,9 @@ This document began as a proposal. It now records what was built, the decisions 
 
 ## What the booth guarantees
 
-- **It saves first, always.** A failed submission can never cost an attendee their drink or their score.
+- **It serves only what the board admitted.** With the service configured, a drink joins the booth's menu only once the service has admitted it. A refusal keeps the attendee naming with the reason, and an unreachable service serves nothing and asks them to try again. The attempt and its token are saved before the send, so a lost reply is settled by resending the same publication and the drink is served once.
 - **The payload is `{handle, id, name, score, token}`** and nothing else. The `token` is a random per-publication token that stays the same across retries, so the service can tell a retry from another attendee who drew the same handle and name. It identifies the publication, never the booth, device or run, and the service keeps only its hash. No run ID, no device, no booth identity.
-- **The client owns its timeout** (4 seconds). A booth queue never waits on a slow service.
+- **The client owns its timeout** (4 seconds), so an attendee waits at most a few seconds for an answer, and other stations are never held up.
 - **A local booth rank and an event rank are never conflated.** Until a receipt arrives, the canvas says the place is still being confirmed.
 
 ## Decisions
@@ -56,11 +56,12 @@ A key proves which service a request is allowed into, not that the booth code is
 
 - `scoreCoffeeName` rechecks the name rules, the blocklist, and the house-example exclusion, and recomputes the score. The request is refused with `422 score_mismatch` if the score or ID differ, and with `422 rejected_name` if the name is refused.
 - The handle must be built from `booth/handle-words.json`, optionally with the eight-hex collision suffix, or the request is refused with `422 invalid_handle`.
-- Ranking is the booth's own `leaderboard()`, and no two drinks share a place. A tied score goes to the drink the service admitted first (its stored `createdAt`). The store stamps that time inside the admission itself, under the write lock, and always later than every drink already on the board, so entry times follow admission order even when a request waited for the lock or a second instance's clock runs behind. Two rows with the same time, possible only on a board written before that rule, are ordered by drink ID. The booth and the board break a tie by the same rule. Admission time comes from the service's own clock, never from the booth, so a leaked booth key cannot claim an earlier place. A rebuild (`npm run leaderboard:republish -- --drinks`) admits every drink again, so after one, tied drinks keep the order in which the booths replayed them, not the order of the original event.
+- **No two active drinks share a score.** A different drink whose score another drink on the board already holds is refused with `409 score_taken`. The check runs inside the admission, under the write lock, so two requests racing for one score, on one instance or two, never both land. A resend of the same drink is still `200`, and a takedown frees the score. Scores are never re-scored on load, so a board written before this rule may still hold a tie.
+- Ranking is the booth's own `leaderboard()`, and no two drinks share a place. On a board that still holds a tie from before `score_taken`, the tied score goes to the drink the service admitted first (its stored `createdAt`). The store stamps that time inside the admission itself, under the write lock, and always later than every drink already on the board, so entry times follow admission order even when a request waited for the lock or a second instance's clock runs behind. Two rows with the same time, possible only on a board written before that rule, are ordered by drink ID. The booth and the board break a tie by the same rule. Admission time comes from the service's own clock, never from the booth, so a leaked booth key cannot claim an earlier place. A rebuild (`npm run leaderboard:republish -- --drinks`) admits every drink again, so after one, tied drinks keep the order in which the booths replayed them, not the order of the original event.
 
 The service moderates with the blocklist deployed alongside it. Updating the blocklist means redeploying the service. `/healthz` reports `moderation: "placeholder"` whenever the list is unreviewed, and the service then logs a warning at start-up.
 
-**Version skew is real.** A rubric change that reaches the service before the booths makes their submissions fail with `score_mismatch`. The booth shows those drinks as still being confirmed, and the reason is in its sync record. Deploy the service from the same commit the booths run.
+**Version skew is real.** A rubric change that reaches the service before the booths makes their submissions fail with `score_mismatch`. A booth then serves nothing and its attendees are told to try again, so deploy the service and every booth from the same commit, together. A booth build from before board-first serving serves first and publishes after, so it would show drinks the service then refuses with `score_taken`: never run one against a board that enforces it.
 
 ### Retraction: delete the entry, reserve the name everywhere
 
@@ -78,7 +79,7 @@ The service replies with `{handle, id, name, score, rank, entries}`. `id`, `name
 
 ### The public page
 
-`GET /` shows rank, drink, barista handle, and score, for the top 20 plus the true total. First place is highlighted with a **Leader** badge and the time its drink was entered, because a tied top score goes to the drink that reached the board first. That time is the only one the API publishes (`leaderEnteredAt`, the leader's stored `createdAt`); rows carry none. With `?handle=…&ref=…` it also shows "your drink" wherever it ranks. **Both are required:** a handle is unique only at one booth, so a handle alone returns no personal row, and `ref` is the opaque publication reference the booth puts in the attendee's QR link. It shows no booth identity, run IDs, or staff attribution, and **no mascot art**, because `mona.png` is not cleared for publication. It polls every 10 seconds. If polling fails, it keeps the last board and says how old it is, so a dropped connection gives a visibly stale board rather than a silently wrong one.
+`GET /` shows rank, drink, barista handle, and score, for the top 20 plus the true total. First place is highlighted with a **Leader** badge and the time its drink was entered, because on a board from before `score_taken`, a tied top score goes to the drink that reached the board first. That time is the only one the API publishes (`leaderEnteredAt`, the leader's stored `createdAt`); rows carry none. With `?handle=…&ref=…` it also shows "your drink" wherever it ranks. **Both are required:** a handle is unique only at one booth, so a handle alone returns no personal row, and `ref` is the opaque publication reference the booth puts in the attendee's QR link. It shows no booth identity, run IDs, or staff attribution, and **no mascot art**, because `mona.png` is not cleared for publication. It polls every 10 seconds. If polling fails, it keeps the last board and says how old it is, so a dropped connection gives a visibly stale board rather than a silently wrong one.
 
 Security measures:
 
@@ -104,7 +105,7 @@ GET    /api/board[?handle=&ref=]    { asOf, boardId, captured, leaderEnteredAt, 
                                 leaderEnteredAt: when the first-place drink was admitted, or null on an empty board.
 POST   /api/entries             booth key. 201 new, 200 same entry again (handle
                                 may be canonical), 409 duplicate_drink |
-                                unavailable_drink | handle_taken,
+                                unavailable_drink | handle_taken | score_taken,
                                 422 score_mismatch | rejected_name | invalid_handle
 POST   /api/retractions         staff key. Body exactly { id }. 204 retracted, 200 {"retraction":"absent"}.
                                 Reserves either way. The ID is never in a URL, so web-server

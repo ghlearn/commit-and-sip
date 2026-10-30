@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { DomainError, requireValue, exactInput, validRunId, generateHandle } from "./domain.mjs";
-import { PLACEMENTS } from "./services/coffee-name.mjs";
+import { coffeeNameId, normalizeCoffeeName, PLACEMENTS } from "./services/coffee-name.mjs";
 import { validateLeaderboardUrl } from "./services/public-url.mjs";
-import { addDrink, leaderboard, removeDrink, seedMenu, standingFor } from "./services/booth-menu.mjs";
+import { addDrink, findDrink, leaderboard, prepareDrink, removeDrink, SCORE_TAKEN_MESSAGE, seedMenu, standingFor } from "./services/booth-menu.mjs";
 import {
   confirmedSync, failedSync, initialSync, newPublicationToken, publicRef, retractionCause, retractionFailure, submissionFor, syncView, tokenHashOf, validateLeaderboardClient, validateReceipt,
 } from "./services/leaderboard.mjs";
@@ -32,6 +32,57 @@ const SETTLED = ["retracted", "absent"];
 const SEND_CLAIM_MS = 60_000;
 const liveClaims = (sync, at = Date.now()) =>
   Object.values(sync?.sending ?? {}).filter(since => at - Date.parse(since) < SEND_CLAIM_MS).length;
+
+// With an event leaderboard, a drink is served only once the board admits it,
+// so two drinks never share a score anywhere and the menu never shows a drink
+// the board refused. These are what the attendee is told when it does not.
+const SERVED_MESSAGE = entry => `${entry.name} is on the menu and scored ${entry.score} out of 5000.`;
+const UNREACHABLE_MESSAGE = "The event leaderboard can't be reached right now, so your drink isn't on the menu yet. "
+  + "Try again in a moment.";
+const ADMISSION_BUSY_MESSAGE = "Your drink is already being checked with the event leaderboard. Wait a moment.";
+// The same words the booth uses for a blocklist hit or a local takedown, so
+// nobody can tell which it was (see services/booth-menu.mjs).
+const UNAVAILABLE_MESSAGE = "That name is not available. Try another.";
+
+// The service's own refusals of a drink. A resend of a drink the board already
+// admitted is answered as a success, so one of these proves this publication
+// is not on the board, however many times it was sent.
+const BOARD_REFUSALS = ["duplicate_drink", "handle_taken", "score_taken", "unavailable_drink"];
+
+// A definite "no" from the service: the drink was not admitted, and sending it
+// again cannot change that. Any other 4xx (a proxy's 429, a stopped app's 404,
+// a rotated key's 401, a validation code) proves only that this one request
+// was turned away, so it is definite only for the first send of a new
+// admission. On a resend the earlier send may have landed, so it stays in
+// doubt, as does no answer, a 5xx, or a reply the booth cannot trust.
+const refusedByBoard = (error, firstSend) => {
+  if (error instanceof DomainError || !Number.isInteger(error?.status) || error.status < 400 || error.status >= 500) {
+    return false;
+  }
+  return BOARD_REFUSALS.includes(error.code) || firstSend;
+};
+
+function admissionRefusal(code, entry) {
+  switch (code) {
+    case "score_taken":
+      return { code, message: SCORE_TAKEN_MESSAGE(entry.name, entry.score, "the event leaderboard"), status: 409 };
+    case "duplicate_drink":
+      return { code, message: `Another barista already published ${entry.name} on the event leaderboard. Invent a different drink.`, status: 409 };
+    case "unavailable_drink":
+    case "rejected_name":
+      return { code: "unavailable_drink", message: UNAVAILABLE_MESSAGE, status: 409 };
+    case "handle_taken":
+      return { code, message: "The event leaderboard could not list that drink under your handle. Try a different name.", status: 409 };
+    default:
+      return { code: "leaderboard_refused", status: 502,
+        message: "The event leaderboard refused this drink, so it isn't on the menu. Ask booth staff for help." };
+  }
+}
+
+// The ID a typed name would take, or null for a name the rules would refuse.
+const typedId = name => {
+  try { return coffeeNameId(normalizeCoffeeName(name).toLowerCase()); } catch { return null; }
+};
 
 // Whether a removed drink's ID may be on the public board, from any booth.
 // The board is keyed by drink ID, not by run, so this run never having been
@@ -233,6 +284,7 @@ export class BoothEngine {
     this.publicationSweep ??= (async () => {
       try {
         if (!this.leaderboardClient) return 0;
+        await this.resolveAdmissions();
         const data = await this.store.read();
         const owed = Object.entries(data.runs)
           .filter(([, run]) => ["pending", "failed"].includes(run.sync?.state) && !run.removed)
@@ -429,12 +481,19 @@ export class BoothEngine {
     // give every owed takedown one more try...
     await this.drainPublications();
     await this.retryRetractions().catch(() => {});
+    await this.resolveAdmissions().catch(() => {});
     return this.store.transaction(async data => {
       // ...and refuse if a publish started in the meantime, here or in another
       // process. Its claim is in this ledger, under this lock.
-      const claimed = Object.values(data.runs).some(run => liveClaims(run.sync));
+      const claimed = Object.values(data.runs).some(run => liveClaims(run.sync) || liveClaims(run.admission));
       requireValue(!this.inFlight?.size && !claimed, "publications_in_flight",
         "A drink is still being sent to the public leaderboard. Try again in a few seconds. Nothing was changed.", 409);
+      // A drink whose admission is in doubt may be on the public board with no
+      // menu entry here. Wiping would lose the only record of it.
+      const unsettled = Object.values(data.runs).filter(run => run.admission).length;
+      requireValue(unsettled === 0, "admissions_unsettled",
+        `${unsettled === 1 ? "One drink is" : `${unsettled} drinks are`} still waiting for the event leaderboard to say whether it was admitted. `
+        + "Press Refresh and retry once the leaderboard can be reached. Nothing was changed.", 409);
       // ...and refuse to wipe while any is still owed.
       const owed = this.removalLog(data).filter(record => !SETTLED.includes(record.published) && mayBePublic(data, record, Boolean(this.leaderboardClient)));
       requireValue(owed.length === 0, "takedowns_owed",
@@ -782,6 +841,7 @@ export class BoothEngine {
     requireValue(["submit_name", "complete"].includes(action),
       "unknown_action", "That action is not available at this booth.", 400);
     exactInput(input, action === "complete" ? [] : ["name", "mascot", "placement"]);
+    if (action === "submit_name" && this.leaderboardClient) return this.submitName(runId, input);
     return this.store.transaction(data => {
       const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
       requireValue(run, "run_missing", "That run does not exist. Start a new one.", 404);
@@ -806,25 +866,178 @@ export class BoothEngine {
       requireValue(run.phase === "naming", "already_served",
         "You have already added your drink. Each attendee invents one.", 409);
 
+      // A standalone booth is its own board, so it refuses a score another
+      // drink on its menu already holds. A booth with an event leaderboard
+      // never reaches here: submitName asks the board instead.
       const entry = addDrink(this.houseMenu(data), {
+        choice: { mascot: input.mascot, placement: input.placement },
+        handle: run.handle, rawName: input.name, removedIds: this.removalLog(data).map(record => record.id),
+        rules: this.rules, runId, uniqueScore: true,
+      });
+      run.submission = submissionView(entry);
+      run.phase = "served";
+      run.sync = initialSync(false);
+      run.events.push({ type: "served", at: entry.createdAt });
+      run.statusMessage = SERVED_MESSAGE(entry);
+      return this.present(run, data);
+    });
+  }
+
+  // --- Board-first serving ----------------------------------------------------
+  // With an event leaderboard, the order is score, admit, serve. The board is
+  // the only place that sees every booth's drinks, so only it can refuse a
+  // score another booth's drink already holds. Serving first and publishing
+  // later would put a drink on this menu that the board then refuses.
+  //
+  // The attempt is recorded in the ledger (`run.admission`) before anything is
+  // sent, with its publication token, so a lost reply is resolved by resending
+  // the same publication: the service answers a resend of an admitted drink as
+  // a success, and the drink is served once, never twice. While an admission
+  // is in doubt it is resolved before anything else is sent for that run.
+  async submitName(runId, input) {
+    // One submission per station at a time. A double tap must not send two
+    // publications; another process is stopped by the ledger claim instead.
+    this.admitting ??= new Set();
+    requireValue(!this.admitting.has(runId), "admission_in_progress", ADMISSION_BUSY_MESSAGE, 409);
+    this.admitting.add(runId);
+    try {
+      // At most two rounds: an earlier attempt still in doubt, then this name.
+      for (let round = 0; round < 2; round += 1) {
+        const claim = await this.claimAdmission(runId, input);
+        // A resend of a different, earlier name that the board refused frees
+        // the attendee to try the name they just typed.
+        const earlierName = claim.earlier && claim.entry.id !== typedId(input.name);
+        const outcome = await this.tracked(this.sendAdmission(claim));
+        const settled = await this.settleAdmission(runId, claim, outcome, { earlierName });
+        if (settled.view) return settled.view;
+        if (settled.refusal && earlierName) continue;
+        if (settled.refusal) throw new DomainError(settled.refusal.code, settled.refusal.message, settled.refusal.status);
+        throw new DomainError("leaderboard_unreachable", UNREACHABLE_MESSAGE, 503);
+      }
+      throw new DomainError("leaderboard_unreachable", UNREACHABLE_MESSAGE, 503);
+    } finally {
+      this.admitting.delete(runId);
+    }
+  }
+
+  // Claims the run's admission under the ledger lock: the earlier one still in
+  // doubt, or a new one for the typed name once it passes every local check.
+  // `input` null resumes an earlier admission only (the retry sweep).
+  async claimAdmission(runId, input) {
+    const attempt = randomUUID();
+    return this.store.transaction(data => {
+      const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
+      if (!input) {
+        if (!run?.admission || liveClaims(run.admission)) return null;
+      } else {
+        requireValue(run, "run_missing", "That run does not exist. Start a new one.", 404);
+        requireValue(run.mode === "booth", "run_conflict", "That run belongs to a different exercise mode.");
+        requireValue(PHASES.includes(run.phase), "invalid_phase", "This run has an unusable state. Ask booth staff.");
+        requireValue(run.phase === "naming", "already_served",
+          "You have already added your drink. Each attendee invents one.", 409);
+        requireValue(!liveClaims(run.admission), "admission_in_progress", ADMISSION_BUSY_MESSAGE, 409);
+      }
+      const now = new Date().toISOString();
+      if (run.admission) {
+        run.admission.sending = { [attempt]: now };
+        return { attempt, earlier: Boolean(input), entry: run.admission.entry, token: run.admission.token };
+      }
+      // Every local check (name rules, blocklist, local duplicates and
+      // takedowns, the mascot and placement choice) runs here, before anything
+      // is sent. Nothing joins the menu yet.
+      const entry = prepareDrink(this.houseMenu(data), {
         choice: { mascot: input.mascot, placement: input.placement },
         handle: run.handle, rawName: input.name, removedIds: this.removalLog(data).map(record => record.id),
         rules: this.rules, runId,
       });
-      run.submission = {
-        breakdown: entry.breakdown, id: entry.id, name: entry.name, placement: entry.placement,
-        price: entry.price, score: entry.score, serving: entry.serving,
-      };
-      run.phase = "served";
-      run.sync = initialSync(Boolean(this.leaderboardClient));
-      // Minted with the served drink, in the same transaction, so the QR link
-      // is personal from the first screen and every later send reuses it.
-      if (this.leaderboardClient) run.sync.token = newPublicationToken();
-      run.events.push({ type: "served", at: entry.createdAt });
-      run.statusMessage = `${entry.name} is on the menu and scored ${entry.score} out of 5000.`;
-      return this.present(run, data);
+      run.admission = { entry, sending: { [attempt]: now }, startedAt: now, token: newPublicationToken() };
+      run.events.push({ type: "admission_requested", at: now });
+      return { attempt, earlier: false, entry, fresh: true, token: run.admission.token };
     });
   }
+
+  async sendAdmission(claim) {
+    const submission = submissionFor(claim.entry, claim.token);
+    try {
+      return { ok: true, receipt: validateReceipt(await this.leaderboardClient.publish(submission), submission) };
+    } catch (error) {
+      return { error, ok: false };
+    }
+  }
+
+  // Records what the board said, under the ledger lock. Admitted: serve it.
+  // Refused: forget the attempt and keep the attendee naming. No answer: keep
+  // the attempt, so the next try resends the same publication.
+  async settleAdmission(runId, claim, outcome, { earlierName = false } = {}) {
+    return this.store.transaction(data => {
+      const run = Object.hasOwn(data.runs, runId) ? data.runs[runId] : null;
+      const admission = run?.admission;
+      // Settled by someone else after this claim lapsed: report what they found.
+      if (!admission || admission.token !== claim.token) {
+        return run?.submission ? { view: this.present(run, data) } : {};
+      }
+      const { [claim.attempt]: _done, ...others } = admission.sending ?? {};
+      admission.sending = others;
+      const at = new Date().toISOString();
+      if (outcome.ok) {
+        const entry = { ...admission.entry, createdAt: at };
+        const menu = this.houseMenu(data);
+        if (!findDrink(menu, entry.id)) menu.push(entry);
+        run.submission = submissionView(entry);
+        // Staff may have closed the station while the answer was on its way.
+        if (run.phase === "naming") run.phase = "served";
+        run.sync = confirmedSync({ attempts: 0, state: "pending", token: admission.token, updatedAt: at }, outcome.receipt, at);
+        delete run.admission;
+        run.events.push({ type: "served", at });
+        run.statusMessage = earlierName
+          ? `Your earlier name, ${entry.name}, reached the event leaderboard, so it is your drink. It scored ${entry.score} out of 5000.`
+          : SERVED_MESSAGE(entry);
+        return { view: this.present(run, data) };
+      }
+      // The first send of a new admission, with no other send of it recorded.
+      const firstSend = claim.fresh === true && !admission.attempts && Object.keys(others).length === 0;
+      if (refusedByBoard(outcome.error, firstSend)) {
+        const refusal = admissionRefusal(outcome.error.code, admission.entry);
+        delete run.admission;
+        // The service's own code is kept for staff; the attendee sees the
+        // refusal's wording only.
+        run.events.push({ type: "admission_refused", at, code: refusedCode(outcome.error) });
+        if (run.phase === "naming") run.statusMessage = refusal.message;
+        return { refusal };
+      }
+      admission.attempts = (admission.attempts ?? 0) + 1;
+      admission.reason = typeof outcome.error?.message === "string" ? outcome.error.message.slice(0, 200) : "Unknown leaderboard error.";
+      admission.updatedAt = at;
+      if (run.phase === "naming") run.statusMessage = UNREACHABLE_MESSAGE;
+      return { inDoubt: true };
+    });
+  }
+
+  // Resolves every admission left in doubt: an attendee who walked away, or a
+  // station staff closed, after the board could not be reached. A drink the
+  // board turns out to have admitted is served; one it refused is dropped.
+  async resolveAdmissions() {
+    if (!this.leaderboardClient) return;
+    const data = await this.store.read();
+    const runIds = Object.entries(data.runs)
+      .filter(([runId, run]) => run.admission && !liveClaims(run.admission) && !this.admitting?.has(runId))
+      .map(([runId]) => runId);
+    for (const runId of runIds) {
+      const claim = await this.claimAdmission(runId, null);
+      if (!claim) continue;
+      const outcome = await this.tracked(this.sendAdmission(claim));
+      await this.settleAdmission(runId, claim, outcome).catch(() => {});
+    }
+  }
 }
+
+function submissionView(entry) {
+  return {
+    breakdown: entry.breakdown, id: entry.id, name: entry.name, placement: entry.placement,
+    price: entry.price, score: entry.score, serving: entry.serving,
+  };
+}
+
+const refusedCode = error => (typeof error?.code === "string" && /^[a-z_]{1,40}$/.test(error.code) ? error.code : null);
 
 export { DomainError };
