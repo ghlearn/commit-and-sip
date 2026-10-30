@@ -110,56 +110,62 @@ test("a confirmed receipt is recorded and shown as the event rank", async () => 
   }
 });
 
-test("a failing service never costs the attendee their drink or score", async () => {
+test("an unreachable board serves nothing and keeps the attendee naming", async () => {
   const { directory, engine } = await booth({
     publish: async () => { throw new Error("leaderboard unreachable"); }
   });
   try {
-    const served = await serve(engine);
-    // Serving itself must succeed: the entry is durable before any network call.
-    assert.equal(served.phase, "served");
-    assert.equal(served.submission.score > 0, true);
-    await engine.publish("board-run");
+    await engine.open({ runId: "board-run" });
+    await assert.rejects(engine.dispatch("board-run", "submit_name", { name: "Mona Moonrise" }),
+      { code: "leaderboard_unreachable", status: 503, message: /Try again in a moment/ });
     const state = await engine.get("board-run");
-    assert.equal(state.sync.state, "failed");
-    assert.equal(state.sync.eventRank, null);
-    assert.equal(state.houseMenu.some(item => item.name === "Mona Moonrise"), true);
-    assert.equal(state.leaderboard[0].name, "Mona Moonrise");
+    // Nothing is served until the board admits the drink.
+    assert.equal(state.phase, "naming");
+    assert.equal(state.submission, null);
+    assert.equal(state.houseMenu.some(item => item.name === "Mona Moonrise"), false);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-test("a mismatched receipt is treated as a failure, not as a rank", async () => {
+test("a mismatched receipt is not an admission, so nothing is served", async () => {
   const { directory, engine } = await booth({
     publish: async submission => ({ ...submission, handle: "someone-else", rank: 1 })
   });
   try {
-    await serve(engine);
-    await engine.publish("board-run");
+    await engine.open({ runId: "board-run" });
+    await assert.rejects(engine.dispatch("board-run", "submit_name", { name: "Mona Moonrise" }),
+      { code: "leaderboard_unreachable" });
     const state = await engine.get("board-run");
-    assert.equal(state.sync.state, "failed");
+    assert.equal(state.phase, "naming");
     assert.equal(state.sync.eventRank, null);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-test("a refresh retries a failed submission and can still confirm it", async () => {
+test("trying again after an outage resends the same admission and serves once", async () => {
+  const sent = [];
   let fail = true;
   const { directory, engine } = await booth({
     publish: async submission => {
+      sent.push(submission);
       if (fail) { fail = false; throw new Error("temporary outage"); }
       return { ...submission, rank: 1, entries: 1 };
     }
   });
   try {
-    await serve(engine);
-    await engine.publish("board-run");
-    assert.equal((await engine.get("board-run")).sync.state, "failed");
-    const refreshed = await engine.dispatch("board-run", "refresh", {});
-    assert.equal(refreshed.sync.state, "confirmed");
-    assert.equal(refreshed.sync.eventRank, 1);
+    await engine.open({ runId: "board-run" });
+    await assert.rejects(engine.dispatch("board-run", "submit_name", { name: "Mona Moonrise" }),
+      { code: "leaderboard_unreachable" });
+    const served = await engine.dispatch("board-run", "submit_name", { name: "Mona Moonrise" });
+    assert.equal(served.phase, "served");
+    assert.equal(served.sync.state, "confirmed");
+    assert.equal(served.sync.eventRank, 1);
+    assert.equal(sent.length, 2);
+    // The retry is the same publication, so the board treats it as a resend.
+    assert.equal(sent[1].token, sent[0].token);
+    assert.equal(served.houseMenu.filter(item => item.name === "Mona Moonrise").length, 1);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

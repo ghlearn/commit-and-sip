@@ -3,18 +3,21 @@ import { requireValue } from "../domain.mjs";
 
 // The booth is authoritative for its own menu; the event leaderboard is a
 // separate service that no booth can see into. Everything here is a client
-// seam: the local entry is always durable first, and a submission that fails
-// can never cost an attendee the drink they invented or the score they earned.
+// seam. A new drink is served only once the board admits it (see submitName in
+// booth-engine.mjs); the sync states below track drinks already on the menu:
+// ones served before this booth was configured, sent again by a rebuild, or
+// left pending by a booth build that served first.
 export const SYNC_STATES = ["disabled", "pending", "confirmed", "failed", "rejected"];
 
 // Refusals that retrying cannot change: another attendee already holds the
-// name, staff took it down, or both handles this publication can use (its
-// own and its canonical form, the same two on every retry) are taken. They
+// name, staff took it down, both handles this publication can use (its
+// own and its canonical form, the same two on every retry) are taken, or
+// another drink already holds its score. They
 // become "rejected" and are never sent again, not even by a rebuild.
 // Otherwise, after the service lost its data, the booth that lost a clash
 // could publish first and take the name from the attendee who legitimately
 // holds it, and a handle clash would be resent forever.
-export const TERMINAL_REJECTIONS = ["duplicate_drink", "handle_taken", "unavailable_drink"];
+export const TERMINAL_REJECTIONS = ["duplicate_drink", "handle_taken", "score_taken", "unavailable_drink"];
 
 // A random value minted once per publication and kept with the run, so every
 // retry of one publication carries the same token. It lets the service tell a

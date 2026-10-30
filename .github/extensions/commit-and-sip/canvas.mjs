@@ -18,7 +18,7 @@ export function boothCanvasDefinition({ engine, guarded = fn => fn(), reportErro
         placement: { enum: PLACEMENTS }
       },
       required: ["name"], additionalProperties: false
-    }, "Add the attendee's invented drink to the house menu and score it. A declared mascot or placement is checked against the name."],
+    }, "Score the attendee's invented drink and add it to the house menu. With an event leaderboard configured, it is served only once the board admits it: a score another drink holds (score_taken) or an unreachable board (leaderboard_unreachable) keeps the attendee naming. A declared mascot or placement is checked against the name."],
     complete: [empty, "Finish this attendee and clear the station for the next one. The drink stays on the menu and leaderboard."],
     refresh: [empty, "Read the current station state, house menu, and leaderboard."]
   };

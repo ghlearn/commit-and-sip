@@ -12,6 +12,28 @@ test("the rubric is bounded and its parts sum to the advertised maximum", () => 
     "an attendee can only be told the score is out of 5000 if the parts really reach it");
 });
 
+test("one valid name earns every category maximum, so 5000 is really reachable", () => {
+  // Summing the caps is not enough: the old rubric's caps also summed to 5000,
+  // but its word-count band made the last 400 points impossible to earn.
+  const best = "Monaduckycopilot Moka Mocha Mint Squint";
+  assert.ok(best.length <= 40, "the name fits the length limit");
+  const { breakdown, score } = scoreCoffeeName(best, rules);
+  for (const part of breakdown) assert.equal(part.points, part.max, `${part.label} is at its maximum`);
+  assert.equal(score, MAX_SCORE);
+});
+
+test("scores move in single points, not steps of 50", () => {
+  const score = name => scoreCoffeeName(name, rules).score;
+  const letters = name => scoreCoffeeName(name, rules).breakdown.find(part => part.label === "Letter value");
+  // A one-letter respelling changes the score without changing any coarse category.
+  assert.equal(score("Mona Moonrisf Mocha") - score("Mona Moonrise Mocha"), 1);
+  assert.equal(letters("Mona Mocha").points, 83, "A=1 ... Z=26, summed over the letters");
+  assert.equal(letters(`Mona ${"z".repeat(35)}`).points, 400, "Letter value is capped");
+  const seen = new Set(["Mona Mocha", "Mona Moonrise Mocha", "Ducky Dawn Drizzle", "Copilot Cinder Crema",
+    "Mona Moonlight Mocha", "Mona Nebula", "Ducky Doppio", "Copilot Cosmic Crema"].map(score));
+  assert.equal(seen.size, 8, "everyday names do not pile up on the same total");
+});
+
 test("a score is a pure, reproducible function of the name alone", () => {
   const first = scoreCoffeeName("Ducky Dawn Drip", rules);
   // Repeated, re-cased and re-spaced submissions must never disagree, so a

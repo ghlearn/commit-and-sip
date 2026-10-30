@@ -5,7 +5,7 @@ import { leaderboard } from "../.github/extensions/commit-and-sip/services/booth
 import { canonicalHandle, PUBLICATION_TOKEN, publicRef, tokenHashOf } from "../.github/extensions/commit-and-sip/services/leaderboard.mjs";
 import { blocklistStatus } from "../.github/extensions/commit-and-sip/services/moderation.mjs";
 import { scoreCoffeeName } from "../.github/extensions/commit-and-sip/services/name-score.mjs";
-import { BoardChangedError, ClosedError, HandleTakenError, KeyMismatchError, ReservedError } from "./store.mjs";
+import { BoardChangedError, ClosedError, HandleTakenError, KeyMismatchError, ReservedError, ScoreTakenError } from "./store.mjs";
 
 // The public leaderboard for the Commit & Sip booth.
 //
@@ -15,8 +15,11 @@ import { BoardChangedError, ClosedError, HandleTakenError, KeyMismatchError, Res
 // with the booth's own modules, so even a leaked booth key cannot post a score
 // the rubric did not award, a name the blocklist refuses, or a handle that was
 // not built from the curated word lists. Ranking is the booth's own
-// `leaderboard()`, so the booth and this board break a tie by the same rule:
-// the drink that got there first, which here is the one admitted first.
+// `leaderboard()`. Two different drinks never share a score: admission refuses
+// a score another drink already holds (409 `score_taken`), so the booth asks
+// the attendee to tweak the name. A board written before that rule may still
+// hold a tie, which the booth and this board break by the same rule: the drink
+// that got there first, which here is the one admitted first.
 
 const MAX_BODY_BYTES = 2048;
 const BOARD_SIZE = 20;
@@ -185,6 +188,10 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
         // Retryable: the booth keeps the drink and sends it again once open.
         if (error instanceof ClosedError) throw new HttpError(503, "board_rebuilding", "The event board is being rebuilt. The drink is kept and sent again later.");
         if (error instanceof HandleTakenError) throw new HttpError(409, "handle_taken", "That handle is already on the board.");
+        // Final for this name: the booth keeps the attendee naming and asks
+        // for a tweak. Never sent for a resend of the same publication, which
+        // is judged below as a retry before any score is compared.
+        if (error instanceof ScoreTakenError) throw new HttpError(409, "score_taken", "Another drink on the board already has that score.");
         throw error;
       }
       if (!admitted.created) {

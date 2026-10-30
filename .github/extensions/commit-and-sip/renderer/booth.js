@@ -219,6 +219,9 @@
     event.preventDefault();
     if (busy || !$("name-form").reportValidity()) return;
     $("name-problem").hidden = true;
+    // A booth with an event leaderboard serves only once the board admits the
+    // drink, so the answer can take a few seconds. Say what is happening.
+    $("name-checking").hidden = false;
     busy = true;
     controls();
     try {
@@ -231,6 +234,7 @@
       $("name-problem").textContent = error.message;
       $("name-problem").hidden = false;
     } finally {
+      $("name-checking").hidden = true;
       busy = false;
       controls();
     }

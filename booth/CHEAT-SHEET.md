@@ -55,7 +55,8 @@ Only a **confirmed event rank** describes the shared leaderboard; a booth rank i
 | Connection lost | Choose **Refresh connection**; reopen the canvas if needed. Saved drinks and scores persist. |
 | Attendee leaves mid-order | Staff dashboard: **Open stations**, select the station, give your name, and close it. Do not wipe the event. |
 | Name rejected | Read the actual message. Let the attendee try another; do not guess whether a generic rejection was moderation or a previous removal. |
-| Offline or event rank unconfirmed | Local naming continues. Check the displayed sync reason; use **Refresh and retry** on the staff dashboard. Never promise publication until confirmed. |
+| Offline or leaderboard unreachable | With a leaderboard configured, nothing is served until it admits the drink: the attendee stays naming and tries again in a moment, and a retry never adds the drink twice. Use **Refresh and retry** on the staff dashboard. |
+| "Another drink already has that score" | Normal. Let the attendee tweak the name (add, swap, or respell a word) and submit again. |
 | Drink needs removal | **Take a drink down**: select it, give your name and reason. Confirm the public outcome. Pending takedowns need **Refresh and retry on this same booth**, with deployed staff keys; follow the [takedown guide](RUNBOOK.md#taking-a-drink-down). |
 
 For extension failures, inspect privately:

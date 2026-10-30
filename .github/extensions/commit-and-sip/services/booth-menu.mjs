@@ -21,7 +21,21 @@ export function findDrink(menu, id) {
   return menu.find(entry => entry.id === id) ?? null;
 }
 
-export function addDrink(menu, { rawName, rules, runId, handle, choice = {}, removedIds = [], now = new Date().toISOString() }) {
+// The attendee's way forward when their score is taken: a different name
+// almost always lands on a different total, because Letter value moves in
+// single points.
+export const SCORE_TAKEN_MESSAGE = (name, score, where = "the house menu") =>
+  `${name} scored ${score}, but another drink on ${where} already has that score, and no two drinks may share one. ` +
+  "Tweak your name (add, swap, or respell a word) and submit again.";
+
+// Every check a drink must pass and the entry it would become, without adding
+// it. A booth with an event leaderboard serves only once the board admits the
+// drink, so it prepares here, asks the board, and pushes afterwards.
+//
+// `uniqueScore` refuses a score another drink on this menu already holds. A
+// standalone booth is its own board, so it sets this. A booth with an event
+// leaderboard leaves it to the service, which sees every booth's drinks.
+export function prepareDrink(menu, { rawName, rules, runId, handle, choice = {}, removedIds = [], uniqueScore = false, now = new Date().toISOString() }) {
   requireValue(Array.isArray(menu), "menu_invalid", "The house menu is unavailable. Ask booth staff to restore it.");
   requireValue(Array.isArray(removedIds), "menu_invalid", "The removal record is unavailable. Ask booth staff to restore it.");
   requireValue(typeof runId === "string" && runId.length > 0, "invalid_run", "A run ID is required to add a drink.", 400);
@@ -59,6 +73,13 @@ export function addDrink(menu, { rawName, rules, runId, handle, choice = {}, rem
   const drink = buildAttendeeOrder(rawName, rules, runId);
   const entry = { ...drink, breakdown, createdAt: now, example: false, handle, mascot, placement, runId, score };
   requireValue(entry.id === id, "menu_invalid", "The drink ID changed between checks. Try the name again.");
+  requireValue(!uniqueScore || !menu.some(item => !item.example && item.score === score),
+    "score_taken", SCORE_TAKEN_MESSAGE(name, score), 409);
+  return entry;
+}
+
+export function addDrink(menu, options) {
+  const entry = prepareDrink(menu, options);
   menu.push(entry);
   return entry;
 }
@@ -95,7 +116,9 @@ export function removeDrink(menu, removals, id, { removedBy, reason, now = new D
 }
 
 // Every drink gets its own place, so an event cannot end in a tie for first.
-// An equal score goes to the drink that got there first: on the event board
+// New drinks never share a score (the leaderboard service, or a standalone
+// booth, refuses a taken one), but a menu or board kept from before that rule
+// can still hold a tie. An equal score goes to the drink that got there first: on the event board
 // that is when the service admitted it, at a booth when the booth served it.
 // The ID only separates two drinks stamped in the same millisecond, so the
 // order never depends on the order the menu happens to be stored in. A row

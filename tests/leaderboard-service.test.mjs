@@ -103,10 +103,10 @@ test("a booth publishes, the board shows it, and a takedown clears it", async t 
   assert.equal((await board(url)).total, 0, "a takedown must reach the public board");
   assert.equal((await store.read()).removals[0].published, "retracted", "the outcome is recorded for staff");
 
-  // The usual case: staff catch a name before it ever syncs. The service has
-  // nothing to delete, and that is a clean outcome, not a failure to retry.
-  await engine.open({ runId: "booth-2" });
-  const unsynced = await engine.dispatch("booth-2", "submit_name", { name: "Copilot Cinder Crema" });
+  // A drink served before this booth had a leaderboard, caught before it ever
+  // synced. The service has nothing to delete, and that is a clean outcome,
+  // not a failure to retry.
+  const unsynced = await servedPending(store, "booth-2", "Copilot Cinder Crema");
   const early = await engine.removeDrink({ id: unsynced.submission.id, reason: "test", removedBy: "lead" });
   assert.equal(early.published, "absent");
   assert.deepEqual(await engine.retryRetractions(), [], "an absent entry is not queued for retry");
@@ -242,39 +242,80 @@ test("a retried submission is a success, but a clashing name is not", async t =>
   assert.equal((await board(url)).entries[0].handle, HANDLE);
 });
 
-test("a tie goes to the drink the board admitted first, by the booth's own rule", async t => {
-  // A clock that moves a second per admission, so admission order is the only
-  // thing separating the tied pair, never two arrivals in one millisecond.
-  let tick = Date.parse("2026-10-28T09:00:00.000Z");
-  const { url, store } = await service(t, { now: () => new Date(tick += 1000) });
-  const candidates = ["Mocha", "Latte", "Crema", "Brew", "Roast", "Drip", "Chai", "Frappe"].flatMap(coffee =>
-    ["Moonrise", "Sunset", "Velvet", "Ember", "Harbor", "Meadow"].map(word => `Mona ${word} ${coffee}`));
-  const byScore = new Map();
-  for (const name of candidates) {
-    const { score } = scoreCoffeeName(name, rules);
-    byScore.set(score, [...(byScore.get(score) ?? []), name]);
-  }
-  // A tie with something strictly above and below it, so the tied pair must
-  // land on 2 and 3, and nothing under them may skip a place.
-  const top = Math.max(...byScore.keys());
-  const [tiedScore, tied] = [...byScore.entries()].find(([score, names]) => names.length >= 2 && score < top) ?? [];
-  assert.ok(tied, "the candidate list should contain a tie below the top score");
-  const higher = [...byScore.entries()].find(([score]) => score > tiedScore);
-  const lower = [...byScore.entries()].find(([score]) => score < tiedScore);
-  assert.ok(lower, "the candidate list should contain a score below the tie");
-  // Admit the tied drink whose ID sorts later first, so neither ID nor name
-  // order can explain it winning the tie.
-  const [laterId, earlierId] = tied.slice(0, 2).sort((a, b) =>
-    scoreCoffeeName(b, rules).id.localeCompare(scoreCoffeeName(a, rules).id));
+// Swapping two words keeps every rubric signal, so these two different drinks
+// genuinely share a score. Any real collision would do; this one is easy to see.
+const TIED = ["Mona Velvet Mocha", "Mona Mocha Velvet"];
 
-  const handles = [HANDLE, OTHER_HANDLE, `${words.adjectives[2]}-${words.verbs[2]}-${words.nouns[2]}`,
-    `${words.adjectives[3]}-${words.verbs[3]}-${words.nouns[3]}`];
-  const sent = [laterId, earlierId, higher[1][0], lower[1][0]].map((name, index) => submission(name, handles[index]));
-  for (const body of sent) assert.equal((await post(url, body)).status, 201);
-  // Receipts are read after every entry has landed. A receipt issued while an
-  // entry was still alone on the board would say rank 1 whatever the rule is.
+test("a different drink whose score is already on the board is refused, until a takedown frees it", async t => {
+  const { url } = await service(t);
+  const [first, rival] = TIED.map((name, index) => submission(name, [HANDLE, OTHER_HANDLE][index]));
+  assert.equal(first.score, rival.score, "this fixture relies on the two names tying");
+  assert.notEqual(first.id, rival.id);
+  assert.equal((await post(url, first)).status, 201);
+
+  const refused = await post(url, rival);
+  assert.equal(refused.status, 409);
+  assert.equal((await refused.json()).error, "score_taken");
+  assert.deepEqual((await board(url)).entries.map(row => row.name), [first.name], "the refused drink never lands");
+
+  const resent = await post(url, first);
+  assert.equal(resent.status, 200, "resending the drink that holds the score is still a retry, not a clash");
+  assert.equal((await resent.json()).rank, 1);
+
+  assert.equal((await del(url, first.id)).status, 204);
+  assert.equal((await post(url, rival)).status, 201, "a takedown frees its score for another drink");
+  assert.deepEqual((await board(url)).entries.map(row => row.score), [rival.score]);
+});
+
+test("two tied drinks racing for one score never both land, on one instance or two", async t => {
+  const { url } = await service(t);
+  const racers = TIED.map((name, index) => submission(name, [HANDLE, OTHER_HANDLE][index]));
+  const answers = await Promise.all(racers.map(body => post(url, body)));
+  assert.deepEqual(answers.map(response => response.status).sort(), [201, 409]);
+  const loser = answers.find(response => response.status === 409);
+  assert.equal((await loser.json()).error, "score_taken");
+  assert.equal((await board(url)).total, 1);
+
+  // Two FileStores on one share stand in for two App Service instances. The
+  // check runs inside the write lock, so it holds across instances too.
+  const { ScoreTakenError } = await import("../leaderboard-service/store.mjs");
+  const directory = await tempDirectory(t);
+  const [a, b] = await Promise.all([openStore({ directory }), openStore({ directory })]);
+  const tied = id => ({ ...entry(id), score: 2222 });
+  const outcomes = await Promise.allSettled(Array.from({ length: 6 }, (_, index) =>
+    (index % 2 ? a : b).admit(tied(`mona-racer-${index}`), { fingerprint: fp(`racer-${index}`), handles: [tied(`mona-racer-${index}`).handle] })));
+  assert.equal(outcomes.filter(outcome => outcome.status === "fulfilled").length, 1, "exactly one racer takes the score");
+  assert.ok(outcomes.filter(outcome => outcome.status === "rejected").every(outcome => outcome.reason instanceof ScoreTakenError));
+  assert.equal((await (await openStore({ directory })).list()).length, 1);
+});
+
+test("a tie left on a board from before score_taken goes to the drink admitted first, by the booth's own rule", async t => {
+  const { url, store } = await service(t);
+  // Written straight into the store, as an older build would have admitted
+  // them. Each carries the token hash a resend is matched against.
+  const legacy = async (name, handle, createdAt) => {
+    const sent = submission(name, handle);
+    const { token, ...fields } = sent;
+    await store.create({ ...fields, createdAt, tokenHash: tokenHashOf(token) });
+    return sent;
+  };
+  // The tied drink whose ID sorts later is admitted first, so neither ID nor
+  // name order can explain it winning the tie.
+  const [laterId, earlierId] = [...TIED].sort((a, b) =>
+    scoreCoffeeName(b, rules).id.localeCompare(scoreCoffeeName(a, rules).id));
+  const sent = [
+    await legacy(laterId, HANDLE, "2026-10-28T09:00:01.000Z"),
+    await legacy(earlierId, OTHER_HANDLE, "2026-10-28T09:00:02.000Z"),
+    await legacy("Mona Moonrise Mocha", `${words.adjectives[2]}-${words.verbs[2]}-${words.nouns[2]}`, "2026-10-28T09:00:03.000Z"),
+    await legacy("Mona Sunset Brew", `${words.adjectives[3]}-${words.verbs[3]}-${words.nouns[3]}`, "2026-10-28T09:00:04.000Z"),
+  ];
+  assert.ok(sent[2].score > sent[0].score && sent[3].score < sent[0].score, "one drink above the tie and one below");
   const receipts = [];
-  for (const body of sent) receipts.push(await (await post(url, body)).json());
+  for (const body of sent) {
+    const resent = await post(url, body);
+    assert.equal(resent.status, 200, "a resend of a legacy tied drink is still a retry");
+    receipts.push(await resent.json());
+  }
   assert.equal(receipts[2].rank, 1);
   assert.equal(receipts[0].rank, 2, "the tied drink admitted first takes the higher place");
   assert.equal(receipts[1].rank, 3, "the tied drink admitted second sits directly below it");
@@ -290,35 +331,24 @@ test("the board says when its leader was entered, and no other drink's time", as
   const { url, store } = await service(t, { now: () => new Date(tick += 1000) });
   assert.equal((await board(url)).leaderEnteredAt, null, "an empty board has no leader");
 
-  const byScore = new Map();
-  for (const name of ["Mocha", "Latte", "Crema", "Brew", "Roast", "Drip"].flatMap(coffee =>
-    ["Moonrise", "Sunset", "Velvet", "Ember"].map(word => `Mona ${word} ${coffee}`))) {
-    const { score } = scoreCoffeeName(name, rules);
-    byScore.set(score, [...(byScore.get(score) ?? []), name]);
-  }
-  // The top of this board is a tie, so only admission order picks the leader.
-  const [tiedScore, tied] = [...byScore.entries()].sort(([a], [b]) => b - a).find(([, names]) => names.length >= 2) ?? [];
-  assert.ok(tied, "the candidate list should contain a tie");
-  const lower = [...byScore.entries()].find(([score]) => score < tiedScore);
-  assert.ok(lower, "the candidate list should contain a score below the tie");
-  // The ID that sorts later goes in first, so only its time can make it lead.
-  const [first, second] = tied.slice(0, 2).sort((a, b) =>
-    scoreCoffeeName(b, rules).id.localeCompare(scoreCoffeeName(a, rules).id));
+  // Admitted lowest score first, so the leader is never simply the first in.
+  const names = ["Mona Sunset Brew", "Mona Velvet Mocha", "Mona Moonrise Mocha"];
   const handles = [HANDLE, OTHER_HANDLE, `${words.adjectives[2]}-${words.verbs[2]}-${words.nouns[2]}`];
-  const sent = [first, second, lower[1][0]].map((name, index) => submission(name, handles[index]));
+  const sent = names.map((name, index) => submission(name, handles[index]));
+  assert.ok(sent[0].score < sent[1].score && sent[1].score < sent[2].score);
   for (const body of sent) assert.equal((await post(url, body)).status, 201);
 
   const enteredAt = async id => (await store.list()).find(entry => entry.id === id).createdAt;
   const shown = await board(url);
-  assert.equal(shown.entries[0].name, first, "the tied drink entered first leads");
-  assert.equal(shown.leaderEnteredAt, await enteredAt(sent[0].id), "and the board says when it was entered");
+  assert.equal(shown.entries[0].name, names[2], "the highest score leads");
+  assert.equal(shown.leaderEnteredAt, await enteredAt(sent[2].id), "and the board says when it was entered");
   assert.deepEqual(shown.entries.map(row => Object.keys(row).sort()), shown.entries.map(() => ["handle", "name", "rank", "score"]),
     "no row carries a time of its own");
 
   // Take the leader down: the next drink leads, and its own time is shown.
-  assert.equal((await del(url, sent[0].id)).status, 204);
+  assert.equal((await del(url, sent[2].id)).status, 204);
   const after = await board(url);
-  assert.equal(after.entries[0].name, second);
+  assert.equal(after.entries[0].name, names[1]);
   assert.equal(after.leaderEnteredAt, await enteredAt(sent[1].id));
 });
 
@@ -439,7 +469,17 @@ const POSIX = process.platform;
 // A reservation as the service stores it: a 64-hex HMAC-SHA256 fingerprint.
 const fp = label => createHash("sha256").update(label).digest("hex");
 // Each row its own handle, as the service guarantees: the phrase plus a suffix from the ID.
-const entry = (id, score = 1000) => ({ createdAt: "2026-01-01T00:00:00Z", handle: `${HANDLE}-${fp(id).slice(0, 8)}`, id, name: id, score });
+// Two different drinks on one board never share a score, so each fixture ID
+// gets its own, stable across calls so a resend still matches.
+const fixtureScores = new Map();
+const scoreOf = id => {
+  if (!fixtureScores.has(id)) fixtureScores.set(id, 4000 - fixtureScores.size);
+  return fixtureScores.get(id);
+};
+const entry = (id, score = scoreOf(id)) => ({ createdAt: "2026-01-01T00:00:00Z", handle: `${HANDLE}-${fp(id).slice(0, 8)}`, id, name: id, score });
+// A board written before admission refused a taken score could still hold a
+// tie. Levelling every score shows how such a board ranks: by entry time.
+const levelled = stored => stored.map(item => ({ ...item, score: 1000 }));
 
 test("the file store survives a restart and never overwrites on create", async t => {
   const directory = await tempDirectory(t);
@@ -496,6 +536,19 @@ async function engineWith(t, client) {
   return { engine: new BoothEngine({ catalog, leaderboardClient: client, rules, store }), store };
 }
 
+// A drink already on the menu whose publication is still pending: served
+// before this booth had a leaderboard, or by a booth build that served first
+// and published after. The retry, rebuild, and takedown paths still handle
+// these, so they are seeded directly rather than through board-first serving.
+async function servedPending(store, runId, name, before = () => {}) {
+  const local = new BoothEngine({ catalog, rules, store });
+  await local.open({ runId });
+  await store.transaction(data => before(data.runs[runId]));
+  const served = await local.dispatch(runId, "submit_name", { name });
+  await store.transaction(data => { data.runs[runId].sync = { attempts: 0, state: "pending", updatedAt: new Date().toISOString() }; });
+  return served;
+}
+
 test("a takedown during an in-flight publish still leaves the board clean", async t => {
   let release;
   let onWire;
@@ -510,9 +563,8 @@ test("a takedown during an in-flight publish still leaves the board clean", asyn
     },
     async retract(id) { retracted.push(id); return "retracted"; },
   };
-  const { engine } = await engineWith(t, client);
-  await engine.open({ runId: "booth-1" });
-  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const { engine, store } = await engineWith(t, client);
+  const served = await servedPending(store, "booth-1", "Mona Moonrise Mocha");
   const publishing = engine.publish("booth-1");
   // Wait until the submission is genuinely on the wire. Removing any earlier
   // would make publish() find no entry and return, and the test would prove
@@ -599,9 +651,8 @@ test("a booth rebuilds its part of a lost board, including drinks served before 
 test("a booth without a staff key says the takedown did not reach the board", async t => {
   const client = createLeaderboardClient({ boothKey: BOOTH_KEY, url: "https://leaderboard.example.org" });
   assert.equal(client.retract, undefined);
-  const { engine } = await engineWith(t, client);
-  await engine.open({ runId: "booth-1" });
-  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const { engine, store } = await engineWith(t, client);
+  const served = await servedPending(store, "booth-1", "Mona Moonrise Mocha");
   const record = await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
   assert.equal(record.published, "not-configured");
 });
@@ -1035,7 +1086,7 @@ test("the token is saved before the first send and reused on every retry", async
   let engine;
   const client = {
     async publish(submission) {
-      const saved = (await engine.store.read()).runs["booth-1"].sync.token;
+      const saved = (await engine.store.read()).runs["booth-1"].admission.token;
       sent.push({ saved, token: submission.token });
       attempt += 1;
       if (attempt === 1) throw new Error("network dropped the response");
@@ -1044,12 +1095,16 @@ test("the token is saved before the first send and reused on every retry", async
   };
   ({ engine } = await engineWith(t, client));
   await engine.open({ runId: "booth-1" });
-  await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
-  await engine.publish("booth-1");
-  await engine.publish("booth-1");
+  await assert.rejects(engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" }),
+    { code: "leaderboard_unreachable" });
+  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
   assert.equal(sent[0].saved, sent[0].token, "persisted before it left the booth");
   assert.equal(sent[1].token, sent[0].token, "the retry is the same publication");
-  assert.equal((await engine.store.read()).runs["booth-1"].sync.state, "confirmed");
+  assert.equal(served.phase, "served");
+  const run = (await engine.store.read()).runs["booth-1"];
+  assert.equal(run.sync.state, "confirmed");
+  assert.equal(run.sync.token, sent[0].token, "the served drink keeps the token the board knows");
+  assert.equal(run.admission, undefined);
 });
 
 test("the stored board keeps only a hash of the publication token", async t => {
@@ -1113,12 +1168,17 @@ test("a refusal retrying cannot change is recorded as final and never resent", a
   const client = serviceUrl => createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url: serviceUrl });
   const boothA = new BoothEngine({ catalog, rules, store: new RunStore(directoryA), leaderboardClient: client(url) });
   const boothB = new BoothEngine({ catalog, rules, store: new RunStore(directoryB), leaderboardClient: client(url) });
+  assert.equal(failedSync({ attempts: 0 }, Object.assign(new Error("x"), { code: "score_taken" })).state, "rejected");
   const a = await boothA.open({ runId: "a-1" });
   await boothA.dispatch("a-1", "submit_name", { name: "Mona Moonrise Mocha" });
-  await boothA.publish("a-1");
-  await boothB.open({ runId: "b-1" });
-  await boothB.store.transaction(data => { data.runs["b-1"].handle = a.handle; });   // the shared phrase
-  await boothB.dispatch("b-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  // Board-first: the same name typed at booth B is refused before it is served.
+  await boothB.open({ runId: "b-0" });
+  await boothB.store.transaction(data => { data.runs["b-0"].handle = a.handle; });
+  await assert.rejects(boothB.dispatch("b-0", "submit_name", { name: "Mona Moonrise Mocha" }), { code: "duplicate_drink" });
+  assert.equal((await boothB.get("b-0")).phase, "naming");
+  await boothB.closeStation({ runId: "b-0", closedBy: "lead" });
+  // A drink booth B served before it was configured meets the same refusal on publish.
+  await servedPending(boothB.store, "b-1", "Mona Moonrise Mocha", run => { run.handle = a.handle; });   // the shared phrase
   await boothB.publish("b-1");
   const bSync = (await boothB.store.read()).runs["b-1"].sync;
   assert.deepEqual([bSync.state, bSync.code], ["rejected", "duplicate_drink"]);
@@ -1171,8 +1231,7 @@ test("retrying on a booth without a staff key does not claim nothing is waiting"
   const boothOnly = createLeaderboardClient({ boothKey: BOOTH_KEY, url: "https://leaderboard.example.org" });
   const { engine } = await engineWith(t, boothOnly);
   assert.deepEqual(await retryReport(engine), { exitCode: 0, text: "No takedowns are waiting to reach the public leaderboard.\n" });
-  await engine.open({ runId: "booth-1" });
-  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const served = await servedPending(engine.store, "booth-1", "Mona Moonrise Mocha");
   await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
   const report = await retryReport(engine);
   assert.equal(report.exitCode, 1, "an outstanding public takedown is not a success");
@@ -1229,7 +1288,7 @@ test("a drink that waited for another instance's write is entered after it, not 
   let tick = Date.parse("2026-10-28T09:00:00.000Z");
   const now = () => new Date(tick += 1000);
   // The interleaving from the review: B holds the lock, admitting one drink,
-  // while a tied drink that arrived earlier waits at A for that lock. Each
+  // while a drink that arrived earlier waits at A for that lock. Each
   // carries the time it arrived, which is what used to be stored.
   const arrived = seconds => new Date(Date.parse("2026-10-28T08:00:00.000Z") + seconds * 1000).toISOString();
   let release;
@@ -1248,8 +1307,8 @@ test("a drink that waited for another instance's write is entered after it, not 
   const stored = await (await openStore({ directory })).list();
   const at = id => Date.parse(stored.find(item => item.id === id).createdAt);
   assert.ok(at("mona-waited") > at("mona-admitted-first"), "entered when it was admitted, after the drink ahead of it");
-  assert.deepEqual(leaderboard(stored).map(row => row.name), ["mona-admitted-first", "mona-waited"],
-    "the tie goes to the drink the board admitted first");
+  assert.deepEqual(leaderboard(levelled(stored)).map(row => row.name), ["mona-admitted-first", "mona-waited"],
+    "a tie on a board from before score_taken goes to the drink the board admitted first");
 });
 
 test("entry times follow admission order across instances, whatever either clock says", async t => {
@@ -1267,8 +1326,8 @@ test("entry times follow admission order across instances, whatever either clock
   const times = order.map(([id]) => Date.parse(stored.find(item => item.id === id).createdAt));
   times.slice(1).forEach((time, index) => assert.ok(time > times[index], `${order[index + 1][0]} is entered after ${order[index][0]}`));
   assert.equal(times[0], start + 60 * 60 * 1000, "a drink on an empty board takes its instance's clock");
-  assert.deepEqual(leaderboard(stored).map(row => row.name), order.map(([id]) => id),
-    "every drink scores 1,000, so the board follows admission order");
+  assert.deepEqual(leaderboard(levelled(stored)).map(row => row.name), order.map(([id]) => id),
+    "tied, as a board from before score_taken could be, the board follows admission order");
 });
 
 test("a resent drink keeps the place and entry time it was first given", async t => {
@@ -1286,7 +1345,8 @@ test("a resent drink keeps the place and entry time it was first given", async t
   assert.equal(resent.entry.createdAt, "2026-10-28T09:00:00.000Z", "and is answered with its original entry time");
   const stored = await (await openStore({ directory })).list();
   assert.equal(stored.find(item => item.id === "mona-leader").createdAt, "2026-10-28T09:00:00.000Z", "the stored time is untouched");
-  assert.deepEqual(leaderboard(stored).map(row => row.name), ["mona-leader", "mona-runner-up"], "so it keeps the lead");
+  assert.deepEqual(leaderboard(levelled(stored)).map(row => row.name), ["mona-leader", "mona-runner-up"],
+    "so even tied, as a board from before score_taken could be, it keeps the lead");
 });
 
 test("a lock left by a dead instance is taken over; a live one is waited for", async t => {
@@ -1439,14 +1499,20 @@ test("a removed name never appears in a request path the web server logs", async
 
 test("a refused publication gets no QR code that would open someone else's row", async t => {
   const refusing = {
-    async publish() { throw Object.assign(new Error("clash"), { code: "duplicate_drink" }); },
+    async publish() { throw Object.assign(new Error("clash"), { code: "duplicate_drink", status: 409 }); },
   };
   const directory = await tempDirectory(t);
-  const engine = new BoothEngine({ catalog, rules, store: new RunStore(directory),
+  const store = new RunStore(directory);
+  const engine = new BoothEngine({ catalog, rules, store,
     leaderboardClient: refusing, leaderboardUrl: "https://sip.example.com/board" });
-  await engine.open({ runId: "booth-1" });
-  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
-  assert.ok(served.attendeeUrl, "before the refusal a link is offered");
+  // Board-first: a refused drink is never served, so there is no link at all.
+  await engine.open({ runId: "booth-0" });
+  await assert.rejects(engine.dispatch("booth-0", "submit_name", { name: "Mona Moonrise Mocha" }), { code: "duplicate_drink" });
+  assert.equal((await engine.get("booth-0")).attendeeUrl, null);
+  // A drink served before this booth was configured loses its link on refusal.
+  await servedPending(store, "booth-1", "Ducky Dawn Drizzle");
+  await store.transaction(data => { data.runs["booth-1"].sync.token = "0123456789abcdef0123456789abcdef"; });
+  assert.ok((await engine.get("booth-1")).attendeeUrl, "before the refusal a link is offered");
   await engine.publish("booth-1");
   const view = await engine.get("booth-1");
   assert.equal(view.sync.state, "rejected");
@@ -1946,8 +2012,7 @@ test("a late failure from an earlier publish cannot undo a confirmation", async 
     },
   };
   const { engine, store } = await engineWith(t, client);
-  await engine.open({ runId: "booth-1" });
-  await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await servedPending(store, "booth-1", "Mona Moonrise Mocha");
   const slow = engine.publish("booth-1");
   while (calls < 1) await new Promise(resolve => setImmediate(resolve));
   await engine.publish("booth-1", { again: true });
@@ -1957,23 +2022,29 @@ test("a late failure from an earlier publish cannot undo a confirmation", async 
   assert.equal((await store.read()).runs["booth-1"].sync.state, "confirmed", "the late failure does not downgrade it");
 });
 
-test("the booth screen's refresh retries a publication that failed", async t => {
+test("the booth screen serves only once the board admits, and trying again lands it once", async t => {
   const { BoothPanel } = await import("../.github/extensions/commit-and-sip/booth-panel.mjs");
   let online = false;
-  const client = { async publish(sent) { if (!online) throw new Error("offline"); return { ...sent, entries: 1, rank: 1 }; } };
+  const sent = [];
+  const client = { async publish(item) { sent.push(item); if (!online) throw new Error("offline"); return { ...item, entries: 1, rank: 1 }; } };
   const { engine } = await engineWith(t, client);
   const panel = new BoothPanel(engine, { renderQr: async () => null });
   panel.engine.lastPublicationSweep = Date.now();                     // keep the background sweep out of this test
   await panel.dispatch("begin", {});
-  await panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" });
-  await panel.backgroundPublish;
-  assert.equal((await panel.get()).sync.state, "failed");
+  await assert.rejects(panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" }),
+    { code: "leaderboard_unreachable", message: /Try again in a moment/ });
+  const waiting = await panel.get();
+  assert.equal(waiting.phase, "naming", "nothing is served while the board is unreachable");
+  assert.equal(waiting.houseMenu.some(item => item.name === "Mona Moonrise Mocha"), false);
   online = true;
-  const refreshed = await panel.dispatch("refresh", {});
-  assert.equal(refreshed.sync.state, "confirmed", "refresh on the real panel reaches the retry");
+  const served = await panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" });
+  assert.equal(served.phase, "served");
+  assert.equal(served.sync.state, "confirmed");
+  assert.equal(new Set(sent.map(item => item.token)).size, 1, "the retry was the same publication");
+  assert.equal(served.houseMenu.filter(item => item.name === "Mona Moonrise Mocha").length, 1);
 });
 
-test("a failed publication is still retried after the attendee has handed over", async t => {
+test("an admission left in doubt is still resolved after the station is closed", async t => {
   const { BoothPanel } = await import("../.github/extensions/commit-and-sip/booth-panel.mjs");
   const { AdminPanel } = await import("../.github/extensions/commit-and-sip/admin-panel.mjs");
   let online = false;
@@ -1982,31 +2053,34 @@ test("a failed publication is still retried after the attendee has handed over",
   const panel = new BoothPanel(engine, { renderQr: async () => null });
   panel.engine.lastPublicationSweep = Date.now();
   await panel.dispatch("begin", {});
-  await panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" });
-  await panel.backgroundPublish;
+  // The reply was lost: the booth cannot tell whether the board took the drink.
+  await assert.rejects(panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" }), { code: "leaderboard_unreachable" });
   const runId = panel.runId;
-  await panel.dispatch("complete", {});
-  assert.equal((await store.read()).runs[runId].sync.state, "failed");
+  await engine.closeStation({ runId, closedBy: "lead" });
+  assert.ok((await store.read()).runs[runId].admission, "the attempt is kept until the board answers");
   online = true;
 
-  // The idle screen's own poll starts the retry once the sweep interval passes.
+  // The idle screen's own poll resends it once the sweep interval passes.
   panel.engine.lastPublicationSweep = 0;
   await panel.get();
   // Wait only for a sweep the poll itself started. Starting one here would
   // make the test pass whether or not the poll did anything.
   assert.ok(engine.publicationSweep, "the idle poll started a retry");
   await engine.publicationSweep;
-  assert.equal((await store.read()).runs[runId].sync.state, "confirmed", "no screen was showing it, and it still landed");
+  const settled = (await store.read()).runs[runId];
+  assert.equal(settled.sync.state, "confirmed", "no screen was showing it, and it still settled");
+  assert.equal(settled.admission, undefined);
+  assert.equal(settled.phase, "complete", "closing the station is not undone");
 
   // And staff refresh does the same for anything still owed.
   const { engine: other, store: otherStore } = await engineWith(t, client);
   online = false;
   await other.open({ runId: "r" });
-  await other.dispatch("r", "submit_name", { name: "Ducky Dawn Drizzle" });
-  await other.publish("r");
+  await assert.rejects(other.dispatch("r", "submit_name", { name: "Ducky Dawn Drizzle" }), { code: "leaderboard_unreachable" });
   online = true;
   await new AdminPanel(other).dispatch("refresh", {});
   assert.equal((await otherStore.read()).runs.r.sync.state, "confirmed");
+  assert.equal((await otherStore.read()).runs.r.phase, "served");
 });
 
 test("the idle poll starts at most one retry sweep per interval", async t => {
@@ -2106,53 +2180,48 @@ test("the dashboard flags an interrupted removal, including one this booth never
 
 // --- Review round 15 ---------------------------------------------------------
 
-test("serving a drink never waits on the leaderboard service", async t => {
+test("a poll or a second tap never sends another admission while one is on the wire", async t => {
   const { BoothPanel } = await import("../.github/extensions/commit-and-sip/booth-panel.mjs");
   const stalled = gate();
   let sends = 0;
   const onWire = gate();
   const client = { async publish(sent) { sends += 1; onWire.open(); await stalled.opened; return { ...sent, entries: 1, rank: 1 }; } };
   const { engine } = await engineWith(t, client);
-  // Count publish requests and the attempts actually started, and know when
-  // the sweep has made its request.
-  let requests = 0;
-  let attempts = 0;
-  const secondRequest = gate();
-  const publish = engine.publish.bind(engine);
-  engine.publish = (...args) => { requests += 1; if (requests === 2) secondRequest.open(); return publish(...args); };
-  const publishOnce = engine.publishOnce.bind(engine);
-  engine.publishOnce = (...args) => { attempts += 1; return publishOnce(...args); };
   const panel = new BoothPanel(engine, { renderQr: async () => null });
   panel.engine.lastPublicationSweep = 0;                                   // let the poll's sweep run too
   await panel.dispatch("begin", {});
-  const served = await panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" });
-  assert.equal(served.phase, "served", "the attendee's answer came back while the service is still silent");
-  assert.equal(served.sync.state, "pending");
+  const submitting = panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" });
+  await onWire.opened;
   const polled = await panel.get();                      // the screen's poll, which also starts a sweep
-  assert.equal(polled.sync.state, "pending");
-  const sweep = engine.publicationSweep;
-  assert.ok(sweep, "the poll started a sweep");
-  await secondRequest.opened;                             // the sweep has asked to publish this run
-  await onWire.opened;                                    // and the first attempt is on the wire
-  assert.equal(attempts, 1, "the sweep joined the publish already in flight rather than starting another");
-  assert.equal(sends, 1, "so the drink was sent once");
+  assert.equal(polled.phase, "naming", "not served until the board answers");
+  await engine.publicationSweep;
+  await assert.rejects(panel.dispatch("submit_name", { name: "Mona Moonrise Mocha" }), { code: "admission_in_progress" });
+  // Another engine on the same ledger (the republish command) sees the claim.
+  const twin = new BoothEngine({ catalog, rules, store: engine.store, leaderboardClient: client });
+  await assert.rejects(twin.dispatch(panel.runId, "submit_name", { name: "Mona Moonrise Mocha" }), { code: "admission_in_progress" });
+  await twin.retryPublications();
+  assert.equal(sends, 1, "the drink was sent once");
   stalled.open();
-  await Promise.all([sweep, panel.backgroundPublish]);
-  assert.equal((await panel.get()).sync.state, "confirmed");
+  const served = await submitting;
+  assert.equal(served.phase, "served");
+  assert.equal(served.sync.state, "confirmed");
 });
 
 test("the attendee's link is personal from the first screen, before any send", async t => {
-  const stalled = gate();
-  const client = { async publish(sent) { await stalled.opened; return { ...sent, entries: 1, rank: 1 }; } };
+  const tokens = [];
   const directory = await tempDirectory(t);
   const store = new RunStore(directory);
+  const client = { async publish(sent) {
+    tokens.push((await store.read()).runs["booth-1"].admission.token);
+    return { ...sent, entries: 1, rank: 1 };
+  } };
   const engine = new BoothEngine({ catalog, rules, store, leaderboardClient: client, leaderboardUrl: "https://sip.example.com/board" });
   await engine.open({ runId: "booth-1" });
   const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
   const token = (await store.read()).runs["booth-1"].sync.token;
-  assert.match(token, /^[0-9a-f]{32}$/, "minted and saved with the served drink");
+  assert.match(token, /^[0-9a-f]{32}$/, "minted and saved before the send");
+  assert.deepEqual(tokens, [token]);
   assert.equal(new URL(served.attendeeUrl).searchParams.get("ref"), publicRef(tokenHashOf(token)));
-  stalled.open();
 });
 
 test("the served screen keeps polling while its drink is being confirmed", async () => {
@@ -2193,8 +2262,7 @@ test("the event cannot be wiped while a publish is on the wire", async t => {
     async retract(id) { retracted.push(id); return retracted.length === 1 ? "absent" : "retracted"; },
   };
   const { engine, store } = await engineWith(t, client);
-  await engine.open({ runId: "booth-1" });
-  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const served = await servedPending(engine.store, "booth-1", "Mona Moonrise Mocha");
   const publishing = engine.publish("booth-1");
   await onWire.opened;                                    // the send has left, past its claim
   await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
@@ -2231,8 +2299,7 @@ test("a publish whose response was lost is still followed by a second retraction
     async retract(id) { retracted.push(id); return retracted.length === 1 ? "absent" : "retracted"; },
   };
   const { engine, store } = await engineWith(t, client);
-  await engine.open({ runId: "booth-1" });
-  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const served = await servedPending(engine.store, "booth-1", "Mona Moonrise Mocha");
   const publishing = engine.publish("booth-1");
   await onWire.opened;                                    // the send has left, past its claim
   await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
@@ -2291,8 +2358,7 @@ test("only the service's own answer settles a takedown as absent", async t => {
       "an answer that is not the service's does not prove the entry is gone");
   }
   const { engine } = await engineWith(t, clientFor(answer(404, { error: "not_found" })));
-  await engine.open({ runId: "booth-1" });
-  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const served = await servedPending(engine.store, "booth-1", "Mona Moonrise Mocha");
   await engine.drainPublications();
   await engine.store.transaction(data => { data.runs["booth-1"].sync = { state: "confirmed" }; });
   const removal = await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
@@ -2345,8 +2411,7 @@ test("a rebuild sends no drink until every takedown is reserved again", async t 
 // --- Review round 18 ---------------------------------------------------------
 
 async function servedAndHandedOver(engine, runId = "booth-1") {
-  await engine.open({ runId });
-  const served = await engine.dispatch(runId, "submit_name", { name: "Mona Moonrise Mocha" });
+  const served = await servedPending(engine.store, runId, "Mona Moonrise Mocha");
   await engine.dispatch(runId, "complete", {});
   return served;
 }
@@ -2437,7 +2502,7 @@ test("a stored row missing any served field is refused, and the health check say
   const store = await openStore({ directory });
   const { url } = await service(t, { store });
   assert.equal((await fetch(`${url}/healthz`)).status, 200);
-  assert.equal((await board(url)).entries[0].score, 1000);
+  assert.equal((await board(url)).entries[0].score, entry("mona-a").score);
 
   // Corrupted underneath a running instance: the health check fails closed.
   await writeFile(join(directory, "default.json"), JSON.stringify({ entries: [{ id: "mona-a" }], reserved: [], version: 2 }));
@@ -2534,8 +2599,7 @@ test("a takedown answered while its drink was still being sent stays owed across
     async retract() { answers.push("absent"); return "absent"; },
   };
   const { engine, store } = await engineWith(t, client);
-  await engine.open({ runId: "booth-1" });
-  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const served = await servedPending(engine.store, "booth-1", "Mona Moonrise Mocha");
   void engine.publish("booth-1");
   await onWire.opened;
   const removal = await engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
@@ -2573,8 +2637,7 @@ test("a retraction that left before a send ended does not settle the takedown", 
     },
   };
   const { engine, store } = await engineWith(t, client);
-  await engine.open({ runId: "booth-1" });
-  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const served = await servedPending(engine.store, "booth-1", "Mona Moonrise Mocha");
   const publishing = engine.publish("booth-1");
   await onWire.opened;
   const removing = engine.removeDrink({ id: served.submission.id, reason: "test", removedBy: "lead" });
@@ -2616,8 +2679,7 @@ test("a send that outlives its claim still reopens a takedown that settled meanw
     async retract() { calls += 1; if (calls === 1) return "absent"; throw new Error("process stopped"); },
   };
   const { engine, store } = await engineWith(t, client);
-  await engine.open({ runId: "booth-1" });
-  const served = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const served = await servedPending(engine.store, "booth-1", "Mona Moonrise Mocha");
   const publishing = engine.publish("booth-1");
   await onWire.opened;
   // A send slow enough that its claim has expired.
@@ -3096,8 +3158,7 @@ test("a late success never overwrites a refusal, and the resend reports the refu
     },
   };
   const { engine, store } = await engineWith(t, client);
-  await engine.open({ runId: "booth-1" });
-  await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await servedPending(engine.store, "booth-1", "Mona Moonrise Mocha");
   const stale = engine.publish("booth-1", { again: true });
   await onWire.opened;
   const refused = await engine.publish("booth-1", { again: true });
@@ -3238,8 +3299,7 @@ test("a handle the service cannot place is a final refusal, not an endless retry
   let sends = 0;
   const client = { async publish() { sends += 1; throw Object.assign(new Error("409 handle_taken"), { code: "handle_taken", status: 409 }); } };
   const { engine, store } = await engineWith(t, client);
-  await engine.open({ runId: "booth-1" });
-  await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await servedPending(engine.store, "booth-1", "Mona Moonrise Mocha");
   await engine.publish("booth-1");
   assert.equal((await store.read()).runs["booth-1"].sync.state, "rejected");
   await engine.retryPublications();
@@ -3417,8 +3477,7 @@ test("a rebuild holds every booth's ordinary publishing until staff open the boa
   const to = url => createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url });
   const boothA = (await engineWith(t, to(lost.url))).engine;
   const boothB = (await engineWith(t, to(lost.url))).engine;
-  await boothB.open({ runId: "b-1" });
-  const takenDown = await boothB.dispatch("b-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const takenDown = await servedPending(boothB.store, "b-1", "Mona Moonrise Mocha");
   await boothB.publish("b-1");
   await boothB.removeDrink({ id: takenDown.submission.id, reason: "test", removedBy: "lead" });
   boothA.leaderboardClient = to(replacement.url);
@@ -3426,8 +3485,7 @@ test("a rebuild holds every booth's ordinary publishing until staff open the boa
 
   // Mid-rebuild, an attendee at A invents the name B took down. A's ordinary
   // publish is held, not admitted, though B has not replayed yet.
-  await boothA.open({ runId: "a-1" });
-  await boothA.dispatch("a-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  await servedPending(boothA.store, "a-1", "Mona Moonrise Mocha");
   await boothA.publish("a-1");
   const held = (await boothA.store.read()).runs["a-1"].sync;
   assert.deepEqual([held.state, held.code], ["failed", "board_rebuilding"], "kept, and retried later");
@@ -3521,11 +3579,9 @@ test("the drinks phase checks the takedowns were replayed onto the board served 
   const first = await service(t, { store: await FileStore.open({ directory: await tempDirectory(t) }) });
   const to = url => createLeaderboardClient({ boothKey: BOOTH_KEY, staffKey: STAFF_KEY, url });
   const { engine } = await engineWith(t, to(first.url));
-  await engine.open({ runId: "booth-1" });
-  const removed = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const removed = await servedPending(engine.store, "booth-1", "Mona Moonrise Mocha");
   await engine.removeDrink({ id: removed.submission.id, reason: "test", removedBy: "lead" });
-  await engine.open({ runId: "booth-2" });
-  await engine.dispatch("booth-2", "submit_name", { name: "Ducky Dawn Drizzle" });
+  await servedPending(engine.store, "booth-2", "Ducky Dawn Drizzle");
 
   await engine.republishAll({ drinks: false });                      // replayed onto the first replacement
   assert.equal((await engine.store.read()).rebuild.boardId, (await board(first.url)).boardId);
@@ -3587,11 +3643,9 @@ test("a rebuild that cannot name its board replays, opens and sends nothing", as
     retract: async id => { calls.retract += 1; return real.retract(id); },
   };
   const { engine } = await engineWith(t, client);
-  await engine.open({ runId: "booth-1" });
-  const removed = await engine.dispatch("booth-1", "submit_name", { name: "Mona Moonrise Mocha" });
+  const removed = await servedPending(engine.store, "booth-1", "Mona Moonrise Mocha");
   await engine.removeDrink({ id: removed.submission.id, reason: "test", removedBy: "lead" });
-  await engine.open({ runId: "booth-2" });
-  await engine.dispatch("booth-2", "submit_name", { name: "Ducky Dawn Drizzle" });
+  await servedPending(engine.store, "booth-2", "Ducky Dawn Drizzle");
   calls.retract = 0;
 
   for (const lookup of [new Error("network"), null]) {

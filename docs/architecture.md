@@ -44,7 +44,7 @@ There are no pull requests, GitHub writes, issues, reviewers, merges, or checks 
 
 A name must match the allowed character set, contain at least one of the three mascots, spelled out unbroken (in any declared placement, when an API caller declares one), stay within length limits, avoid duplicates already on the house menu, and pass the blocklist. Duplicate detection compares normalized names so spacing and case cannot smuggle a repeat onto the menu.
 
-Scoring is a deterministic rubric in `services/name-score.mjs`, not a language model. The same name always scores the same, a rank can be recomputed from stored names, and staff can explain any score from the returned breakdown. The component maximums sum to exactly 5,000 and a test pins that total, so "out of 5,000" stays true. The three seeded drinks are worked examples and are never scored or ranked. Never describe a rubric score as Copilot's opinion.
+Scoring is a deterministic rubric in `services/name-score.mjs`, not a language model. The same name always scores the same, a rank can be recomputed from stored names, and staff can explain any score from the returned breakdown. The category maximums sum to exactly 5,000, and a test shows one valid name earning every maximum and scoring 5,000, so "out of 5,000" is reachable, not just a sum. Letter value (A=1 to Z=26, capped at 400) moves the score in single points, so ties are rare; a tie that does occur is refused, not ranked: the leaderboard service refuses a different drink with an active score (`409 score_taken`), and a standalone booth does the same on its own menu. The three seeded drinks are worked examples and are never scored or ranked. Never describe a rubric score as Copilot's opinion.
 
 The rubric lives in code rather than in a data file. `booth/scoring-rubric.json` described the retired pull-request flow, was read by nothing, and was removed. An attendee-facing published rubric would need a test pinning it to the scorer to prevent drift.
 
@@ -58,7 +58,7 @@ A blocklist only catches what someone predicted. `removeDrink` covers the rest: 
 
 ## Leaderboard seam
 
-Publication is local-first. The engine commits the served result inside the store transaction, releases the lock, and only then attempts a remote publication. A failed publication never blocks or alters the attendee's local result; a refresh retries it.
+With an event leaderboard, serving is board-first: score, admit, then serve. Only the service sees every booth's drinks, so only it can refuse a score another booth's drink holds; serving first would show drinks the board then refuses. `submitName` records the attempt and its publication token in the ledger (`run.admission`) under the store lock, sends it outside the lock, and records the answer under the lock again. Admitted: the drink joins the menu and the attendee is served. Refused: the attempt is dropped and the attendee keeps naming. No answer: nothing is served, the attempt is kept, and the next try, the retry sweep, or a wipe resends the same publication, so a lost reply is served once. An event wipe refuses (`admissions_unsettled`) while any attempt is in doubt. Drinks already on the menu with a pending publication (served before a booth was configured) still publish after the fact and retry on refresh.
 
 Receipts are accepted only when the handle, ID, name, and score match what was submitted (the handle may instead be its canonical form, when another booth used the phrase first). A mismatched receipt is recorded as a failure and never displayed. The payload deliberately excludes the run ID, device, and booth identity.
 
@@ -109,9 +109,9 @@ Keep regression coverage for:
 
 - Handle generation, uniqueness, and the curated collision suffix.
 - Name validation: character set, length, mascot presence and placement, duplicates, and blocklist evasion.
-- Rubric determinism and the 5,000-point total.
+- Rubric determinism, and one valid name reaching every category maximum and 5,000.
 - Phase transitions, including that completing clears the counter without erasing the served result or house menu.
-- Local-first publication, receipt mismatch rejection, and retry on refresh.
+- Board-first serving: `score_taken` across booths and in a race, an unreachable board, lost replies served once, an earlier attempt settled first, and a standalone booth's own score check; receipt mismatch rejection, and retry on refresh.
 - Staff takedown: name reservation after removal, attendee-facing withdrawal of every success claim, and that removal stays out of the dispatched action set.
 - Event lifecycle: archive-then-verify-then-wipe ordering, refusal on an active station, an empty booth, a missing confirmation, or an archive that did not read back, that a failed archive leaves no file behind, no-overwrite on artifacts, and that a closed station keeps its served drink.
 - Station reconciliation: a station closed by staff, or one whose event was archived, returns to idle and accepts the next attendee rather than refusing as `already_started` or failing as `run_missing`.

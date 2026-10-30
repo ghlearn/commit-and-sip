@@ -5,6 +5,13 @@ import { validateCoffeeName } from "./coffee-name.mjs";
 // so the same name always scores the same, a rank can be recomputed server-side
 // from stored names, and staff can explain any score at the booth from the
 // returned breakdown. No model call is involved; this is a rubric, not a judge.
+//
+// Every category maximum can be earned by one valid name at the same time
+// (a test proves it), so 5,000 is a real ceiling, not a sum on paper. Letter
+// value pays in single points, so scores are not stuck on steps of 50 and two
+// different names rarely land on the same total. Rarely is not never: a
+// finite range cannot give every name its own score, so the leaderboard and a
+// standalone booth refuse a drink whose score another drink already holds.
 export const MAX_SCORE = 5000;
 
 // The seeded house drinks are worked examples shown to attendees. They are never
@@ -44,8 +51,8 @@ function alliterationPoints(name, mascot) {
 
 function craftPoints(name) {
   const found = new Set(tokens(name).filter(token => COFFEE_TERMS.includes(token)));
-  if (found.size >= 2) return { points: 900, found: [...found] };
-  return { points: found.size === 1 ? 600 : 0, found: [...found] };
+  if (found.size >= 2) return { points: 800, found: [...found] };
+  return { points: found.size === 1 ? 500 : 0, found: [...found] };
 }
 
 function wordplayPoints(name, mascot) {
@@ -55,25 +62,26 @@ function wordplayPoints(name, mascot) {
   // A blend fuses the mascot into a longer word, such as "Monachino", wherever
   // that word sits in the name.
   if (list.some(token => token !== mascot && token.includes(mascot))) {
-    points += 450;
+    points += 400;
     signals.push("blend");
   }
   // Internal rhyme: two words sharing a three-letter ending.
   const endings = list.filter(token => token.length >= 3).map(token => token.slice(-3));
   if (new Set(endings).size < endings.length) {
-    points += 450;
+    points += 400;
     signals.push("rhyme");
   }
-  return { points: Math.min(points, 900), signals };
+  return { points: Math.min(points, 800), signals };
 }
 
-// Two to four words is the house shape. This band is deliberately flat so a
+// Two to five words is the house shape. This band is deliberately flat, and
+// wide enough to hold a mascot, two coffee terms and two invented words, so a
 // richer name is not penalised for having room to be inventive.
 function economyPoints(name) {
   const count = words(name).length;
-  if (count >= 2 && count <= 4) return 600;
-  if (count === 5) return 350;
-  return count === 1 ? 250 : 150;
+  if (count >= 2 && count <= 5) return 500;
+  if (count === 6) return 300;
+  return count === 1 ? 200 : 100;
 }
 
 // Same unbroken-text rule validateCoffeeName uses, so crew credit never exceeds
@@ -95,7 +103,17 @@ function rarityPoints(name, mascots) {
   const inventive = new Set(tokens(name).filter(token =>
     !mascots.some(mascot => token.includes(mascot))
     && !COFFEE_TERMS.includes(token) && !COMMON_WORDS.includes(token)));
-  return { points: Math.min(inventive.size, 3) * 200, inventive: [...inventive] };
+  return { points: Math.min(inventive.size, 2) * 250, inventive: [...inventive] };
+}
+
+// Each letter is worth its place in the alphabet (A=1 ... Z=26), capped. The
+// only category that pays in single points, so it is what keeps two different
+// names off the same total. Digits, spaces and punctuation are worth nothing.
+const LETTER_VALUE_MAX = 400;
+function letterPoints(name) {
+  const total = [...name.toLowerCase()].reduce((sum, char) =>
+    sum + (char >= "a" && char <= "z" ? char.charCodeAt(0) - 96 : 0), 0);
+  return Math.min(total, LETTER_VALUE_MAX);
 }
 
 export function scoreCoffeeName(raw, rules) {
@@ -110,11 +128,12 @@ export function scoreCoffeeName(raw, rules) {
   const breakdown = [
     { label: "Valid house name", max: 600, points: 600 },
     { label: "Alliteration", max: 800, points: alliterationPoints(name, mascot) },
-    { label: "Coffee craft", max: 900, points: craft.points, detail: craft.found },
-    { label: "Wordplay", max: 900, points: play.points, detail: play.signals },
-    { label: "House shape", max: 600, points: economyPoints(name) },
+    { label: "Coffee craft", max: 800, points: craft.points, detail: craft.found },
+    { label: "Wordplay", max: 800, points: play.points, detail: play.signals },
+    { label: "House shape", max: 500, points: economyPoints(name) },
     { label: "Mascot crew", max: 600, points: crewPoints(crew), detail: crew },
-    { label: "Invention", max: 600, points: rarity.points, detail: rarity.inventive },
+    { label: "Invention", max: 500, points: rarity.points, detail: rarity.inventive },
+    { label: "Letter value", max: LETTER_VALUE_MAX, points: letterPoints(name) },
   ];
   const total = breakdown.reduce((sum, part) => sum + part.points, 0);
   // Clamped so a rubric change can never emit an out-of-range competition score.
