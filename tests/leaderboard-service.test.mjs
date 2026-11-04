@@ -8,7 +8,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import vm from "node:vm";
-import { CONTENT_SECURITY_POLICY, createApp, handleIsCurated } from "../leaderboard-service/app.mjs";
+import { CONTENT_SECURITY_POLICY, contentSecurityPolicy, createApp, embedSettings, handleIsCurated } from "../leaderboard-service/app.mjs";
 import { ConflictError, FileStore, MemoryStore, reservationKey } from "../leaderboard-service/store.mjs";
 import { BoothEngine } from "../.github/extensions/commit-and-sip/booth-engine.mjs";
 import { AdminPanel } from "../.github/extensions/commit-and-sip/admin-panel.mjs";
@@ -36,8 +36,8 @@ const words = JSON.parse(await readFile(new URL("../booth/handle-words.json", im
 const HANDLE = `${words.adjectives[0]}-${words.verbs[0]}-${words.nouns[0]}`;
 const OTHER_HANDLE = `${words.adjectives[1]}-${words.verbs[1]}-${words.nouns[1]}`;
 
-async function service(t, { store = new MemoryStore(), serviceRules = rules, now } = {}) {
-  const app = createApp({ boothKey: BOOTH_KEY, now, reservationKey: RESERVATION_KEY, rules: serviceRules, staffKey: STAFF_KEY, store, words });
+async function service(t, { store = new MemoryStore(), serviceRules = rules, now, embed } = {}) {
+  const app = createApp({ boothKey: BOOTH_KEY, embed, now, reservationKey: RESERVATION_KEY, rules: serviceRules, staffKey: STAFF_KEY, store, words });
   const server = createServer(app).listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(() => new Promise(resolve => server.close(resolve)));
@@ -354,11 +354,95 @@ test("the page ships with a strict policy and nothing it would have to relax it 
   const html = await page.text();
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>/i, "no inline script");
   assert.doesNotMatch(html, /<style|\sstyle=/i, "no inline style");
-  for (const path of ["/board.js", "/board.css", "/fonts/MonaSansVF.woff2", "/fonts/OFL.txt"]) {
-    assert.equal((await fetch(`${url}${path}`)).status, 200, `${path} is served`);
+  for (const path of ["/board.js", "/kiosk.js", "/board.css", "/fonts/MonaSansVF.woff2", "/fonts/OFL.txt"]) {
+    const response = await fetch(`${url}${path}`);
+    assert.equal(response.status, 200, `${path} is served`);
+    assert.equal(response.headers.get("access-control-allow-origin"), null, `${path} is not shared cross-origin by default`);
   }
+  assert.match(CONTENT_SECURITY_POLICY, /frame-ancestors 'none'$/, "no site may frame the board by default");
   assert.equal((await fetch(`${url}/api/board`)).headers.get("cache-control"), "no-store");
+  assert.equal((await fetch(`${url}/api/board`)).headers.get("access-control-allow-origin"), null);
   assert.equal((await fetch(`${url}/../booth/local-config.json`)).status, 404, "only listed files are served");
+});
+
+test("a looper the service names may frame the board, and gets its data and font", async t => {
+  const embed = embedSettings({
+    EMBED_ORIGINS: "https://ghlearn.github.io http://localhost:*, https://ghlearn.github.io",
+    WEBSITE_HOSTNAME: "commit-and-sip-leaderboard.azurewebsites.net",
+  });
+  assert.deepEqual(embed, {
+    ancestors: ["https://ghlearn.github.io", "http://localhost:*"],
+    self: "https://commit-and-sip-leaderboard.azurewebsites.net",
+  }, "listed once each, and the service names its own origin");
+  const { url } = await service(t, { embed });
+  const page = await fetch(`${url}/`);
+  const policy = page.headers.get("content-security-policy");
+  assert.equal(policy, contentSecurityPolicy(embed));
+  assert.match(policy, /frame-ancestors https:\/\/ghlearn\.github\.io http:\/\/localhost:\*$/);
+  // A sandboxed frame has an opaque origin, which WebKit never matches to 'self'.
+  for (const directive of ["script-src", "style-src", "font-src", "connect-src", "img-src"]) {
+    assert.match(policy, new RegExp(`${directive} 'self' https://commit-and-sip-leaderboard\\.azurewebsites\\.net(;|$)`));
+  }
+  assert.match(policy, /default-src 'none'/);
+  assert.equal(page.headers.get("access-control-allow-origin"), null, "the page itself is not shared");
+
+  // The frame's requests carry Origin: null, so only "*" can answer them.
+  // These two are public, read-only and sent without credentials.
+  for (const [path, method] of [["/api/board", "GET"], ["/api/board", "HEAD"], ["/fonts/MonaSansVF.woff2", "GET"]]) {
+    const response = await fetch(`${url}${path}`, { headers: { Origin: "null" }, method });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("access-control-allow-origin"), "*", `${method} ${path} is readable from the frame`);
+  }
+  for (const path of ["/board.js", "/kiosk.js", "/board.css", "/healthz"]) {
+    assert.equal((await fetch(`${url}${path}`)).headers.get("access-control-allow-origin"), null, `${path} needs no CORS`);
+  }
+  const write = await post(url, submission("Mona Moonrise Mocha"), BOOTH_KEY, { Origin: "https://ghlearn.github.io" });
+  assert.equal(write.status, 201);
+  assert.equal(write.headers.get("access-control-allow-origin"), null, "a write is never shared cross-origin");
+  const retract = await del(url, "missing-entry");
+  assert.equal(retract.headers.get("access-control-allow-origin"), null);
+});
+
+test("the committed embed origins are ones the service will start with", async () => {
+  const main = await readFile(new URL("../infra/main.bicep", import.meta.url), "utf8");
+  const app = await readFile(new URL("../infra/modules/app.bicep", import.meta.url), "utf8");
+  assert.match(main, /param embedOrigins string = ''/, "a deployment that names none is framed by nobody");
+  assert.match(main, /embedOrigins: embedOrigins/);
+  assert.match(app, /\{ name: 'EMBED_ORIGINS', value: embedOrigins \}/);
+  const { parameters } = JSON.parse(await readFile(new URL("../infra/main.parameters.json", import.meta.url), "utf8"));
+  const { ancestors } = embedSettings({ EMBED_ORIGINS: parameters.embedOrigins.value });
+  assert.ok(ancestors.includes("https://ghlearn.github.io"), "the booth video looper on GitHub Pages");
+});
+
+test("an embed origin that is not well formed stops the service", () => {
+  assert.deepEqual(embedSettings({}), { ancestors: [], self: undefined }, "nothing may frame it unless named");
+  assert.deepEqual(embedSettings({ WEBSITE_HOSTNAME: "commit-and-sip-leaderboard.azurewebsites.net" }),
+    { ancestors: [], self: undefined }, "the default policy is unchanged on App Service");
+  assert.equal(embedSettings({ EMBED_ORIGINS: "https://a.example", WEBSITE_HOSTNAME: "bad host/" }).self, undefined);
+  for (const origin of ["*", "'self'", "https://*.github.io", "https://ghlearn.github.io/ghlearn-video-looper",
+    "https://ghlearn.github.io/", "javascript:alert(1)", "ghlearn.github.io", "https://", "data:"]) {
+    assert.throws(() => embedSettings({ EMBED_ORIGINS: origin }), /EMBED_ORIGINS/, origin);
+  }
+});
+
+test("the kiosk helper is idle outside a frame and talks only to the page framing it", async () => {
+  const source = await readFile(new URL("../leaderboard-service/public/kiosk.js", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /innerHTML|outerHTML|insertAdjacentHTML|document\.write|fetch\(|eval\(/);
+  const load = framed => {
+    const sent = [];
+    const listeners = [];
+    const window = { addEventListener: (type, listener) => listeners.push([type, listener]), scrollTo: () => {}, scrollY: 0 };
+    window.parent = framed ? { postMessage: (message, target) => sent.push([message, target]) } : window;
+    const document = { adoptedStyleSheets: [], documentElement: { clientHeight: 0, scrollHeight: 0 } };
+    vm.runInNewContext(source, { document, performance, requestAnimationFrame: () => {}, setTimeout, window });
+    return { document, listeners, sent, window };
+  };
+  const alone = load(false);
+  assert.deepEqual([alone.sent, alone.listeners], [[], []], "a phone or monitor tab is untouched");
+  const framed = load(true);
+  // The message was built in the script's own realm, so compare its shape.
+  assert.equal(JSON.stringify(framed.sent), JSON.stringify([[{ bentoLooper: "ready" }, "*"]]));
+  assert.deepEqual(framed.listeners.map(([type]) => type), ["message"]);
 });
 
 test("HEAD answers like GET, because the QR generator checks the destination with HEAD", async t => {
@@ -383,7 +467,7 @@ test("the page never parses attendee text as HTML and carries no mascot art", as
   // The mascot is not cleared for publication (see .github/images/README.md),
   // and this page is public. Adding it belongs to brand sign-off, not here.
   // The one image allowed is the repository QR the event owner supplied.
-  for (const file of ["index.html", "board.css", "board.js"]) {
+  for (const file of ["index.html", "board.css", "board.js", "kiosk.js"]) {
     const text = (await readFile(new URL(`../leaderboard-service/public/${file}`, import.meta.url), "utf8"))
       .replaceAll(/<img class="built-qr" src="\/repo-qr\.png"[^>]*>/g, "");
     assert.doesNotMatch(text, /mona\.png|\.png|\.svg|<img/i, `${file} must not carry artwork`);
@@ -644,6 +728,7 @@ test("the deploy package carries what the service reads and never the staff secr
   for (const required of [
     "leaderboard-service/server.mjs", "leaderboard-service/app.mjs", "leaderboard-service/store.mjs",
     "leaderboard-service/public/index.html", "leaderboard-service/public/board.js", "leaderboard-service/public/board.css",
+    "leaderboard-service/public/kiosk.js",
     ".github/extensions/commit-and-sip/services/name-score.mjs", ".github/extensions/commit-and-sip/services/moderation.mjs",
     ".github/extensions/commit-and-sip/services/booth-menu.mjs", ".github/extensions/commit-and-sip/domain.mjs",
     "booth/name-rules.json", "booth/blocked-terms.json", "booth/handle-words.json",

@@ -6,6 +6,7 @@
     "resourceGroupName": { "value": "rg-commit-and-sip-lb-westus2" },
     "appName": { "value": "commit-and-sip-leaderboard" },
     "eventId": { "value": "universe-2026" },
-    "owner": { "value": "arilivigni" }
+    "owner": { "value": "arilivigni" },
+    "embedOrigins": { "value": "https://ghlearn.github.io http://localhost:* http://127.0.0.1:*" }
   }
 }

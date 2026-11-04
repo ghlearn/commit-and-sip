@@ -27,6 +27,9 @@ param eventId string = 'default'
 @description('Owner tag, matching the convention on existing resources in this subscription.')
 param owner string
 
+@description('Sites allowed to show the board in a frame, such as the booth video looper on GitHub Pages: space-separated origins, no paths. Empty means no site may frame it.')
+param embedOrigins string = ''
+
 @secure()
 @minLength(32)
 @description('Publishes entries. Supplied from booth/local-config.json at deploy time; never committed.')
@@ -67,6 +70,7 @@ module app 'modules/app.bicep' = {
     location: location
     appName: appName
     eventId: checkedEventId
+    embedOrigins: embedOrigins
     tags: tags
     boothKey: boothKey
     staffKey: staffKey

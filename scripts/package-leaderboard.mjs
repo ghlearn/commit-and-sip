@@ -94,7 +94,7 @@ async function smokeTest(stage) {
       if (Date.now() > deadline) throw new Error(`The staged service did not start:\n${output}`);
       await new Promise(done => setTimeout(done, 100));
     }
-    for (const path of ["/healthz", "/", "/board.js", "/board.css", "/fonts/MonaSansVF.woff2", "/fonts/OFL.txt"]) {
+    for (const path of ["/healthz", "/", "/board.js", "/kiosk.js", "/board.css", "/fonts/MonaSansVF.woff2", "/fonts/OFL.txt"]) {
       const response = await fetch(`http://127.0.0.1:${port}${path}`);
       if (!response.ok) throw new Error(`The staged service answered ${response.status} for ${path}.`);
     }
