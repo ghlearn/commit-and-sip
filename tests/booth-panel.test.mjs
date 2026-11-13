@@ -282,6 +282,34 @@ test("naming polls preserve typing, render background settlement, and ignore sta
   await flush();
   assert.equal(element("pick-name").value, "Mona still typing");
   assert.equal(element("name-form").resetCount, undefined);
+  const failed = (code, message) => ({ ok: false, status: 409, json: async () => ({ error: { code, message } }) });
+  next = async () => failed("leaderboard_unreachable", "Connection lost. Try again.");
+  await element("name-form").handlers.submit({ preventDefault() {} });
+  assert.equal(element("name-problem").textContent, "Connection lost. Try again.");
+  const refused = { ...naming, admissionFeedback: { code: "score_taken", message: "Tweak your name." } };
+  next = async () => response(refused);
+  interval();
+  await flush();
+  assert.equal(element("name-problem").hidden, true, "the stale connectivity error is cleared");
+  assert.equal(element("name-board-feedback").hidden, false);
+  assert.match(element("name-board-feedback").textContent, /Tweak your name/);
+  assert.equal(element("pick-name").value, "Mona still typing");
+  next = async () => failed("invalid_name", "Include a mascot.");
+  await element("name-form").handlers.submit({ preventDefault() {} });
+  next = async () => response(refused);
+  interval();
+  await flush();
+  assert.equal(element("name-problem").hidden, false, "local validation remains visible");
+  assert.equal(element("name-problem").textContent, "Include a mascot.");
+  assert.equal(element("name-board-feedback").hidden, false, "the earlier refusal is also visible");
+  next = async () => failed("duplicate_drink", "This name is already on the booth menu.");
+  await element("name-form").handlers.submit({ preventDefault() {} });
+  next = async () => response({ ...naming, admissionFeedback: { code: "duplicate_drink", message: "Another barista published this name." } });
+  interval();
+  await flush();
+  assert.equal(element("name-problem").hidden, false, "a local error sharing the board code is still distinct");
+  assert.equal(element("name-problem").textContent, "This name is already on the booth menu.");
+  next = () => new Promise(resolve => { release = resolve; });
   interval();
   const releaseStale = release;
   next = async () => response(served);
@@ -302,6 +330,28 @@ test("naming polls preserve typing, render background settlement, and ignore sta
   assert.equal(element("view-served").hidden, false);
   assert.equal(element("served-name").textContent, "Mona Moonrise");
   assert.equal(element("pick-name").value, "Ducky draft");
+});
+
+test("the naming state exposes a background refusal until a new attempt starts", async t => {
+  let count = 0;
+  const leaderboardClient = { async publish(sent) {
+    count += 1;
+    if (count === 1) throw new Error("timeout");
+    if (count === 2) throw Object.assign(new Error("taken"), { code: "score_taken", status: 409 });
+    return { ...sent, entries: 1, rank: 1 };
+  } };
+  const booth = await station(t, { leaderboardClient });
+  await booth.act("begin");
+  const timedOut = await booth.act("submit_name", { name: "Mona Moonrise" });
+  assert.equal(timedOut.body.error.code, "leaderboard_unreachable");
+  await booth.engine.retryPublications();
+  const state = (await booth.state()).body;
+  assert.equal(state.phase, "naming");
+  assert.equal(state.admissionFeedback.code, "score_taken");
+  assert.match(state.admissionFeedback.message, /Tweak your name/);
+  const served = (await booth.act("submit_name", { name: "Ducky Dawn Drizzle" })).body;
+  assert.equal(served.phase, "served");
+  assert.equal(served.admissionFeedback, null);
 });
 
 test("the hint's example is a name the station accepts", async t => {

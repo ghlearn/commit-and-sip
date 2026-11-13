@@ -11,6 +11,7 @@
   let confirming = false;
   let backgroundLoading = false;
   let revision = 0;
+  let nameErrorCode = null;
 
   function fail(message) {
     $("booth-error-message").textContent = message;
@@ -38,7 +39,10 @@
       let data;
       try { data = await response.json(); }
       catch { throw new Error(`The booth returned an unreadable response (HTTP ${response.status}). Refresh the connection.`); }
-      if (!response.ok) throw new Error(data.error?.message || `The booth returned HTTP ${response.status}. Refresh the connection.`);
+      if (!response.ok) throw Object.assign(
+        new Error(data.error?.message || `The booth returned HTTP ${response.status}. Refresh the connection.`),
+        { code: data.error?.code }
+      );
       return data;
     } catch (error) {
       if (error.name === "AbortError") throw new Error("The booth took too long to respond. Refresh the connection before trying again; your drink may already have been saved.");
@@ -99,6 +103,14 @@
 
   function fillNaming(state) {
     $("naming-handle").textContent = state.handle;
+    const feedback = state.admissionFeedback;
+    $("name-board-feedback").hidden = !feedback;
+    $("name-board-feedback").textContent = feedback ? `Earlier attempt: ${feedback.message}` : "";
+    if (feedback && (nameErrorCode === "leaderboard_unreachable"
+      || (nameErrorCode === feedback.code && $("name-problem").textContent === feedback.message))) {
+      $("name-problem").hidden = true;
+      nameErrorCode = null;
+    }
   }
 
   function fillServed(state) {
@@ -175,6 +187,8 @@
         ? `Thanks, ${state.justCompleted}. The counter is clear and ready for the next barista.`
         : "Step up and invent a coffee for the house menu.";
       $("name-problem").hidden = true;
+      $("name-board-feedback").hidden = true;
+      nameErrorCode = null;
       $("pick-name").value = "";
       $("name-form").reset();
     }
@@ -237,6 +251,8 @@
     event.preventDefault();
     if (busy || !$("name-form").reportValidity()) return;
     $("name-problem").hidden = true;
+    $("name-board-feedback").hidden = true;
+    nameErrorCode = null;
     // A booth with an event leaderboard serves only once the board admits the
     // drink, so the answer can take a few seconds. Say what is happening.
     $("name-checking").hidden = false;
@@ -252,6 +268,7 @@
       // with what they typed rather than sending them back to the counter.
       $("name-problem").textContent = error.message;
       $("name-problem").hidden = false;
+      nameErrorCode = error.code ?? null;
     } finally {
       $("name-checking").hidden = true;
       busy = false;

@@ -661,6 +661,7 @@ export class BoothEngine {
   present(run, data) {
     return {
       ...this.houseView(data),
+      admissionFeedback: run.phase === "naming" ? run.admissionFeedback ?? null : null,
       attendeeUrl: this.attendeeUrl(run),
       completedAt: run.completedAt ?? null,
       createdAt: run.createdAt,
@@ -952,6 +953,7 @@ export class BoothEngine {
         handle: run.handle, rawName: input.name, removedIds: this.removalLog(data).map(record => record.id),
         rules: this.rules, runId,
       });
+      delete run.admissionFeedback;
       run.admission = { entry, sending: { [attempt]: now }, startedAt: now, token: newPublicationToken() };
       run.events.push({ type: "admission_requested", at: now });
       return { attempt, earlier: false, entry, fresh: true, token: run.admission.token };
@@ -1004,7 +1006,10 @@ export class BoothEngine {
         // The service's own code is kept for staff; the attendee sees the
         // refusal's wording only.
         run.events.push({ type: "admission_refused", at, code: refusedCode(outcome.error) });
-        if (run.phase === "naming") run.statusMessage = refusal.message;
+        if (run.phase === "naming") {
+          run.admissionFeedback = { code: refusal.code, message: refusal.message };
+          run.statusMessage = refusal.message;
+        }
         return { refusal };
       }
       admission.attempts = (admission.attempts ?? 0) + 1;
