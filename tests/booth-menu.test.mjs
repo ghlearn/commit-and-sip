@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadCatalog } from "../.github/extensions/commit-and-sip/domain.mjs";
 import { loadNameRules } from "../.github/extensions/commit-and-sip/services/coffee-name.mjs";
-import { addDrink, leaderboard, seedMenu, standingFor } from "../.github/extensions/commit-and-sip/services/booth-menu.mjs";
+import { addDrink, leaderboard, prepareDrink, seedMenu, standingFor } from "../.github/extensions/commit-and-sip/services/booth-menu.mjs";
 
 const rules = await loadNameRules();
 const catalog = await loadCatalog();
@@ -96,8 +96,10 @@ test("the leaderboard ranks by score and gives a tie to the drink served first",
   const at = (rawName, runId, handle, now) => addDrink(menu, { rawName, rules, runId, handle, now });
   // Served in the opposite order to the names' alphabetical and ID order, so
   // only the time can put the first-served drink on top.
-  at("Mona Moonlight Mocha", "run-1", "brave-brewing-otter", "2026-01-01T09:00:00.000Z");
-  at("Ducky Dawn Drip", "run-2", "keen-frothing-vole", "2026-01-01T09:05:00.000Z");
+  // Word order swapped: two different drinks with one score, as a menu kept
+  // from before scores had to be unique could hold.
+  at("Mona Velvet Mocha", "run-1", "brave-brewing-otter", "2026-01-01T09:00:00.000Z");
+  at("Mona Mocha Velvet", "run-2", "keen-frothing-vole", "2026-01-01T09:05:00.000Z");
   at("Mona Nebula", "run-3", "calm-pouring-heron", "2026-01-01T09:10:00.000Z");
 
   const board = leaderboard(menu);
@@ -106,7 +108,7 @@ test("the leaderboard ranks by score and gives a tie to the drink served first",
   // here with an obvious reason rather than somewhere downstream.
   assert.equal(board[0].score, board[1].score, "this fixture relies on the top two names tying");
   assert.notEqual(board[1].score, board[2].score);
-  assert.deepEqual(board.map(row => row.name), ["Mona Moonlight Mocha", "Ducky Dawn Drip", "Mona Nebula"],
+  assert.deepEqual(board.map(row => row.name), ["Mona Velvet Mocha", "Mona Mocha Velvet", "Mona Nebula"],
     "the tied drink served first ranks above the one served later");
   assert.deepEqual(board.map(row => row.rank), [1, 2, 3], "no two drinks share a place");
 
@@ -119,17 +121,39 @@ test("the leaderboard ranks by score and gives a tie to the drink served first",
 test("a tie in score and time still ranks the same however the menu is stored", () => {
   const menu = seedMenu(catalog);
   // `add` stamps every drink with the same instant, so only the ID separates these two.
-  const first = add(menu, "Mona Moonlight Mocha", "run-1", "brave-brewing-otter");
-  const second = add(menu, "Ducky Dawn Drip", "run-2", "keen-frothing-vole");
+  const first = add(menu, "Mona Velvet Mocha", "run-1", "brave-brewing-otter");
+  const second = add(menu, "Mona Mocha Velvet", "run-2", "keen-frothing-vole");
   assert.equal(first.score, second.score, "this fixture relies on the two names tying");
   // An ID that would sort first, so only the missing time can put it last.
   menu.push({ ...first, createdAt: undefined, handle: "calm-pouring-heron", id: "aaa-undated", name: "Undated Drink", runId: "run-3" });
 
   const board = leaderboard(menu);
   assert.deepEqual(board.map(row => row.rank), [1, 2, 3]);
-  assert.deepEqual(board.map(row => row.name), ["Ducky Dawn Drip", "Mona Moonlight Mocha", "Undated Drink"],
+  assert.deepEqual(board.map(row => row.name), ["Mona Mocha Velvet", "Mona Velvet Mocha", "Undated Drink"],
     "the same instant falls back to the drink ID, and a row with no time comes last");
   assert.deepEqual(leaderboard([...menu].reverse()), board, "storage order never changes the board");
+});
+
+test("a standalone menu refuses a score another drink holds, until a takedown frees it", () => {
+  const menu = seedMenu(catalog);
+  const unique = (rawName, runId, handle) => addDrink(menu, { rawName, rules, runId, handle, uniqueScore: true,
+    now: "2026-01-01T00:00:00.000Z" });
+  const first = unique("Mona Velvet Mocha", "run-1", "brave-brewing-otter");
+  let error;
+  assert.throws(() => unique("Mona Mocha Velvet", "run-2", "keen-frothing-vole"), thrown => { error = thrown; return true; });
+  assert.deepEqual([error.code, error.status], ["score_taken", 409]);
+  assert.match(error.message, /Tweak your name/, "the attendee is told what to do next");
+  assert.equal(menu.length, 4, "a refused drink never joins the menu");
+  // House examples carry no score, so they never block one.
+  assert.ok(unique("Mona Moonrise Mocha", "run-3", "calm-pouring-heron"));
+  // Preparing checks everything and builds the entry, but adds nothing.
+  const prepared = prepareDrink(menu, { rawName: "Ducky Dawn Drizzle", rules, runId: "run-4", handle: "glad-pouring-stoat", uniqueScore: true });
+  assert.equal(prepared.id, "ducky-dawn-drizzle");
+  assert.equal(menu.length, 5);
+  assert.throws(() => prepareDrink(menu, { rawName: "Mona Mocha Velvet", rules, runId: "run-2", handle: "keen-frothing-vole", uniqueScore: true }),
+    { code: "score_taken" });
+  menu.splice(menu.indexOf(first), 1);
+  assert.equal(unique("Mona Mocha Velvet", "run-2", "keen-frothing-vole").score, first.score, "a removed drink frees its score");
 });
 
 test("a drink cannot be added without a run and handle to attribute it to", () => {

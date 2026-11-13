@@ -329,7 +329,10 @@ async function serveMany(engine, count) {
   for (let index = 0; index < count; index += 1) {
     const runId = `booth-many-${index}`;
     await engine.open({ runId });
-    const name = `Mona Brew ${index + 1}`;
+    // No two drinks share a score, and digits earn no letter value, so the
+    // suffix is letters: each one moves the score by a point or two.
+    const letter = String.fromCharCode(97 + index);
+    const name = `Mona Brew ${letter}${letter}`;
     await engine.dispatch(runId, "submit_name", { name });
     await engine.dispatch(runId, "complete", {});
     names.push(name);

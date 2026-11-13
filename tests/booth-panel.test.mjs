@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import vm from "node:vm";
 import { RunStore } from "../.github/extensions/commit-and-sip/store.mjs";
 import { BoothEngine } from "../.github/extensions/commit-and-sip/booth-engine.mjs";
 import { BoothPanel } from "../.github/extensions/commit-and-sip/booth-panel.mjs";
@@ -22,7 +23,12 @@ async function station(t, options = {}) {
   const engine = new BoothEngine({ store, catalog, rules, ...options });
   const panel = new BoothPanel(engine, { renderQr: async url => `data:image/png;base64,${Buffer.from(url).toString("base64")}` });
   const served = await startServer({ engine, panel, home: "booth.html" });
-  t.after(async () => { await served.close(); await rm(directory, { recursive: true, force: true }); });
+  t.after(async () => {
+    await served.close();
+    if (engine.publicationSweep) await engine.publicationSweep;
+    await engine.drainPublications();
+    await rm(directory, { recursive: true, force: true });
+  });
 
   const base = new URL(served.url);
   const ticket = base.searchParams.get("ticket");
@@ -247,6 +253,116 @@ test("the booth form asks only for the name and says a mascot is required", asyn
   assert.doesNotMatch(script, /pick-mascot|pick-placement/);
 });
 
+test("naming polls preserve typing, render background settlement, and ignore stale responses", async () => {
+  const elements = new Map();
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, {
+      value: "", hidden: false, disabled: false, textContent: "", handlers: {},
+      setAttribute() {}, replaceChildren() {}, append() {}, reset() { this.resetCount = (this.resetCount ?? 0) + 1; },
+      reportValidity() { return true; }, addEventListener(type, handler) { this.handlers[type] = handler; },
+    });
+    return elements.get(id);
+  };
+  const naming = { phase: "naming", handle: "bright-brews-beans", houseMenu: [], houseMenuTotal: 0,
+    leaderboard: [], leaderboardTotal: 0 };
+  const served = { ...naming, phase: "served", submission: { name: "Mona Moonrise", score: 1234, breakdown: [] },
+    sync: { state: "confirmed" }, standing: { rank: 1, entries: 1 } };
+  const response = state => ({ ok: true, json: async () => state });
+  let interval;
+  let next = async () => response(naming);
+  const source = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/booth.js", import.meta.url), "utf8");
+  vm.runInNewContext(source, {
+    document: { hidden: false, getElementById: element, createElement: () => element(Symbol()), createTextNode: () => ({}) },
+    window: { location: { search: "?ticket=test" }, setInterval: callback => { interval = callback; } },
+    fetch: (...args) => next(...args), URLSearchParams, AbortController, setTimeout, clearTimeout,
+  });
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  await flush();
+  element("pick-name").value = "Mona still typing";
+  let release;
+  next = () => new Promise(resolve => { release = resolve; });
+  interval();
+  assert.equal(element("name-fields").disabled, false, "background polling does not interrupt typing");
+  release(response(naming));
+  await flush();
+  assert.equal(element("pick-name").value, "Mona still typing");
+  assert.equal(element("name-form").resetCount, undefined);
+  const failed = (code, message) => ({ ok: false, status: 409, json: async () => ({ error: { code, message } }) });
+  next = async () => failed("leaderboard_unreachable", "Connection lost. Try again.");
+  await element("name-form").handlers.submit({ preventDefault() {} });
+  assert.equal(element("name-problem").textContent, "Connection lost. Try again.");
+  const refused = { ...naming, admissionFeedback: { code: "score_taken", message: "Tweak your name." } };
+  next = async () => response(refused);
+  interval();
+  await flush();
+  assert.equal(element("name-problem").hidden, true, "the stale connectivity error is cleared");
+  assert.equal(element("name-board-feedback").hidden, false);
+  assert.match(element("name-board-feedback").textContent, /Tweak your name/);
+  assert.equal(element("pick-name").value, "Mona still typing");
+  next = async () => failed("invalid_name", "Include a mascot.");
+  await element("name-form").handlers.submit({ preventDefault() {} });
+  next = async () => response(refused);
+  interval();
+  await flush();
+  assert.equal(element("name-problem").hidden, false, "local validation remains visible");
+  assert.equal(element("name-problem").textContent, "Include a mascot.");
+  assert.equal(element("name-board-feedback").hidden, false, "the earlier refusal is also visible");
+  next = async () => failed("duplicate_drink", "This name is already on the booth menu.");
+  await element("name-form").handlers.submit({ preventDefault() {} });
+  next = async () => response({ ...naming, admissionFeedback: { code: "duplicate_drink", message: "Another barista published this name." } });
+  interval();
+  await flush();
+  assert.equal(element("name-problem").hidden, false, "a local error sharing the board code is still distinct");
+  assert.equal(element("name-problem").textContent, "This name is already on the booth menu.");
+  next = () => new Promise(resolve => { release = resolve; });
+  interval();
+  const releaseStale = release;
+  next = async () => response(served);
+  await element("name-form").handlers.submit({ preventDefault() {} });
+  releaseStale(response(naming));
+  await flush();
+  assert.equal(element("view-served").hidden, false, "a stale naming poll cannot overwrite a completed submission");
+  assert.equal(element("served-score").textContent, "1234");
+
+  // A separate naming screen receives a settlement on its next background poll.
+  next = async () => response(naming);
+  await element("booth-retry").handlers.click();
+  await flush();
+  element("pick-name").value = "Ducky draft";
+  next = async () => response(served);
+  interval();
+  await flush();
+  assert.equal(element("view-served").hidden, false);
+  assert.equal(element("served-name").textContent, "Mona Moonrise");
+  assert.equal(element("pick-name").value, "Ducky draft");
+  next = async () => response({ ...naming, phase: "idle" });
+  interval();
+  await flush();
+  assert.equal(element("view-idle").hidden, false, "a served screen reconciles a later staff closure");
+});
+
+test("the naming state exposes a background refusal until a new attempt starts", async t => {
+  let count = 0;
+  const leaderboardClient = { async publish(sent) {
+    count += 1;
+    if (count === 1) throw new Error("timeout");
+    if (count === 2) throw Object.assign(new Error("taken"), { code: "score_taken", status: 409 });
+    return { ...sent, entries: 1, rank: 1 };
+  } };
+  const booth = await station(t, { leaderboardClient });
+  await booth.act("begin");
+  const timedOut = await booth.act("submit_name", { name: "Mona Moonrise" });
+  assert.equal(timedOut.body.error.code, "leaderboard_unreachable");
+  await booth.engine.retryPublications();
+  const state = (await booth.state()).body;
+  assert.equal(state.phase, "naming");
+  assert.equal(state.admissionFeedback.code, "score_taken");
+  assert.match(state.admissionFeedback.message, /Tweak your name/);
+  const served = (await booth.act("submit_name", { name: "Ducky Dawn Drizzle" })).body;
+  assert.equal(served.phase, "served");
+  assert.equal(served.admissionFeedback, null);
+});
+
 test("the hint's example is a name the station accepts", async t => {
   const booth = await station(t);
   await booth.act("begin");
@@ -296,6 +412,71 @@ test("a station staff closed is ready for the next attendee", async t => {
   const next = await booth.act("begin");
   assert.equal(next.status, 200, "and the next attendee can start");
   assert.notEqual(next.body.runId, runId, "as a new run, not the closed one");
+});
+
+for (const reopen of [false, true]) {
+  for (const outcome of ["admitted", "timeout"]) {
+    test(`a closed in-flight admission returns ${reopen ? "the next run" : "idle"} after ${outcome}`, async t => {
+      let release;
+      let entered;
+      const started = new Promise(resolve => { entered = resolve; });
+      const gate = new Promise(resolve => { release = resolve; });
+      t.after(() => release());
+      let sends = 0;
+      const leaderboardClient = { async publish(sent) {
+        sends += 1;
+        if (sends === 1) {
+          entered();
+          await gate;
+          if (outcome === "timeout") throw new Error("timeout");
+        }
+        return { ...sent, entries: 1, rank: 1 };
+      } };
+      const booth = await station(t, { leaderboardClient });
+      const first = (await booth.act("begin")).body;
+      const inFlight = booth.act("submit_name", { name: "Mona Moonrise Mocha" });
+      await started;
+      await booth.engine.closeStation({ runId: first.runId, closedBy: "Sam" });
+      const next = reopen ? (await booth.act("begin")).body : null;
+      release();
+      const result = await inFlight;
+      assert.equal(result.status, 200);
+      assert.equal(result.body.phase, reopen ? "naming" : "idle");
+      if (reopen) {
+        assert.equal(result.body.runId, next.runId, "the old answer cannot displace the next attendee");
+        assert.equal((await booth.state()).body.runId, next.runId);
+      } else {
+        assert.equal((await booth.act("begin")).body.phase, "naming", "the station can start another order");
+      }
+    });
+  }
+}
+
+test("a stale station read cannot clear a newly started attendee", async t => {
+  const booth = await station(t);
+  const first = (await booth.act("begin")).body;
+  const original = booth.engine.get.bind(booth.engine);
+  let release;
+  let entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  let delayed = false;
+  booth.engine.get = async runId => {
+    if (!delayed && runId === first.runId) {
+      delayed = true;
+      entered();
+      await gate;
+    }
+    return original(runId);
+  };
+  const oldRead = booth.state();
+  await started;
+  await booth.engine.closeStation({ runId: first.runId, closedBy: "Sam" });
+  const next = (await booth.act("begin")).body;
+  release();
+  assert.equal((await oldRead).body.runId, next.runId);
+  assert.equal((await booth.state()).body.runId, next.runId);
 });
 
 test("a station whose event was archived recovers instead of failing", async t => {

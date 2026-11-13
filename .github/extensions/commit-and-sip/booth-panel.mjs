@@ -30,27 +30,28 @@ export class BoothPanel {
   // strand the station. Reconcile instead of trusting the cursor: a run that is
   // gone or already finished releases it, and the next attendee can start.
   async currentRun() {
-    let state;
-    try {
-      state = await this.engine.get(this.runId);
-    } catch (error) {
-      if (error?.code !== "run_missing") throw error;
-      this.runId = null;
-      return null;
+    for (;;) {
+      const runId = this.runId;
+      if (!runId) return null;
+      let state;
+      try {
+        state = await this.engine.get(runId);
+      } catch (error) {
+        if (error?.code !== "run_missing") throw error;
+      }
+      if (this.runId !== runId) continue;
+      if (!state || state.phase === "complete") {
+        this.runId = null;
+        return null;
+      }
+      return state;
     }
-    if (state.phase === "complete") {
-      this.runId = null;
-      return null;
-    }
-    return state;
   }
 
-  // The idle screen polls every few seconds, and that is the only thing still
-  // running once an attendee has handed over. So it also starts a retry of
-  // any publication still owed, at most every 30 seconds, without waiting for
-  // it: the screen never slows down for the network. The interval is kept on
-  // the engine every station shares, not on this panel: several stations'
-  // idle polls, staggered, would otherwise start a sweep every few seconds.
+  // Screens poll every few seconds, including after hand-over. A poll also
+  // starts a retry of any publication still owed, at most every 30 seconds,
+  // without waiting for it. The interval is shared across this booth's
+  // stations so staggered polls do not start extra sweeps.
   sweepInBackground(now = Date.now()) {
     if (now - (this.engine.lastPublicationSweep ?? -Infinity) < SWEEP_INTERVAL_MS) return;
     this.engine.lastPublicationSweep = now;
@@ -93,21 +94,30 @@ export class BoothPanel {
     }
     if (this.runId) await this.currentRun();
     requireValue(this.runId, "not_started", "Start an order at this station first.", 409);
-    const state = await this.engine.dispatch(this.runId, action, input);
-    // Serving commits locally first; publishing to the event leaderboard is a
-    // separate step that must not be able to fail or slow the attendee's
-    // submission. It runs in the background: the screen answers at once with
-    // the drink "still being confirmed", and polls until the service answers.
-    if (action === "submit_name") {
-      this.backgroundPublish = this.engine.publish(this.runId).catch(() => {});
-      return this.decorate(state);
+    // With an event leaderboard, submit_name answers only once the board has
+    // admitted the drink (and it is served) or said why not, so there is no
+    // background publish left to start here.
+    const runId = this.runId;
+    let state;
+    try {
+      state = await this.engine.dispatch(runId, action, input);
+    } catch (error) {
+      if (this.runId !== runId || !(await this.currentRun()) || this.runId !== runId) return this.get();
+      throw error;
     }
+    if (this.runId !== runId) return this.get();
     // Completing hands the station to the next attendee. The run itself stays
     // finished in the store; only this panel's cursor is released.
     if (action === "complete") {
       this.runId = null;
       return { phase: "idle", ...(await this.engine.house()), justCompleted: state.handle };
     }
-    return this.decorate(state);
+    if (state.phase === "complete") {
+      this.runId = null;
+      return this.get();
+    }
+    const current = await this.currentRun();
+    if (!current || this.runId !== runId) return this.get();
+    return this.decorate(current);
   }
 }

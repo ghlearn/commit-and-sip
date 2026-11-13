@@ -5,10 +5,9 @@
   const VIEWS = ["idle", "naming", "served"];
   let busy = false;
   let phase = null;
-  // The drink is published in the background, so the served screen keeps
-  // checking while the outcome is still open: pending, or failed and due for
-  // a retry (the panel retries on its poll). Confirmed and rejected are final.
-  let confirming = false;
+  let backgroundLoading = false;
+  let revision = 0;
+  let nameErrorCode = null;
 
   function fail(message) {
     $("booth-error-message").textContent = message;
@@ -36,7 +35,10 @@
       let data;
       try { data = await response.json(); }
       catch { throw new Error(`The booth returned an unreadable response (HTTP ${response.status}). Refresh the connection.`); }
-      if (!response.ok) throw new Error(data.error?.message || `The booth returned HTTP ${response.status}. Refresh the connection.`);
+      if (!response.ok) throw Object.assign(
+        new Error(data.error?.message || `The booth returned HTTP ${response.status}. Refresh the connection.`),
+        { code: data.error?.code }
+      );
       return data;
     } catch (error) {
       if (error.name === "AbortError") throw new Error("The booth took too long to respond. Refresh the connection before trying again; your drink may already have been saved.");
@@ -97,6 +99,14 @@
 
   function fillNaming(state) {
     $("naming-handle").textContent = state.handle;
+    const feedback = state.admissionFeedback;
+    $("name-board-feedback").hidden = !feedback;
+    $("name-board-feedback").textContent = feedback ? `Earlier attempt: ${feedback.message}` : "";
+    if (feedback && (nameErrorCode === "leaderboard_unreachable"
+      || (nameErrorCode === feedback.code && $("name-problem").textContent === feedback.message))) {
+      $("name-problem").hidden = true;
+      nameErrorCode = null;
+    }
   }
 
   function fillServed(state) {
@@ -163,7 +173,6 @@
 
   function render(state) {
     phase = state.phase === "complete" ? "served" : state.phase;
-    confirming = state.phase === "served" && ["pending", "failed"].includes(state.sync?.state) && !state.removed;
     for (const view of VIEWS) $(`view-${view}`).hidden = view !== phase;
     fillMenu(state);
     if (phase === "naming") fillNaming(state);
@@ -173,6 +182,8 @@
         ? `Thanks, ${state.justCompleted}. The counter is clear and ready for the next barista.`
         : "Step up and invent a coffee for the house menu.";
       $("name-problem").hidden = true;
+      $("name-board-feedback").hidden = true;
+      nameErrorCode = null;
       $("pick-name").value = "";
       $("name-form").reset();
     }
@@ -180,6 +191,21 @@
 
   async function load(explicit = true) {
     if (busy) return;
+    if (!explicit) {
+      if (backgroundLoading) return;
+      backgroundLoading = true;
+      const current = revision;
+      try {
+        const state = await request("/api/state");
+        if (!busy && current === revision) render(state);
+      } catch (error) {
+        if (!busy && current === revision) fail(error.message);
+      } finally {
+        backgroundLoading = false;
+      }
+      return;
+    }
+    revision += 1;
     busy = true;
     controls();
     try {
@@ -196,6 +222,7 @@
 
   async function act(action, input = {}) {
     if (busy) return;
+    revision += 1;
     busy = true;
     controls();
     try {
@@ -219,6 +246,12 @@
     event.preventDefault();
     if (busy || !$("name-form").reportValidity()) return;
     $("name-problem").hidden = true;
+    $("name-board-feedback").hidden = true;
+    nameErrorCode = null;
+    // A booth with an event leaderboard serves only once the board admits the
+    // drink, so the answer can take a few seconds. Say what is happening.
+    $("name-checking").hidden = false;
+    revision += 1;
     busy = true;
     controls();
     try {
@@ -230,7 +263,9 @@
       // with what they typed rather than sending them back to the counter.
       $("name-problem").textContent = error.message;
       $("name-problem").hidden = false;
+      nameErrorCode = error.code ?? null;
     } finally {
+      $("name-checking").hidden = true;
       busy = false;
       controls();
     }
@@ -238,8 +273,8 @@
 
   void load();
   window.setInterval(() => {
-    // Keep the menu and leaderboard current between attendees without
-    // interrupting anyone mid-typing.
-    if (!document.hidden && (phase === "idle" || confirming)) void load(false);
+    // Reconcile background settlements and staff closures without disabling
+    // or resetting the naming form while someone is typing.
+    if (!document.hidden && VIEWS.includes(phase)) void load(false);
   }, 5000);
 })();
