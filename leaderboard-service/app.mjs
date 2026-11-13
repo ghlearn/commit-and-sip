@@ -32,7 +32,9 @@ const STATIC = {
   "/": { file: new URL("./public/index.html", import.meta.url), type: "text/html; charset=utf-8" },
   "/board.css": { file: new URL("./public/board.css", import.meta.url), type: "text/css; charset=utf-8" },
   "/board.js": { file: new URL("./public/board.js", import.meta.url), type: "text/javascript; charset=utf-8" },
-  "/fonts/MonaSansVF.woff2": { file: renderer("fonts/MonaSansVF.woff2"), type: "font/woff2" },
+  "/kiosk.js": { file: new URL("./public/kiosk.js", import.meta.url), type: "text/javascript; charset=utf-8" },
+  // Fonts are fetched in CORS mode, so a framed page (an opaque origin) needs the header to load it.
+  "/fonts/MonaSansVF.woff2": { file: renderer("fonts/MonaSansVF.woff2"), type: "font/woff2", cors: true },
   // The same code the booth shows, so the two can never point different ways.
   "/repo-qr.png": { file: renderer("repo-qr.png"), type: "image/png" },
   // The font licence requires the notice to travel with the font.
@@ -40,10 +42,45 @@ const STATIC = {
 };
 
 // No inline script or style anywhere, so the policy can forbid both.
-export const CONTENT_SECURITY_POLICY = [
-  "default-src 'none'", "script-src 'self'", "style-src 'self'", "font-src 'self'",
-  "connect-src 'self'", "img-src 'self'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'",
-].join("; ");
+//
+// By default no site may frame the board. EMBED_ORIGINS names the sites that
+// may, such as the booth video looper on GitHub Pages. Those players show it in
+// a sandboxed frame, where the page has an opaque origin: WebKit then matches
+// nothing against 'self', so the service also names its own origin, and the
+// board's data and font (both fetched in CORS mode) are sent with an
+// Access-Control-Allow-Origin header. Both are public and read without
+// credentials. Write routes never get the header.
+export function contentSecurityPolicy({ ancestors = [], self } = {}) {
+  const own = self ? `'self' ${self}` : "'self'";
+  return [
+    "default-src 'none'", `script-src ${own}`, `style-src ${own}`, `font-src ${own}`,
+    `connect-src ${own}`, `img-src ${own}`, "base-uri 'none'", "form-action 'none'",
+    `frame-ancestors ${ancestors.length ? ancestors.join(" ") : "'none'"}`,
+  ].join("; ");
+}
+
+export const CONTENT_SECURITY_POLICY = contentSecurityPolicy();
+
+// A scheme and a host, optionally a port or "*" for any port. No path and no
+// wildcard host, so a typo cannot open the board to every site.
+const EMBED_ORIGIN = /^https?:\/\/(?:localhost|127\.0\.0\.1|[a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::(?:\d{1,5}|\*))?$/i;
+const HOST_NAME = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
+
+// Reads EMBED_ORIGINS (space or comma separated) and, on App Service, the
+// app's own host name. An origin that is not well formed stops the service, the
+// same way a short key does, rather than starting with a policy nobody meant.
+export function embedSettings({ EMBED_ORIGINS = "", WEBSITE_HOSTNAME } = {}) {
+  const ancestors = [...new Set(EMBED_ORIGINS.split(/[\s,]+/).filter(Boolean))];
+  for (const origin of ancestors) {
+    const port = /:(\d+)$/.exec(origin)?.[1];
+    if (!EMBED_ORIGIN.test(origin) || (port !== undefined && (Number(port) < 1 || Number(port) > 65535))) {
+      throw new Error(`EMBED_ORIGINS: "${origin}" is not an origin such as https://ghlearn.github.io.`);
+    }
+  }
+  const self = ancestors.length && WEBSITE_HOSTNAME && HOST_NAME.test(WEBSITE_HOSTNAME)
+    ? `https://${WEBSITE_HOSTNAME.toLowerCase()}` : undefined;
+  return { ancestors, self };
+}
 
 class HttpError extends Error {
   constructor(status, code, message) {
@@ -124,11 +161,13 @@ function receiptFor(entry, entries) {
 
 const publicRow = ({ handle, name, rank, score }) => ({ handle, name, rank, score });
 
-export function createApp({ store, rules, words, boothKey, staffKey, reservationKey, now = () => new Date(), log = () => {} }) {
+export function createApp({ store, rules, words, boothKey, staffKey, reservationKey, embed = {}, now = () => new Date(), log = () => {} }) {
   for (const [label, key] of [["booth", boothKey], ["staff", staffKey], ["reservation", reservationKey]]) {
     if (typeof key !== "string" || key.length < 32) throw new Error(`The ${label} key must be at least 32 characters.`);
   }
   if (boothKey === staffKey) throw new Error("The booth and staff keys must differ.");
+  const policy = contentSecurityPolicy(embed);
+  const embeddable = Boolean(embed.ancestors?.length);
   const moderation = blocklistStatus(rules.blocklist).ready ? "reviewed" : "placeholder";
   const fingerprint = id => createHmac("sha256", reservationKey).update(id).digest("hex");
 
@@ -296,12 +335,15 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
     try {
       const url = new URL(request.url, "http://localhost");
       const asset = method === "GET" ? STATIC[url.pathname] : undefined;
+      if (embeddable && method === "GET" && (asset?.cors || url.pathname === "/api/board")) {
+        headers["Access-Control-Allow-Origin"] = "*";
+      }
       if (asset) {
         // Read first: a failed read must still be able to answer with a 500,
         // which it cannot once a 200 has gone out.
         const body = await readFile(asset.file);
         response.writeHead(200, {
-          ...headers, "Cache-Control": "public, max-age=300", "Content-Security-Policy": CONTENT_SECURITY_POLICY,
+          ...headers, "Cache-Control": "public, max-age=300", "Content-Security-Policy": policy,
           "Content-Type": asset.type,
         });
         response.end(head ? undefined : body);

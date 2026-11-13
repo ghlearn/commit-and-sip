@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { loadNameRules } from "../.github/extensions/commit-and-sip/services/coffee-name.mjs";
 import { blocklistStatus } from "../.github/extensions/commit-and-sip/services/moderation.mjs";
-import { createApp } from "./app.mjs";
+import { createApp, embedSettings } from "./app.mjs";
 import { FileStore, openReservationKey } from "./store.mjs";
 
 // Node built-ins only: no SDK, no connection string, no storage account. The
@@ -19,14 +19,16 @@ const words = JSON.parse(await readFile(new URL("../booth/handle-words.json", im
 const directory = process.env.DATA_DIR || "/home/data/commit-and-sip";
 const store = await FileStore.open({ directory, event: process.env.EVENT_ID || "default" });
 
+const embed = embedSettings(process.env);
 const app = createApp({
-  boothKey: required("BOOTH_KEY"), log: message => console.error(message), reservationKey: await openReservationKey(directory, store),
+  boothKey: required("BOOTH_KEY"), embed, log: message => console.error(message), reservationKey: await openReservationKey(directory, store),
   rules, staffKey: required("STAFF_KEY"), store, words,
 });
 
 const port = Number(process.env.PORT) || 8080;
 createServer(app).listen(port, () => {
   console.log(`Commit & Sip leaderboard listening on ${port}.`);
+  if (embed.ancestors.length) console.log(`The board may be framed by ${embed.ancestors.join(" ")}.`);
   // The service moderates with the blocklist deployed alongside it. Say so
   // plainly in the log, the way the booth does, while that list is unreviewed.
   if (!blocklistStatus(rules.blocklist).ready) {

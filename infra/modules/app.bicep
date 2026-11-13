@@ -1,6 +1,7 @@
 param location string
 param appName string
 param eventId string
+param embedOrigins string = ''
 param tags object
 
 @secure()
@@ -62,6 +63,8 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'STAFF_KEY', value: staffKey }
         { name: 'EVENT_ID', value: eventId }
         { name: 'DATA_DIR', value: '/home/data/commit-and-sip' }
+        // Checked by the service at start-up (embedSettings in app.mjs).
+        { name: 'EMBED_ORIGINS', value: embedOrigins }
         // /home is the persistent share; this keeps it mounted.
         { name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE', value: 'true' }
         // Avoids overlapping workers within one VM during a recycle. It does not

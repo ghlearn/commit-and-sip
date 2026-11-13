@@ -88,6 +88,19 @@ Security measures:
 - All attendee text is assigned through `textContent`.
 - `nosniff` and `no-referrer` headers.
 - `no-store` on the API.
+- No site may frame the page unless it is listed in `EMBED_ORIGINS` (see below).
+
+### Showing the board in the booth video looper
+
+The booth video looper ([ghlearn/ghlearn-video-looper](https://github.com/ghlearn/ghlearn-video-looper), published on GitHub Pages) shows this page as one of its slides, in a frame. Framing is off by default (`frame-ancestors 'none'`). The `EMBED_ORIGINS` app setting, from the `embedOrigins` infrastructure parameter, lists the sites allowed to frame it: space-separated origins with no path, such as `https://ghlearn.github.io http://localhost:*`. The service refuses to start if an entry is not a well-formed origin. A wildcard host is not accepted, so a typo cannot open the board to every site.
+
+When at least one origin is listed:
+
+- `frame-ancestors` names exactly those origins.
+- The looper's frame is sandboxed, so the page runs with an opaque origin, which WebKit (Safari, the GitHub Copilot App) never matches against `'self'`. The policy therefore also names the service's own origin, `https://$WEBSITE_HOSTNAME`, beside `'self'`.
+- `GET`/`HEAD /api/board` and the font are sent with `Access-Control-Allow-Origin: *`, because the frame fetches them with `Origin: null`. Both are public, read-only and sent without credentials. No write route, page, or script gets the header.
+
+`kiosk.js` runs only when the page is framed. It hides the scrollbar and pointer and, while the looper says the slide is on screen (`{ bentoLooper: "active", seconds }`), scrolls a screenful at a time so every row and the QR code are shown. It returns to the top on `{ bentoLooper: "idle" }`. It listens only to the page framing it and never touches the data.
 
 **Not done:** the page needs JavaScript. The proposal asked for it to be legible without JavaScript "if practical". Server-rendering was judged not worth the second escaping surface for a board read on phones and a monitor.
 
