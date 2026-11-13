@@ -420,9 +420,71 @@ test("an embed origin that is not well formed stops the service", () => {
     { ancestors: [], self: undefined }, "the default policy is unchanged on App Service");
   assert.equal(embedSettings({ EMBED_ORIGINS: "https://a.example", WEBSITE_HOSTNAME: "bad host/" }).self, undefined);
   for (const origin of ["*", "'self'", "https://*.github.io", "https://ghlearn.github.io/ghlearn-video-looper",
-    "https://ghlearn.github.io/", "javascript:alert(1)", "ghlearn.github.io", "https://", "data:"]) {
+    "https://ghlearn.github.io/", "javascript:alert(1)", "ghlearn.github.io", "https://", "data:",
+    "https://ghlearn.github.io:99999", "https://ghlearn.github.io:65536", "http://localhost:0"]) {
     assert.throws(() => embedSettings({ EMBED_ORIGINS: origin }), /EMBED_ORIGINS/, origin);
   }
+  assert.deepEqual(embedSettings({ EMBED_ORIGINS: "http://localhost:65535 http://localhost:1" }).ancestors,
+    ["http://localhost:65535", "http://localhost:1"]);
+});
+
+// Runs kiosk.js in a frame against a fake clock. The fake frame cannot be
+// scrolled while it is 0px tall, as a hidden iframe cannot.
+async function framedKiosk({ innerHeight, scrollHeight, scrollY = 0 }) {
+  const source = await readFile(new URL("../leaderboard-service/public/kiosk.js", import.meta.url), "utf8");
+  let now = 0;
+  let timers = [];
+  const schedule = (fn, at) => timers.push({ fn, at });
+  const listeners = [];
+  const parent = { postMessage: () => {} };
+  const window = {
+    parent, innerHeight, scrollY,
+    addEventListener: (type, listener) => listeners.push(listener),
+    scrollTo({ top }) {
+      if (window.innerHeight > 0) window.scrollY = Math.max(0, Math.min(top, scrollHeight - window.innerHeight));
+    },
+  };
+  const document = { adoptedStyleSheets: [], documentElement: { clientHeight: 0, scrollHeight } };
+  vm.runInNewContext(source, {
+    document, window, performance: { now: () => now },
+    setTimeout: (fn, ms) => schedule(fn, now + ms),
+    requestAnimationFrame: fn => schedule(() => fn(now), now + 16),
+  });
+  const advance = async (ms, each = () => {}) => {
+    const until = now + ms;
+    for (;;) {
+      await new Promise(done => setImmediate(done));
+      timers.sort((a, b) => a.at - b.at);
+      if (!timers.length || timers[0].at > until) break;
+      const timer = timers.shift();
+      now = timer.at;
+      timer.fn();
+      each(now);
+    }
+    now = until;
+  };
+  const send = data => listeners.forEach(listener => listener({ source: parent, data }));
+  return { window, advance, send };
+}
+
+test("the kiosk reaches the bottom of a tall board within a short slide", async () => {
+  const kiosk = await framedKiosk({ innerHeight: 600, scrollHeight: 3000 });
+  kiosk.send({ bentoLooper: "active", seconds: 10 });
+  let bottomAt;
+  await kiosk.advance(10_000, now => {
+    if (bottomAt === undefined && kiosk.window.scrollY === 2400) bottomAt = now;
+  });
+  assert.ok(bottomAt !== undefined && bottomAt <= 10_000, `reached the bottom at ${bottomAt}`);
+});
+
+test("a frame shown after its slide starts begins again at the top", async () => {
+  const kiosk = await framedKiosk({ innerHeight: 0, scrollHeight: 3000, scrollY: 2400 });
+  kiosk.send({ bentoLooper: "active", seconds: 20 });
+  await kiosk.advance(250);
+  assert.equal(kiosk.window.scrollY, 2400, "a hidden frame cannot move");
+  kiosk.window.innerHeight = 600;
+  await kiosk.advance(150);
+  assert.equal(kiosk.window.scrollY, 0);
 });
 
 test("the kiosk helper is idle outside a frame and talks only to the page framing it", async () => {

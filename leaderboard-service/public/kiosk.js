@@ -65,26 +65,45 @@
 
   // A page at a time, so each screenful holds still long enough to read. The
   // pace is worked out again on every step from the live height, so rows that
-  // arrive while the slide is up are still reached before it ends.
+  // arrive while the slide is up are still reached before it ends. When the
+  // board is too tall to show at a comfortable pace, pages stop overlapping
+  // and then the holds and glides shrink, so the bottom rows are never cut.
+  const MIN_HOLD_MS = 1500;
+  const pace = (left, remaining) => {
+    const needed = steps => steps * GLIDE_MS + (steps + 1) * MIN_HOLD_MS;
+    let page = Math.max(1, Math.round(viewHeight() * 0.8));
+    let steps = Math.ceil(left / page);
+    if (needed(steps) > remaining) {
+      page = Math.max(1, viewHeight());
+      steps = Math.ceil(left / page);
+    }
+    const scale = Math.min(1, Math.max(0, remaining) / needed(steps));
+    const glideMs = GLIDE_MS * scale;
+    const hold = Math.max(MIN_HOLD_MS * scale, (remaining - steps * glideMs) / (steps + 1));
+    return { page, glideMs, hold };
+  };
+
   const play = async seconds => {
     const id = ++run;
     const end = performance.now() + seconds * 1000;
     jump(0);
-    // Just after the slide appears the frame can still be 0px tall.
+    // Just after the slide appears the frame can still be 0px tall, and a
+    // frame that tall cannot be scrolled, so return to the top once it has
+    // a height.
     for (let tries = 0; viewHeight() === 0 && tries < 30 && id === run; tries++) await wait(100);
+    if (id !== run) return;
+    jump(0);
     while (id === run && performance.now() < end) {
       const left = maxY() - window.scrollY;
       if (left < 4) {
         await wait(400);
         continue;
       }
-      const page = Math.max(1, Math.round(viewHeight() * 0.8));
-      const steps = Math.ceil(left / page);
-      const hold = Math.max(1500, (end - performance.now() - steps * GLIDE_MS) / (steps + 1));
+      const { page, glideMs, hold } = pace(left, end - performance.now());
       await wait(hold);
       if (id !== run) return;
       if (maxY() - window.scrollY < 4) continue;
-      await glide(Math.min(window.scrollY + page, maxY()), GLIDE_MS, id);
+      await glide(Math.min(window.scrollY + page, maxY()), glideMs, id);
     }
   };
 

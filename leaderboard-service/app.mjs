@@ -69,7 +69,8 @@ const HOST_NAME = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
 export function embedSettings({ EMBED_ORIGINS = "", WEBSITE_HOSTNAME } = {}) {
   const ancestors = [...new Set(EMBED_ORIGINS.split(/[\s,]+/).filter(Boolean))];
   for (const origin of ancestors) {
-    if (!EMBED_ORIGIN.test(origin)) {
+    const port = /:(\d+)$/.exec(origin)?.[1];
+    if (!EMBED_ORIGIN.test(origin) || (port !== undefined && (Number(port) < 1 || Number(port) > 65535))) {
       throw new Error(`EMBED_ORIGINS: "${origin}" is not an origin such as https://ghlearn.github.io.`);
     }
   }
