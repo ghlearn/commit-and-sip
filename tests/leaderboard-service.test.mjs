@@ -2312,9 +2312,8 @@ test("the attendee's link is personal from the first screen, before any send", a
 
 test("the served screen keeps polling while its drink is being confirmed", async () => {
   const script = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/booth.js", import.meta.url), "utf8");
-  assert.match(script, /confirming = state\.phase === "served" && \["pending", "failed"\]\.includes\(state\.sync\?\.state\)/,
-    "a failed publish is still retryable, so the screen keeps checking; confirmed and rejected are final");
-  assert.match(script, /phase === "idle" \|\| phase === "naming" \|\| confirming\)\) void load\(false\)/);
+  assert.match(script, /VIEWS\.includes\(phase\)\) void load\(false\)/,
+    "the screen also reconciles a staff closure after confirmation");
 });
 
 test("the template accepts exactly the event IDs the service can start with", async t => {

@@ -23,7 +23,12 @@ async function station(t, options = {}) {
   const engine = new BoothEngine({ store, catalog, rules, ...options });
   const panel = new BoothPanel(engine, { renderQr: async url => `data:image/png;base64,${Buffer.from(url).toString("base64")}` });
   const served = await startServer({ engine, panel, home: "booth.html" });
-  t.after(async () => { await served.close(); await rm(directory, { recursive: true, force: true }); });
+  t.after(async () => {
+    await served.close();
+    if (engine.publicationSweep) await engine.publicationSweep;
+    await engine.drainPublications();
+    await rm(directory, { recursive: true, force: true });
+  });
 
   const base = new URL(served.url);
   const ticket = base.searchParams.get("ticket");
@@ -330,6 +335,10 @@ test("naming polls preserve typing, render background settlement, and ignore sta
   assert.equal(element("view-served").hidden, false);
   assert.equal(element("served-name").textContent, "Mona Moonrise");
   assert.equal(element("pick-name").value, "Ducky draft");
+  next = async () => response({ ...naming, phase: "idle" });
+  interval();
+  await flush();
+  assert.equal(element("view-idle").hidden, false, "a served screen reconciles a later staff closure");
 });
 
 test("the naming state exposes a background refusal until a new attempt starts", async t => {
@@ -403,6 +412,71 @@ test("a station staff closed is ready for the next attendee", async t => {
   const next = await booth.act("begin");
   assert.equal(next.status, 200, "and the next attendee can start");
   assert.notEqual(next.body.runId, runId, "as a new run, not the closed one");
+});
+
+for (const reopen of [false, true]) {
+  for (const outcome of ["admitted", "timeout"]) {
+    test(`a closed in-flight admission returns ${reopen ? "the next run" : "idle"} after ${outcome}`, async t => {
+      let release;
+      let entered;
+      const started = new Promise(resolve => { entered = resolve; });
+      const gate = new Promise(resolve => { release = resolve; });
+      t.after(() => release());
+      let sends = 0;
+      const leaderboardClient = { async publish(sent) {
+        sends += 1;
+        if (sends === 1) {
+          entered();
+          await gate;
+          if (outcome === "timeout") throw new Error("timeout");
+        }
+        return { ...sent, entries: 1, rank: 1 };
+      } };
+      const booth = await station(t, { leaderboardClient });
+      const first = (await booth.act("begin")).body;
+      const inFlight = booth.act("submit_name", { name: "Mona Moonrise Mocha" });
+      await started;
+      await booth.engine.closeStation({ runId: first.runId, closedBy: "Sam" });
+      const next = reopen ? (await booth.act("begin")).body : null;
+      release();
+      const result = await inFlight;
+      assert.equal(result.status, 200);
+      assert.equal(result.body.phase, reopen ? "naming" : "idle");
+      if (reopen) {
+        assert.equal(result.body.runId, next.runId, "the old answer cannot displace the next attendee");
+        assert.equal((await booth.state()).body.runId, next.runId);
+      } else {
+        assert.equal((await booth.act("begin")).body.phase, "naming", "the station can start another order");
+      }
+    });
+  }
+}
+
+test("a stale station read cannot clear a newly started attendee", async t => {
+  const booth = await station(t);
+  const first = (await booth.act("begin")).body;
+  const original = booth.engine.get.bind(booth.engine);
+  let release;
+  let entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  let delayed = false;
+  booth.engine.get = async runId => {
+    if (!delayed && runId === first.runId) {
+      delayed = true;
+      entered();
+      await gate;
+    }
+    return original(runId);
+  };
+  const oldRead = booth.state();
+  await started;
+  await booth.engine.closeStation({ runId: first.runId, closedBy: "Sam" });
+  const next = (await booth.act("begin")).body;
+  release();
+  assert.equal((await oldRead).body.runId, next.runId);
+  assert.equal((await booth.state()).body.runId, next.runId);
 });
 
 test("a station whose event was archived recovers instead of failing", async t => {

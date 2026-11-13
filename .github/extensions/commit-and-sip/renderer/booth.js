@@ -5,10 +5,6 @@
   const VIEWS = ["idle", "naming", "served"];
   let busy = false;
   let phase = null;
-  // The drink is published in the background, so the served screen keeps
-  // checking while the outcome is still open: pending, or failed and due for
-  // a retry (the panel retries on its poll). Confirmed and rejected are final.
-  let confirming = false;
   let backgroundLoading = false;
   let revision = 0;
   let nameErrorCode = null;
@@ -177,7 +173,6 @@
 
   function render(state) {
     phase = state.phase === "complete" ? "served" : state.phase;
-    confirming = state.phase === "served" && ["pending", "failed"].includes(state.sync?.state) && !state.removed;
     for (const view of VIEWS) $(`view-${view}`).hidden = view !== phase;
     fillMenu(state);
     if (phase === "naming") fillNaming(state);
@@ -278,8 +273,8 @@
 
   void load();
   window.setInterval(() => {
-    // Reconcile admissions settled in the background without disabling or
-    // resetting the naming form while someone is typing.
-    if (!document.hidden && (phase === "idle" || phase === "naming" || confirming)) void load(false);
+    // Reconcile background settlements and staff closures without disabling
+    // or resetting the naming form while someone is typing.
+    if (!document.hidden && VIEWS.includes(phase)) void load(false);
   }, 5000);
 })();
