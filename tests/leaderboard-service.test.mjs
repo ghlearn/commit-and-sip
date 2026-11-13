@@ -263,8 +263,94 @@ test("a different drink whose score is already on the board is refused, until a 
   assert.equal((await resent.json()).rank, 1);
 
   assert.equal((await del(url, first.id)).status, 204);
-  assert.equal((await post(url, rival)).status, 201, "a takedown frees its score for another drink");
+  assert.equal((await post(url, rival)).status, 409, "the refused publication stays refused");
+  assert.equal((await post(url, submission(rival.name, rival.handle))).status, 201, "a takedown frees the score for a new publication");
   assert.deepEqual((await board(url)).entries.map(row => row.score), [rival.score]);
+});
+
+test("a refusal remains terminal for a delayed request across instances and restarts", async t => {
+  const directory = await tempDirectory(t);
+  const a = await openStore({ directory });
+  const b = await openStore({ directory });
+  const firstService = await service(t, { store: a });
+  const secondService = await service(t, { store: b });
+  const [holder, rival] = TIED.map((name, index) => submission(name, [HANDLE, OTHER_HANDLE][index]));
+  assert.equal((await post(firstService.url, holder)).status, 201);
+
+  let release;
+  let blocked;
+  const entered = new Promise(resolve => { blocked = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  const originalAdmit = a.admit.bind(a);
+  a.admit = async (item, options) => {
+    if (item.tokenHash === tokenHashOf(rival.token)) { blocked(); await gate; }
+    return originalAdmit(item, options);
+  };
+  const delayed = post(firstService.url, rival);
+  await entered;
+  const refusal = await post(secondService.url, rival);
+  assert.equal(refusal.status, 409);
+  assert.equal((await refusal.json()).error, "score_taken");
+  assert.equal((await del(secondService.url, holder.id)).status, 204);
+  release();
+  const late = await delayed;
+  assert.equal(late.status, 409, "the earlier request cannot claim the now-free score");
+  assert.equal((await late.json()).error, "score_taken");
+
+  const restarted = await service(t, { store: await openStore({ directory }) });
+  const replay = await post(restarted.url, rival);
+  assert.equal(replay.status, 409);
+  assert.equal((await replay.json()).error, "score_taken");
+  assert.equal((await board(restarted.url)).total, 0);
+  const saved = await readFile(join(directory, "default.json"), "utf8");
+  assert.ok(JSON.parse(saved).refusals.some(item => item.tokenHash === tokenHashOf(rival.token) && item.code === "score_taken"));
+  assert.ok(!saved.includes(rival.token) && !saved.includes(rival.name), "only the token hash and decision are retained");
+  assert.equal((await post(restarted.url, submission(rival.name, rival.handle))).status, 201);
+});
+
+test("a failed refusal write never reports a terminal 409", async t => {
+  const store = await openStore({ directory: await tempDirectory(t) });
+  const { url } = await service(t, { store });
+  const [holder, rival] = TIED.map(name => submission(name));
+  assert.equal((await post(url, holder)).status, 201);
+  const persist = store.persist.bind(store);
+  store.persist = async () => { throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); };
+  assert.equal((await post(url, rival)).status, 500);
+  store.persist = persist;
+  assert.equal((await del(url, holder.id)).status, 204);
+  assert.equal((await post(url, rival)).status, 201, "no uncommitted refusal survived");
+});
+
+test("duplicate and handle refusals stay final even when the conflicting entry is removed", async t => {
+  const { url } = await service(t);
+  const holder = submission("Mona Moonrise Mocha");
+  const duplicate = submission(holder.name, OTHER_HANDLE);
+  assert.equal((await post(url, holder)).status, 201);
+  assert.equal((await (await post(url, duplicate)).json()).error, "duplicate_drink");
+  await del(url, holder.id);
+  assert.equal((await (await post(url, duplicate)).json()).error, "duplicate_drink");
+
+  const store = new MemoryStore();
+  await store.create({ ...entry("mona-a"), handle: "one", score: 1000 });
+  await store.create({ ...entry("mona-b"), handle: "two", score: 1001 });
+  const candidate = { ...entry("mona-c"), score: 1002, tokenHash: "a".repeat(64) };
+  const options = { fingerprint: fp(candidate.id), handles: ["one", "two"] };
+  assert.equal((await store.admit(candidate, options)).rejection, "handle_taken");
+  await store.retract("mona-a", fp("mona-a"));
+  await store.retract("mona-b", fp("mona-b"));
+  assert.equal((await store.admit(candidate, options)).rejection, "handle_taken");
+  assert.equal((await store.admit({ ...candidate, tokenHash: "b".repeat(64) }, options)).created, true);
+});
+
+test("a malformed persisted refusal prevents loading the board", async t => {
+  for (const refusals of [null, [{ tokenHash: "bad", code: "score_taken" }],
+    [{ tokenHash: "a".repeat(64), code: "unknown" }],
+    Array(2).fill({ tokenHash: "a".repeat(64), code: "score_taken" })]) {
+    const directory = await tempDirectory(t);
+    await writeFile(join(directory, "default.json"), JSON.stringify({ entries: [], refusals }));
+    await assert.rejects(() => FileStore.open({ directory }), /malformed refusals/);
+  }
 });
 
 test("two tied drinks racing for one score never both land, on one instance or two", async t => {
@@ -2228,7 +2314,7 @@ test("the served screen keeps polling while its drink is being confirmed", async
   const script = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/booth.js", import.meta.url), "utf8");
   assert.match(script, /confirming = state\.phase === "served" && \["pending", "failed"\]\.includes\(state\.sync\?\.state\)/,
     "a failed publish is still retryable, so the screen keeps checking; confirmed and rejected are final");
-  assert.match(script, /phase === "idle" \|\| confirming\)\) void load\(false\)/);
+  assert.match(script, /phase === "idle" \|\| phase === "naming" \|\| confirming\)\) void load\(false\)/);
 });
 
 test("the template accepts exactly the event IDs the service can start with", async t => {

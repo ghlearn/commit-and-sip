@@ -194,6 +194,17 @@ export function createApp({ store, rules, words, boothKey, staffKey, reservation
         if (error instanceof ScoreTakenError) throw new HttpError(409, "score_taken", "Another drink on the board already has that score.");
         throw error;
       }
+      // These token decisions were committed under the board lock before the
+      // response, so a delayed earlier request cannot later change its result.
+      if (admitted.rejection) {
+        const messages = {
+          duplicate_drink: "Another barista already published a drink with this name.",
+          handle_taken: "That handle is already on the board.",
+          score_taken: "Another drink on the board already has that score.",
+          unavailable_drink: "That name is not available.",
+        };
+        throw new HttpError(409, admitted.rejection, messages[admitted.rejection]);
+      }
       if (!admitted.created) {
         // A booth retries after a network blip, so the same publication
         // arriving twice is a success. Matching fields are not enough: another

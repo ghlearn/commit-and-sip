@@ -135,6 +135,26 @@ test("an admission whose reply was lost is served once when the attendee tries a
   await assert.rejects(engine.dispatch("r-1", "submit_name", { name: "Mona Moonrise Mocha" }), { code: "already_served" });
 });
 
+test("a restarted standalone booth cannot bypass an unresolved board admission", async t => {
+  const { url } = await service(t);
+  const real = clientFor(url);
+  const client = { ...real, async publish(submission) {
+    await real.publish(submission);
+    throw new Error("reply lost");
+  } };
+  const engine = await booth(t, client);
+  await engine.open({ runId: "r-1" });
+  await assert.rejects(engine.dispatch("r-1", "submit_name", { name: "Mona Moonrise Mocha" }), { code: "leaderboard_unreachable" });
+  const standalone = new BoothEngine({ catalog, rules, store: engine.store });
+  await assert.rejects(standalone.dispatch("r-1", "submit_name", { name: "Ducky Dawn Drizzle" }),
+    { code: "admission_unsettled", status: 503, message: /restore the connection/ });
+  assert.ok((await engine.store.read()).runs["r-1"].admission);
+  const restored = new BoothEngine({ catalog, leaderboardClient: real, rules, store: engine.store });
+  const served = await restored.dispatch("r-1", "submit_name", { name: "Ducky Dawn Drizzle" });
+  assert.equal(served.submission.name, "Mona Moonrise Mocha");
+  assert.deepEqual((await boardOf(url)).entries.map(row => row.name), ["Mona Moonrise Mocha"]);
+});
+
 test("an earlier name the board took is the attendee's drink, even if they typed a new one", async t => {
   const { url } = await service(t);
   const real = clientFor(url);

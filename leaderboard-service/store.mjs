@@ -89,6 +89,7 @@ export class MemoryStore {
   constructor({ closed = false } = {}) {
     this.entries = new Map();
     this.reserved = new Set();
+    this.refusals = new Map();
     this.closed = closed;
     this.boardId = randomBytes(16).toString("hex");
     // Every drink ever admitted to this board, for tracking. It only grows:
@@ -122,6 +123,7 @@ export class MemoryStore {
     const cleared = { captured: this.captured, total: this.entries.size };
     this.entries = new Map();
     this.reserved = new Set();
+    this.refusals = new Map();
     this.captured = 0;
     this.closed = false;
     this.boardId = randomBytes(16).toString("hex");
@@ -156,16 +158,30 @@ export class MemoryStore {
   // ignored. A resent drink keeps the time it was first admitted.
   async admit(entry, { fingerprint, handles, now = () => new Date() }) {
     if (this.closed) throw new ClosedError();
-    if (this.reserved.has(fingerprint)) throw new ReservedError();
+    const reject = (code, ErrorType) => {
+      if (!entry.tokenHash) throw new ErrorType();
+      this.refusals.set(entry.tokenHash, code);
+      return { rejection: code };
+    };
+    if (entry.tokenHash && this.refusals.has(entry.tokenHash)) {
+      return { rejection: this.refusals.get(entry.tokenHash) };
+    }
+    if (this.reserved.has(fingerprint)) return reject("unavailable_drink", ReservedError);
     const board = () => [...this.entries.values()].map(item => ({ ...item }));
     const existing = this.entries.get(entry.id);
-    if (existing) return { created: false, entries: board(), entry: { ...existing } };
+    if (existing) {
+      if (entry.tokenHash && (existing.tokenHash !== entry.tokenHash || !handles.includes(existing.handle)
+        || existing.name !== entry.name || existing.score !== entry.score)) {
+        return reject("duplicate_drink", ConflictError);
+      }
+      return { created: false, entries: board(), entry: { ...existing } };
+    }
     // Checked here, inside the one admission step (under the write lock, for
     // the file store), so two drinks racing for the same score cannot both win.
-    if ([...this.entries.values()].some(item => item.score === entry.score)) throw new ScoreTakenError();
+    if ([...this.entries.values()].some(item => item.score === entry.score)) return reject("score_taken", ScoreTakenError);
     const used = new Set([...this.entries.values()].map(item => item.handle));
     const handle = handles.find(candidate => !used.has(candidate));
-    if (!handle) throw new HandleTakenError();
+    if (!handle) return reject("handle_taken", HandleTakenError);
     // Admission refuses a taken score, but a board written before that rule
     // can still hold a tie, and it goes to the drink admitted first. So entry
     // times must follow
@@ -201,6 +217,7 @@ const STORED_HANDLE = /^[a-z]+-[a-z]+-[a-z]+(?:-[0-9a-f]{8})?$/;
 const TOKEN_HASH = /^[0-9a-f]{64}$/;
 const KEY_ID = /^[0-9a-f]{16}$/;
 const BOARD_ID = /^[0-9a-f]{32}$/;
+const REFUSAL_CODES = new Set(["duplicate_drink", "handle_taken", "score_taken", "unavailable_drink"]);
 
 // What is wrong with a stored row, or null. Every field the board serves or
 // compares must be present and of its type, or a corrupted row would load,
@@ -313,7 +330,7 @@ export class FileStore extends MemoryStore {
       // A board this service is creating from nothing starts closed: it may be
       // the replacement for one that was lost, and takedowns must be
       // replayed onto it before any drink. Staff open it.
-      if (error.code === "ENOENT") return { boardId: null, captured: 0, closed: true, entries: new Map(), keyId: null, reserved: new Set(), version: 0 };
+      if (error.code === "ENOENT") return { boardId: null, captured: 0, closed: true, entries: new Map(), keyId: null, refusals: new Map(), reserved: new Set(), version: 0 };
       throw error;
     }
     const unreadable = reason => new Error(`${this.file} is not a readable board (${reason}). Move it aside to start empty, or restore it.`);
@@ -354,6 +371,17 @@ export class FileStore extends MemoryStore {
       || [...reserved].some(item => typeof item !== "string" || !FINGERPRINT.test(item))) {
       throw unreadable("malformed reservations");
     }
+    if (saved.refusals !== undefined && !Array.isArray(saved.refusals)) throw unreadable("malformed refusals");
+    const refusals = new Map();
+    for (const decision of saved.refusals ?? []) {
+      if (!decision || typeof decision !== "object" || Array.isArray(decision)
+        || Object.keys(decision).sort().join() !== "code,tokenHash"
+        || typeof decision.tokenHash !== "string" || !TOKEN_HASH.test(decision.tokenHash)
+        || !REFUSAL_CODES.has(decision.code) || refusals.has(decision.tokenHash)) {
+        throw unreadable("malformed refusals");
+      }
+      refusals.set(decision.tokenHash, decision.code);
+    }
     // A board from before the tally starts it at what it holds now. A present
     // tally must be a count, and can never be below the drinks still on it.
     if (saved.captured !== undefined
@@ -370,6 +398,7 @@ export class FileStore extends MemoryStore {
       closed: saved.closed ?? false,
       entries,
       keyId: saved.keyId ?? null,
+      refusals,
       reserved,
       version: saved.version ?? 0,
     };
@@ -387,6 +416,7 @@ export class FileStore extends MemoryStore {
   load(disk) {
     this.entries = new Map([...disk.entries].map(([id, entry]) => [id, { ...entry }]));
     this.reserved = new Set(disk.reserved);
+    this.refusals = new Map(disk.refusals);
     this.closed = disk.closed;
     this.captured = disk.captured;
     this.boardId = disk.boardId;
@@ -604,6 +634,7 @@ export class FileStore extends MemoryStore {
             captured: this.captured,
             closed: Boolean(this.closed),
             entries: [...this.entries.values()], keyId: this.keyId ?? disk.keyId ?? undefined,
+            refusals: [...this.refusals].map(([tokenHash, code]) => ({ code, tokenHash })),
             reserved: [...this.reserved], version: disk.version + 1,
           })}\n`, owner);
           return result;

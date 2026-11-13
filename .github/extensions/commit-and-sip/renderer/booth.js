@@ -9,6 +9,8 @@
   // checking while the outcome is still open: pending, or failed and due for
   // a retry (the panel retries on its poll). Confirmed and rejected are final.
   let confirming = false;
+  let backgroundLoading = false;
+  let revision = 0;
 
   function fail(message) {
     $("booth-error-message").textContent = message;
@@ -180,6 +182,21 @@
 
   async function load(explicit = true) {
     if (busy) return;
+    if (!explicit) {
+      if (backgroundLoading) return;
+      backgroundLoading = true;
+      const current = revision;
+      try {
+        const state = await request("/api/state");
+        if (!busy && current === revision) render(state);
+      } catch (error) {
+        if (!busy && current === revision) fail(error.message);
+      } finally {
+        backgroundLoading = false;
+      }
+      return;
+    }
+    revision += 1;
     busy = true;
     controls();
     try {
@@ -196,6 +213,7 @@
 
   async function act(action, input = {}) {
     if (busy) return;
+    revision += 1;
     busy = true;
     controls();
     try {
@@ -222,6 +240,7 @@
     // A booth with an event leaderboard serves only once the board admits the
     // drink, so the answer can take a few seconds. Say what is happening.
     $("name-checking").hidden = false;
+    revision += 1;
     busy = true;
     controls();
     try {
@@ -242,8 +261,8 @@
 
   void load();
   window.setInterval(() => {
-    // Keep the menu and leaderboard current between attendees without
-    // interrupting anyone mid-typing.
-    if (!document.hidden && (phase === "idle" || confirming)) void load(false);
+    // Reconcile admissions settled in the background without disabling or
+    // resetting the naming form while someone is typing.
+    if (!document.hidden && (phase === "idle" || phase === "naming" || confirming)) void load(false);
   }, 5000);
 })();

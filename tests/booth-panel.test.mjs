@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import vm from "node:vm";
 import { RunStore } from "../.github/extensions/commit-and-sip/store.mjs";
 import { BoothEngine } from "../.github/extensions/commit-and-sip/booth-engine.mjs";
 import { BoothPanel } from "../.github/extensions/commit-and-sip/booth-panel.mjs";
@@ -245,6 +246,62 @@ test("the booth form asks only for the name and says a mascot is required", asyn
   assert.match(form, /<input id="pick-name"[^>]*aria-describedby="mascot-hint name-help"/);
   const script = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/booth.js", import.meta.url), "utf8");
   assert.doesNotMatch(script, /pick-mascot|pick-placement/);
+});
+
+test("naming polls preserve typing, render background settlement, and ignore stale responses", async () => {
+  const elements = new Map();
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, {
+      value: "", hidden: false, disabled: false, textContent: "", handlers: {},
+      setAttribute() {}, replaceChildren() {}, append() {}, reset() { this.resetCount = (this.resetCount ?? 0) + 1; },
+      reportValidity() { return true; }, addEventListener(type, handler) { this.handlers[type] = handler; },
+    });
+    return elements.get(id);
+  };
+  const naming = { phase: "naming", handle: "bright-brews-beans", houseMenu: [], houseMenuTotal: 0,
+    leaderboard: [], leaderboardTotal: 0 };
+  const served = { ...naming, phase: "served", submission: { name: "Mona Moonrise", score: 1234, breakdown: [] },
+    sync: { state: "confirmed" }, standing: { rank: 1, entries: 1 } };
+  const response = state => ({ ok: true, json: async () => state });
+  let interval;
+  let next = async () => response(naming);
+  const source = await readFile(new URL("../.github/extensions/commit-and-sip/renderer/booth.js", import.meta.url), "utf8");
+  vm.runInNewContext(source, {
+    document: { hidden: false, getElementById: element, createElement: () => element(Symbol()), createTextNode: () => ({}) },
+    window: { location: { search: "?ticket=test" }, setInterval: callback => { interval = callback; } },
+    fetch: (...args) => next(...args), URLSearchParams, AbortController, setTimeout, clearTimeout,
+  });
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  await flush();
+  element("pick-name").value = "Mona still typing";
+  let release;
+  next = () => new Promise(resolve => { release = resolve; });
+  interval();
+  assert.equal(element("name-fields").disabled, false, "background polling does not interrupt typing");
+  release(response(naming));
+  await flush();
+  assert.equal(element("pick-name").value, "Mona still typing");
+  assert.equal(element("name-form").resetCount, undefined);
+  interval();
+  const releaseStale = release;
+  next = async () => response(served);
+  await element("name-form").handlers.submit({ preventDefault() {} });
+  releaseStale(response(naming));
+  await flush();
+  assert.equal(element("view-served").hidden, false, "a stale naming poll cannot overwrite a completed submission");
+  assert.equal(element("served-score").textContent, "1234");
+
+  // A separate naming screen receives a settlement on its next background poll.
+  next = async () => response(naming);
+  await element("booth-retry").handlers.click();
+  await flush();
+  element("pick-name").value = "Ducky draft";
+  next = async () => response(served);
+  interval();
+  await flush();
+  assert.equal(element("view-served").hidden, false);
+  assert.equal(element("served-name").textContent, "Mona Moonrise");
+  assert.equal(element("pick-name").value, "Ducky draft");
 });
 
 test("the hint's example is a name the station accepts", async t => {

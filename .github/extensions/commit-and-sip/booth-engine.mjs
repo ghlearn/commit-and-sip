@@ -865,6 +865,8 @@ export class BoothEngine {
       // One drink per attendee keeps the competition fair and the menu readable.
       requireValue(run.phase === "naming", "already_served",
         "You have already added your drink. Each attendee invents one.", 409);
+      requireValue(!run.admission, "admission_unsettled",
+        "Your earlier drink still needs the event leaderboard. Ask booth staff to restore the connection before trying again.", 503);
 
       // A standalone booth is its own board, so it refuses a score another
       // drink on its menu already holds. A booth with an event leaderboard
