@@ -866,8 +866,8 @@ export class BoothEngine {
       // One drink per attendee keeps the competition fair and the menu readable.
       requireValue(run.phase === "naming", "already_served",
         "You have already added your drink. Each attendee invents one.", 409);
-      requireValue(!run.admission, "admission_unsettled",
-        "Your earlier drink still needs the event leaderboard. Ask booth staff to restore the connection before trying again.", 503);
+      requireValue(!Object.values(data.runs).some(other => other.admission), "admission_unsettled",
+        "An earlier drink at this booth still needs the event leaderboard. Ask booth staff to restore the connection before trying again.", 503);
 
       // A standalone booth is its own board, so it refuses a score another
       // drink on its menu already holds. A booth with an event leaderboard
@@ -951,7 +951,7 @@ export class BoothEngine {
       const entry = prepareDrink(this.houseMenu(data), {
         choice: { mascot: input.mascot, placement: input.placement },
         handle: run.handle, rawName: input.name, removedIds: this.removalLog(data).map(record => record.id),
-        rules: this.rules, runId,
+        rules: this.rules, runId, uniqueScore: true,
       });
       delete run.admissionFeedback;
       run.admission = { entry, sending: { [attempt]: now }, startedAt: now, token: newPublicationToken() };

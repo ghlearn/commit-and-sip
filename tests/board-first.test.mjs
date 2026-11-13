@@ -155,6 +155,44 @@ test("a restarted standalone booth cannot bypass an unresolved board admission",
   assert.deepEqual((await boardOf(url)).entries.map(row => row.name), ["Mona Moonrise Mocha"]);
 });
 
+test("a closed run's unresolved admission blocks every standalone run until it settles", async t => {
+  const { url } = await service(t);
+  const real = clientFor(url);
+  const client = { ...real, async publish(submission) {
+    await real.publish(submission);
+    throw new Error("reply lost");
+  } };
+  const engine = await booth(t, client);
+  await engine.open({ runId: "r-1" });
+  await assert.rejects(engine.dispatch("r-1", "submit_name", { name: TIED[0] }), { code: "leaderboard_unreachable" });
+  await engine.closeStation({ runId: "r-1", closedBy: "lead" });
+  const standalone = new BoothEngine({ catalog, rules, store: engine.store });
+  await standalone.open({ runId: "r-2" });
+  for (const name of [TIED[1], "Ducky Dawn Drizzle"]) {
+    await assert.rejects(standalone.dispatch("r-2", "submit_name", { name }),
+      { code: "admission_unsettled", status: 503 });
+  }
+  const restored = new BoothEngine({ catalog, leaderboardClient: real, rules, store: engine.store });
+  await restored.retryPublications();
+  assert.equal((await restored.get("r-1")).phase, "complete");
+  assert.equal((await restored.get("r-1")).submission.name, TIED[0]);
+  await assert.rejects(standalone.dispatch("r-2", "submit_name", { name: TIED[1] }), { code: "score_taken" });
+  assert.equal((await standalone.dispatch("r-2", "submit_name", { name: "Ducky Dawn Drizzle" })).phase, "served");
+});
+
+test("enabling publishing cannot collide with a drink served while standalone", async t => {
+  const { url } = await service(t);
+  const standalone = await booth(t);
+  await standalone.open({ runId: "r-1" });
+  await standalone.dispatch("r-1", "submit_name", { name: TIED[0] });
+  const configured = new BoothEngine({ catalog, leaderboardClient: clientFor(url), rules, store: standalone.store });
+  await configured.open({ runId: "r-2" });
+  await assert.rejects(configured.dispatch("r-2", "submit_name", { name: TIED[1] }),
+    { code: "score_taken", status: 409 });
+  assert.equal((await boardOf(url)).total, 0, "the local clash is refused before publishing");
+  assert.equal((await configured.dispatch("r-2", "submit_name", { name: "Ducky Dawn Drizzle" })).phase, "served");
+});
+
 test("an earlier name the board took is the attendee's drink, even if they typed a new one", async t => {
   const { url } = await service(t);
   const real = clientFor(url);

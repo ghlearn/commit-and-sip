@@ -32,9 +32,9 @@ export const SCORE_TAKEN_MESSAGE = (name, score, where = "the house menu") =>
 // it. A booth with an event leaderboard serves only once the board admits the
 // drink, so it prepares here, asks the board, and pushes afterwards.
 //
-// `uniqueScore` refuses a score another drink on this menu already holds. A
-// standalone booth is its own board, so it sets this. A booth with an event
-// leaderboard leaves it to the service, which sees every booth's drinks.
+// `uniqueScore` refuses a score another drink on this menu already holds.
+// Booths use it even with an event leaderboard because their menus may still
+// contain drinks served while publishing was disabled.
 export function prepareDrink(menu, { rawName, rules, runId, handle, choice = {}, removedIds = [], uniqueScore = false, now = new Date().toISOString() }) {
   requireValue(Array.isArray(menu), "menu_invalid", "The house menu is unavailable. Ask booth staff to restore it.");
   requireValue(Array.isArray(removedIds), "menu_invalid", "The removal record is unavailable. Ask booth staff to restore it.");
